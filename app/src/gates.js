@@ -179,7 +179,10 @@ export function createGates(opts) {
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "没点名、也没有求详/提问 → 只给本地短答" };
         }
       }
-      plan = searchPlan(tierInfo.tier, cls.keywords);
+      plan = searchPlan(tierInfo.tier, cls.keywords, {
+        questionWord: !!cls.isQuestion, detailAsk: !!detailAsk, fresh: !!cls.isFresh,
+        hasUrl: !!cls.hasUrl, explicitSearch: !!cls.explicitSearch
+      });
       reason.push("深度分档：" + tierInfo.reason);
 
       // 外审：从"只在高档审深度"改成"按不确定度择机复核『开口 + 深度』"
@@ -217,7 +220,10 @@ export function createGates(opts) {
         } else {
           reason.push("外审不确定 → 保持本地判断");
         }
-        plan = searchPlan(tierInfo.tier, cls.keywords);
+        plan = searchPlan(tierInfo.tier, cls.keywords, {
+          questionWord: !!cls.isQuestion, detailAsk: !!detailAsk, fresh: !!cls.isFresh,
+          hasUrl: !!cls.hasUrl, explicitSearch: !!cls.explicitSearch
+        });
       }
     }
 

@@ -650,7 +650,7 @@ export function createRuntime(deps) {
         contextWindow: rc.contextWindow,
         depthPolicy: { low: { maxChars: dc[0] }, mid: { maxChars: dc[1] }, high: { maxChars: dc[2] } }   // 配置里的"三档字数"真的生效
       });
-      let taskText = buildTaskText(dec.tier, policy, dec.keywords);
+      let taskText = buildTaskText(dec.tier, Object.assign({}, policy, { search: dec.search }), dec.keywords);
       // N12：需要搜索时先搜一次，把摘要作为消息体注入（不进系统提示词，前缀缓存不受影响）
       if (dec.search > 0 && searchSvc) {
         const sr = await searchSvc.run({ gid: evt.gid, keywords: dec.keywords || [], mode: rc.searchMode, ctx: { evt: evt, decision: dec } });
@@ -776,6 +776,7 @@ export function createRuntime(deps) {
     observe({
       kind: "sent", gid: batch.gid, uid: batch.uid, speaker: evt.speaker, tier: dec.tier,
       mergedCount: batch.count, mood: parsed.mood || null, memePending: parsed.mood || null,
+      reply: { used: !!useQuoteReply, wanted: !!(typeof quoted2 !== "undefined" && quoted2 && quoted2.wanted), mode: rc.quoteReply, auto: !!(typeof quoted2 !== "undefined" && quoted2 && !quoted2.wanted && useQuoteReply) },
       segments: sent, usage: usage, cacheHitRate: r0(usage), search: searchInfo, meme: memeInfo, voice: voiceInfo, art: artInfo, chart: chartInfo, vision: visionTexts.length ? visionTexts : null
     });
     return { gid: batch.gid, action: "sent", tier: dec.tier, merged: batch.count, segments: sent, usage: usage, mood: parsed.mood || null, search: searchInfo, meme: memeInfo, voice: voiceInfo, art: artInfo, vision: visionTexts.length ? visionTexts : null };

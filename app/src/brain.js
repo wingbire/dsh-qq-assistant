@@ -112,7 +112,7 @@ export function cacheHitRate(u) {
 
 export const DEPTH_POLICY_DEFAULT = {
   low:  { callBrain: false, model: "deepseek-flash", reasoningEffort: "off",  search: 0, maxChars: 20,  contextWindow: 0 },
-  mid:  { callBrain: true,  model: "deepseek-flash", reasoningEffort: "low",  search: 1, maxChars: 60,  contextWindow: 10 },
+  mid:  { callBrain: true,  model: "deepseek-flash", reasoningEffort: "low",  search: 0, maxChars: 60,  contextWindow: 10 },   // N22：搜不搜由搜索闸门按信号决定，这里只是兜底
   high: { callBrain: true,  model: "deepseek-flash", reasoningEffort: "high", search: 1, maxChars: 200, contextWindow: 10 }
 };
 

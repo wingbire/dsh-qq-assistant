@@ -12,7 +12,10 @@ export const FLAG_WORDS = {
   detail: ["详细", "解释", "原因", "原理", "文档", "步骤", "教程", "深入", "展开", "具体", "说说", "讲讲", "多讲", "介绍", "举例", "怎么弄"],
   media: ["[图片]", "[语音]", "[视频]", "[表情]", "[动画表情]", "[文件]"],
   quote: ["[转发]", "转发", "转自", "引用"],
-  url: ["http://", "https://", "www."]
+  url: ["http://", "https://", "www."],
+  // N22 搜索闸门用：① "要外部/实时信息"的信号 ② 用户明确让搜
+  fresh: ["今天", "现在", "最新", "刚刚", "近期", "几点", "什么时候", "哪天", "多久", "天气", "气温", "股价", "价格", "多少钱", "新闻", "版本", "更新", "赛程", "比分", "汇率", "上映", "发售", "下载地址", "链接", "网址", "地址", "官网"],
+  search: ["搜一下", "搜搜", "搜索", "查一下", "查查", "帮我搜", "帮忙搜", "百度一下", "谷歌"]
 };
 
 export const PARTICLES = ["吗", "呢", "吧", "啊", "呀", "咋", "6"];
@@ -46,8 +49,32 @@ export function flagsOf(text) {
     isDetailAsk: findWords(t, FLAG_WORDS.detail).length > 0,
     isMedia: findWords(t, FLAG_WORDS.media).length > 0,
     isQuote: findWords(t, FLAG_WORDS.quote).length > 0,
-    hasUrl: findWords(t, FLAG_WORDS.url).length > 0
+    hasUrl: findWords(t, FLAG_WORDS.url).length > 0,
+    isFresh: findWords(t, FLAG_WORDS.fresh).length > 0,          // 问的是会变的信息（价格/时间/版本/链接…）
+    explicitSearch: findWords(t, FLAG_WORDS.search).length > 0   // 明确让"搜一下"
   };
+}
+
+// 口语废词：拿它们当检索词只会把搜索带偏（实测"我去/好像/确实"这种真的被拿去搜过）
+export const WEAK_KEYWORDS = STOPWORDS.concat([
+  "我去", "去调", "调调", "好像", "确实", "觉得", "无敌", "开始", "这个", "那个", "废话", "行了",
+  "就是", "可以", "应该", "你们", "我们", "他们", "一下", "哈哈", "笑死", "无语"
+]);
+
+// 能拿去搜的词：去掉废词与纯数字，长词优先（长词更像真主题词）
+export function searchableKeywords(list) {
+  return (list || []).map(function (w) { return String(w); }).filter(function (w) {
+    if (w.length < 2) return false;
+    if (WEAK_KEYWORDS.indexOf(w) >= 0) return false;
+    if (/^[0-9]+$/.test(w)) return false;
+    // 整词全由废词拼出来（"我去调调"）也不当检索词
+    if (w.length >= 2) {
+      let junk = 0, total = 0;
+      for (let i = 0; i + 2 <= w.length; i++) { total += 1; if (WEAK_KEYWORDS.indexOf(w.slice(i, i + 2)) >= 0) junk += 1; }
+      if (total > 0 && junk === total) return false;
+    }
+    return true;
+  }).sort(function (a, b) { return b.length - a.length; });
 }
 
 export function extractKeywords(text, ctx) {
@@ -82,7 +109,8 @@ export function extractKeywords(text, ctx) {
   let added = 0;
   for (const run of runs) {
     if (added >= 4) break;
-    const sizes = run.length >= 4 ? [2, 3, 4] : [run.length];
+    // 长句不切 2 字 n-gram —— "我去调调"→"我去/去调/调调"这种废词就是这么来的；超长句干脆不抽（句子不是关键词）
+    const sizes = run.length <= 6 ? [run.length] : [];   // 短句整句当关键词，长句不切片（碎片检索词=废词）
     for (const n of sizes) {
       for (let i = 0; i + n <= run.length; i++) {
         const w = run.slice(i, i + n);

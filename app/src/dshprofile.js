@@ -120,6 +120,7 @@ export function personaFromConfig(cfg, opts) {
     illustrationYoung: p.illustrationYoung || DEFAULT_PERSONA.illustrationYoung,
     illustrationAdult: p.illustrationAdult || DEFAULT_PERSONA.illustrationAdult,
     memeEnabled: (c.plugins ? c.plugins.meme !== false : true) && p.memeFreq !== "关",
+    quoteReply: (cfg && ((cfg.runtime && cfg.runtime.quoteReply) || cfg.quoteReply)) || "自动",
     illustrationEnabled: (c.plugins ? c.plugins.illustration !== false : true),   // 立绘（图片）开关
     voiceEnabled: voiceOn,
     voiceMaxChars: (rt.voice && rt.voice.maxChars) || 60,
@@ -216,6 +217,12 @@ export function buildPersonaText(persona, cfg) {
   } else {
     T.push("【看不到图】");
     T.push("- 群里发的图片你看不到内容（识图没开，或当前模型没有视觉能力）。消息里出现 [图片] 时，直说看不到、让对方描述一下，别猜、别编。");
+    T.push("");
+  }
+  if (p.quoteReply !== "关") {
+    T.push("【引用回复】");
+    T.push("- 想专门回**某一条**消息（接刚才那句、纠正谁、回答很久以前问你的、群里同时在聊好几件事），就在正文里写 \`[引用]\`（位置随意，系统会摘掉这三个字，把这条做成引用回复）。");
+    T.push("- 别人用引用回你时，你也会自动引用回去；不带 [引用] 就是普通发言。别每条都引用，只在需要「明确说给谁听」时用。");
     T.push("");
   }
   if (!p.memeEnabled && !p.voiceEnabled && !p.visionEnabled) {

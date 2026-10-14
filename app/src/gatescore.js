@@ -1,3 +1,5 @@
+import { searchableKeywords } from "./classify.js";
+
 // N14 定型：灰区上下界在 0.30~0.85 之间按步长 0.02 自适应，每 refN(20) 次调一次。
 export const DEFAULT_BOUNDS = { lo: 0.40, hi: 0.75, loMin: 0.30, loMax: 0.60, hiMin: 0.60, hiMax: 0.85, step: 0.02 };
 
@@ -31,11 +33,19 @@ export function depthTier(U, tiers) {
   return { tier: "high", maxChars: mc[2], reason: "U >= 多讲线" };
 }
 
-export function searchPlan(tier, keywords) {
-  const kws = (keywords || []).slice(0, 3);
+// 搜索闸门（N22）：以前只要"中档 + 有关键词"就搜，于是闲聊也搜（实测 126 条里 58 条要搜，
+// "无敌了""我去调调"都去搜了一遍，一次 5 秒还拖慢回复）。现在要两件事同时成立：
+//   ① 真的需要外部/实时信息（提问 + 会变的信息 / 链接 / 用户明确让搜）
+//   ② 检索词像人话（去掉 2 字 n-gram 废词，长词优先）
+export function searchPlan(tier, keywords, opts) {
+  const o = opts || {};
+  const kws = searchableKeywords(keywords).slice(0, 3);
   if (tier === "low") return { search: 0, keywords: [] };
-  if (tier === "mid") return { search: kws.length > 0 ? 1 : 0, keywords: kws };
-  return { search: 1, keywords: kws };
+  if (o.explicitSearch) return { search: 1, keywords: kws };        // 用户说"搜一下" → 必须搜
+  if (!kws.length) return { search: 0, keywords: [] };              // 没有像样的检索词 → 别拿废词搜
+  const needs = !!(o.hasUrl || (o.questionWord && (o.fresh || o.detailAsk)) || o.fresh && o.detailAsk);
+  if (tier === "high") return { search: needs ? 1 : 0, keywords: kws };
+  return { search: needs ? 1 : 0, keywords: kws };                  // 中档：要"提问 + 需要新鲜信息/链接"才搜
 }
 
 export function adaptBounds(bounds, stat) {

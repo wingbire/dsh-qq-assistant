@@ -1,4 +1,4 @@
-import { classify, CLASSIFY_TABLE, extractKeywords } from "../app/src/classify.js";
+import { classify, CLASSIFY_TABLE, extractKeywords, searchableKeywords } from "../app/src/classify.js";
 import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { createGates } from "../app/src/gates.js";
@@ -64,7 +64,12 @@ t("classify: 求助标记", function () { ok(classify("帮我写个 ffmpeg 命�
 t("classify: 详细标记", function () { ok(classify("详细讲讲原理并写进文档").flags.isDetailAsk, "isDetailAsk 应为真"); });
 t("classify: 话题深度 3", function () { eq(classify("详细讲讲这个报错的原因和原理，我要写进文档里").topicDepth, 3); });
 t("classify: 闲聊深度 0", function () { eq(classify("大家晚饭吃了吗").topicDepth <= 1, true); });
-t("classify: 关键词非空", function () { ok(extractKeywords("这个报错怎么解", {}).length > 0); });
+t("classify: 关键词——短句整句、长句不切碎片、废词不进检索词", function () {
+  ok(extractKeywords("原神开黑", {}).length > 0, "短句能抽出关键词");
+  ok(extractKeywords("好像确实有点问题", {}).indexOf("好像确") < 0, "长句不再切出「好像确」这种碎片 n-gram");
+  eq(searchableKeywords(["我去", "调调", "确实", "123", "必应"]), ["必应"], "废词与纯数字都滤掉（长词优先排序）");
+  eq(searchableKeywords(["原神", "什么时候"]), ["什么时候", "原神"], "长词排前面");
+});
 t("classify: 兴趣命中", function () { eq(classify("今晚开黑吗", { interests: ["开黑"] }).interestHit, ["开黑"]); });
 
 t("utility: pSay 单调", function () {
@@ -89,7 +94,20 @@ t("gatescore: 深档映射", function () {
   eq(depthTier(0.4, null).tier, "mid");
   eq(depthTier(0.8, null).tier, "high");
 });
-t("gatescore: 低档不搜", function () { eq(searchPlan("low", ["a"]).search, 0); eq(searchPlan("high", ["a"]).search, 1); });
+t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
+  eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
+  eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");
+  eq(searchPlan("mid", [], { questionWord: true, fresh: true }).search, 0, "没有像样的检索词就不搜");
+  eq(searchPlan("mid", ["什么时候"], { questionWord: true, fresh: true }).search, 1, "问 + 会变的信息 → 搜");
+  eq(searchPlan("mid", ["谁有"], { questionWord: true }).search, 0, "只是提问、不需要外部信息 → 不搜");
+  eq(searchPlan("high", ["怎么解"], { questionWord: true }).search, 0, "高档也一样：没有信息需求就不搜");
+  eq(searchPlan("high", ["怎么解"], { questionWord: true, detailAsk: true }).search, 1, "求详 + 提问 → 搜");
+  eq(searchPlan("high", ["手册"], { hasUrl: true }).search, 1, "带链接 → 搜");
+  eq(searchPlan("mid", ["天气"], { explicitSearch: true }).search, 1, "用户说「搜一下」→ 必搜");
+  eq(searchPlan("mid", ["我去调调"], {}).keywords.length, 0, "废词不算检索词");
+  eq(searchPlan("high", ["a"], {}).search, 0, "检索词不达标也不搜");
+  eq(searchPlan("mid", ["天气"], { explicitSearch: true }).keywords.join(""), "天气", "让搜时保留检索词");
+});
 t("gatescore: 边界自适应有界", function () {
   const b = adaptBounds({ lo: 0.4, hi: 0.75 }, { missedRate: 0.9, auditFlipRate: 0.9 });
   ok(b.lo >= 0.25 && b.hi <= 0.92, "应在边界内");
@@ -2779,7 +2797,7 @@ t("config: 三档字数（depthChars）真的会进提示词（原来硬编码 2
   const pol = depthPolicy("mid", { contextWindow: 10, depthPolicy: { low: { maxChars: 10 }, mid: { maxChars: 30 }, high: { maxChars: 90 } } });
   eq(pol.maxChars, 30, "大脑提示词里的字数上限也跟着走");
   eq(pol.callBrain, true, "按档深合并：不能把中档的 callBrain/search 冲掉");
-  eq(pol.search, 1);
+  eq(pol.search, 0, "N22：中档默认不再建议搜索（搜不搜由搜索闸门按信号决定）");
   eq(depthPolicy("mid", { contextWindow: 10 }).maxChars, 60, "没配就用默认");
 });
 
