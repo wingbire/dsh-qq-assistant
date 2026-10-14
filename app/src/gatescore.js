@@ -43,7 +43,9 @@ export function searchPlan(tier, keywords, opts) {
   if (tier === "low") return { search: 0, keywords: [] };
   if (o.explicitSearch) return { search: 1, keywords: kws };        // 用户说"搜一下" → 必须搜
   if (!kws.length) return { search: 0, keywords: [] };              // 没有像样的检索词 → 别拿废词搜
-  const needs = !!(o.hasUrl || (o.questionWord && (o.fresh || o.detailAsk)) || o.fresh && o.detailAsk);
+  // "会变的信息"本身就是信息需求（「今天上海天气」不带疑问词也该搜），
+  // 而"求详 + 提问"（帮我详细讲讲）也值得查一下；纯提问不带这两样就不搜（"这个报错怎么解"）。
+  const needs = !!(o.hasUrl || o.fresh || (o.questionWord && o.detailAsk));
   if (tier === "high") return { search: needs ? 1 : 0, keywords: kws };
   return { search: needs ? 1 : 0, keywords: kws };                  // 中档：要"提问 + 需要新鲜信息/链接"才搜
 }

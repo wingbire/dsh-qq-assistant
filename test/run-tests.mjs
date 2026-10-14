@@ -100,6 +100,7 @@ t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让
   eq(searchPlan("mid", [], { questionWord: true, fresh: true }).search, 0, "没有像样的检索词就不搜");
   eq(searchPlan("mid", ["什么时候"], { questionWord: true, fresh: true }).search, 1, "问 + 会变的信息 → 搜");
   eq(searchPlan("mid", ["谁有"], { questionWord: true }).search, 0, "只是提问、不需要外部信息 → 不搜");
+  eq(searchPlan("mid", ["天气"], { fresh: true }).search, 1, "会变的信息（今天上海天气）不带疑问词也要搜");
   eq(searchPlan("high", ["怎么解"], { questionWord: true }).search, 0, "高档也一样：没有信息需求就不搜");
   eq(searchPlan("high", ["怎么解"], { questionWord: true, detailAsk: true }).search, 1, "求详 + 提问 → 搜");
   eq(searchPlan("high", ["手册"], { hasUrl: true }).search, 1, "带链接 → 搜");
