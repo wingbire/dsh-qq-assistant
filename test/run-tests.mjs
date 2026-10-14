@@ -21,6 +21,7 @@ import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
 import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
+import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
 import { parseAuditVerdict, auditStub, createAuditor, setAuditChannel, getAuditChannel, audit as runAudit, AUDIT_PROFILE_ID, AUDIT_TIMEOUT_MS } from "../app/src/audit.js";
@@ -2418,6 +2419,37 @@ t("runtime: 语音走本机 STT，转写拼进正文并参与本地一判", asyn
   eq(rt.stats().sttCached, 1);
 });
 
+
+t("ofm: 免费模型清单（车道/状态/看图标记）与检测结果落盘", function () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-ofm-"));
+  const state = {
+    catalog: { at: 111, entries: ["ling-3.1-flash-free", "cat-jam-free"], kiloRows: [
+      { id: "kilo-auto/free", name: "Kilo Auto Free", channel: "kilo", vision: false, reasoning: true, contextWindow: 256000 },
+      { id: "dots-studio/dots-3-note-preview:free", name: "Kilo Dots3 Note", channel: "kilo", vision: true }
+    ] },
+    availability: { results: { "ling-3.1-flash-free": { state: "unknown", detail: "can only be used from within OpenCode", latencyMs: 399 }, "cat-jam-free": { state: "region-blocked", detail: "not available in your country" } } }
+  };
+  const probe = { at: 222, results: {
+    "dots-studio/dots-3-note-preview:free": { ok: true, ms: 5550 },
+    "kilo-auto/free": { ok: false, error: "read ECONNRESET" }
+  } };
+  const rows = modelList(state, probe);
+  eq(rows.length, 4, "两条 Kilo + 两条 OpenCode");
+  eq(rows[0].id, "dots-studio/dots-3-note-preview:free", "实测可用的排最前面");
+  eq(rows[0].state, "available");
+  eq(rows[0].vision, true, "能看图的要标出来（界面里给提示）");
+  eq(rows.filter(function (r) { return r.id === "kilo-auto/free"; })[0].state, "failed");
+  eq(rows.filter(function (r) { return r.lane === "opencode"; })[0].state, "blocked", "OpenCode 免费池标成不可选");
+  eq(rows.filter(function (r) { return r.id === "cat-jam-free"; })[0].state, "region-blocked");
+  const f = path.join(dir, "ofm-models.json");
+  eq(writeProbe(f, probe), true);
+  eq(readProbe(f).at, 222);
+  eq(readProbe(f).results["dots-studio/dots-3-note-preview:free"].ms, 5550);
+  eq(readProbe(path.join(dir, "nope.json")), null, "读不到就返回 null，别抛");
+  const st = readOfmState(dir);
+  eq(st.catalog, null, "插件没装时 catalog 是 null（界面会提示）");
+  ok(String(st.error || "").indexOf("catalog.json") >= 0, "要给得出为什么读不到：" + st.error);
+});
 
 t("prompt: 装配顺序按缓存优先级（专属人设/画像 → 兴趣词条 → 本轮任务 → 上下文）", async function () {
   const prof = { rounds: 3, interests: ["打游戏", "做视频"], dislikes: ["政治"], habits: "短句", notes: "爱用梗", pace: "快", activeHours: "20-23", personaText: "别叫我助手" };

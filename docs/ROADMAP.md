@@ -43,7 +43,7 @@
 
 - [x] ~~archify 端到端验证~~ —— 已跑通（`demo/run-chart-demo.mjs` 13/13），并补上了 HTML→PNG 这一步
 - [x] ~~OFM 免费池模型摸底~~ —— 已查明车道差异，推荐模型见上表
-- [ ] **OFM 车道自动探测** —— 让程序自己试几条车道，挑当前可用的（车道会随上游变化）
+- [x] **OFM 车道自动探测** —— 让程序自己试几条车道，挑当前可用的（车道会随上游变化）
 - [~] **判定用例集** —— 已有 **24 条模拟情景语料**（指代不明 / 人称混用 / 长短悬殊）+
   「本地 ↔ 外审」交叉验证脚本（`app/dsh-data/_probe/scenario-crosscheck.mjs`，一致率 15 → 20/24、
   "多嘴进大脑" 8 → 0、"漏接" 1 → 0）；**扩到 60 条**、覆盖六因子边界与灰区仍是待办
@@ -72,3 +72,10 @@
 
 改之前建议先读 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [DESIGN.md](DESIGN.md)；
 跑 `node test/run-tests.mjs` 应当是 **215 项全过**，加了功能记得补测试。
+
+## 配置端：免费模型检测与下拉（2026-10-14 加）
+
+- 设置页新增「免费模型（Our Free Model）」卡片：**检测可用模型**按钮会挨个真机试一遍（每个几秒），结果落盘 ，然后**下拉选择**要用哪个。
+- 数据源是插件自己的 （kiloRows 15 个 + OpenCode entries 10 个）。
+- 实测（2026-10-14）：**kilo-auto/free ✓**（9.8~16.7s）、**dots-studio/dots-3-note-preview:free ✓**（5.6~12.8s，且 vision=true 能看图）、nemotron-3-ultra **时好时坏**（成功过 16.7s，后来 ECONNRESET）、OpenCode 的  **稳定 ECONNRESET**（标 ⛔ 不给选）。
+- 走免费车道：成本 0，但更慢、不享前缀缓存（实测 cacheReadTokens≈0）；外审走 OFM 时超时建议放宽到 20000。

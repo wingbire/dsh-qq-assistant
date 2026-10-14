@@ -6,7 +6,7 @@ import { createStore } from "./src/store.js";
 import { createBot } from "./src/index.js";
 import { createOneBot, probePort } from "./src/onebot.js";
 import { createRuntime } from "./src/runtime.js";
-import { runBrain, ensureBrainProfile, resolveDshCli } from "./src/brain.js";
+import { runBrain, ensureBrainProfile, resolveDshCli, PROFILE_DEFAULT } from "./src/brain.js";
 import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
@@ -14,6 +14,7 @@ import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA } from "./src/vision.js";
 import { createStt } from "./src/stt.js";
+import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, writeProbe as writeOfmProbe, probeModels as probeOfmModels, OFM_DEFAULT_CANDIDATES } from "./src/ofm.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
 import { visionCapability } from "./src/vision.js";
 import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from "./src/paths.js";
@@ -154,6 +155,8 @@ const bot = createBot({
 });
 const cli = resolveDshCli();
 const quoteCache = new Map();   // 被引用消息原文（10 分钟）
+const OFM_PROBE_FILE = path.join(DATA_ROOT, "ofm-models.json");   // 免费模型真机检测结果
+let ofmProbing = false;
 
 const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg) });
 log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));
@@ -428,6 +431,43 @@ const webui = createWebUi({
   configFile: CONFIG_FILE, probeOnebot: probeOnebot, listGroups: listGroups, onConfigSaved: onConfigSaved,
   napcatInfo: napcatView, napcatAdopt: adoptNapCat, napcatReveal: napcatReveal,
   checkUpdate: doCheckUpdate, applyUpdate: doApplyUpdate, depsProbe: async function () { return depsProbe.probe(); }, depFix: doDepFix,
+  // 免费模型：清单（读插件目录 + 上次检测结果）
+  modelList: async function () {
+    const st = readOfmState(DSH_HOME);
+    const probe = readOfmProbe(OFM_PROBE_FILE);
+    const rows = ofmModelList(st, probe);
+    const conf = webui ? webui.getConfig() : cfg;
+    const p = (conf && conf.plugins) || {};
+    return {
+      ok: !!st.catalog, error: st.error || null,
+      provider: "our-free-model",
+      catalogAt: st.at, probeAt: probe ? probe.at : null,
+      candidates: OFM_DEFAULT_CANDIDATES,
+      current: { brain: p.ourFreeModelBrain === true, brainId: String(p.ourFreeModelBrainId || ""), audit: p.ourFreeModel === true, auditId: String(p.ourFreeModelId || "") },
+      models: rows,
+      available: rows.filter(function (x) { return x.state === "available"; }).map(function (x) { return x.id; }),
+      visionModels: rows.filter(function (x) { return x.vision && x.state !== "blocked"; }).map(function (x) { return x.id; })
+    };
+  },
+  // 免费模型：真机检测（几秒一个，只在用户点按钮时跑）
+  modelProbe: async function () {
+    if (ofmProbing) return { ok: false, error: "已经在检测了，稍等一下" };
+    ofmProbing = true;
+    try {
+      const conf = webui ? webui.getConfig() : cfg;
+      const p = personaFromConfig(conf);
+      const text = (String(getPath(conf, "persona.globalText") || "").trim() || undefined);
+      const r = await probeOfmModels({
+        dshHome: DSH_HOME, profile: PROFILE_DEFAULT, personaText: text, log: log,
+        candidates: (conf && conf.plugins && conf.plugins.ofmCandidates) || OFM_DEFAULT_CANDIDATES
+      });
+      if (r.ok) writeOfmProbe(OFM_PROBE_FILE, { at: r.at, results: r.results });
+      const st = readOfmState(DSH_HOME);
+      const rows = ofmModelList(st, r.ok ? { at: r.at, results: r.results } : readOfmProbe(OFM_PROBE_FILE));
+      return { ok: r.ok, error: r.error || null, at: r.at, okCount: r.okCount, total: r.total, models: rows,
+        available: rows.filter(function (x) { return x.state === "available"; }).map(function (x) { return x.id; }) };
+    } finally { ofmProbing = false; }
+  },
   reconnect: function () { return reconnectOnebot(liveCfg); }
 });
 

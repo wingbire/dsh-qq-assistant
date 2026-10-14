@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-219%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-220%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)

@@ -144,6 +144,8 @@ export function createWebUi(deps) {
   const checkUpdateFn = d.checkUpdate || null;    // async () => 更新检查结果
   const applyUpdateFn = d.applyUpdate || null;    // async () => 执行更新
   const depsProbeFn = d.depsProbe || null;        // async () => { items: [...] }
+  const modelListFn = d.modelList || null;        // async () => { ok, models: [...], current }
+  const modelProbeFn = d.modelProbe || null;      // async () => { ok, at, results, models }
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
@@ -310,6 +312,13 @@ export function createWebUi(deps) {
       return sendJson(res, 200, pluginInstallFn ? await pluginInstallFn(String(b.id)) : { ok: false, error: "没有接插件安装服务" });
     }
 
+    // 免费模型（Our Free Model 插件）：清单 + 真机检测
+    if (p === "/api/models" && req.method === "GET") {
+      return sendJson(res, 200, modelListFn ? await modelListFn() : { ok: false, error: "没有接模型清单服务" });
+    }
+    if (p === "/api/models/probe" && req.method === "POST") {
+      return sendJson(res, 200, modelProbeFn ? await modelProbeFn() : { ok: false, error: "没有接模型检测服务" });
+    }
     if (p === "/api/deps" && req.method === "GET") {
       return sendJson(res, 200, depsProbeFn ? await depsProbeFn() : { ok: false, items: [] });
     }

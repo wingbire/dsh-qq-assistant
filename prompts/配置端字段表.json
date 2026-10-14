@@ -371,6 +371,33 @@
           "说明": "0 = 不限（默认）。>0 时每群每小时最多发这么多条，超出静默丢弃（含主动搭话）"
         },
         {
+          "键": "plugins.ourFreeModelBrain",
+          "标签": "大脑走免费模型（Our Free Model）",
+          "类型": "bool",
+          "默认": false,
+          "说明": "打开后大脑改走社区插件 Our Free Model 的免费车道；成本 0，但更慢、且不享前缀缓存（实测 cacheReadTokens≈0）。车道会随上游变，用「检测可用模型」挑当前能用的"
+        },
+        {
+          "键": "plugins.ourFreeModelBrainId",
+          "标签": "大脑用的免费模型",
+          "类型": "select",
+          "默认": "kilo-auto/free",
+          "说明": "下拉里列出检测到的模型；实测可用：kilo-auto/free、dots-studio/dots-3-note-preview:free（vision）、nvidia/nemotron-3-ultra-550b-a55b:free。OpenCode 那条免费池会 ECONNRESET，标成 blocked 不给选"
+        },
+        {
+          "键": "plugins.ourFreeModel",
+          "标签": "外审二判走免费模型",
+          "类型": "bool",
+          "默认": false,
+          "说明": "打开后外审复核（是/短/否）走免费车道；走 OFM 时外审超时建议放宽到 20000"
+        },
+        {
+          "键": "plugins.ourFreeModelId",
+          "标签": "外审用的免费模型",
+          "类型": "select",
+          "默认": "kilo-auto/free"
+        },
+        {
           "键": "runtime.stt.enabled",
           "标签": "语音转写（本机 STT）",
           "类型": "bool",

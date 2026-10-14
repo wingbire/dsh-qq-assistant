@@ -496,6 +496,8 @@
   function pageSettings() {
     S.update = S.update || null;
     S.deps = S.deps || null;
+    S.models = S.models || null;
+    S.ofmLog = S.ofmLog || null;
     function updHtml() {
       var u = S.update;
       if (!u) return '<div class="muted">点「检查更新」看看仓库里有没有新版。</div>';
@@ -527,7 +529,41 @@
         '<table><thead><tr><th>依赖</th><th>状态</th><th>版本</th><th>说明</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         (S.depLog ? '<pre class="pre" style="margin-top:10px">' + esc(S.depLog) + '</pre>' : "");
     }
-    return '<details class="card" open><summary>从 git 仓库更新<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' +
+    function ofmHtml() {
+      var m = S.models;
+      if (!m) return '<div class="muted">点「检测可用模型」看看免费车道现在能跑哪些。</div>';
+      if (!m.ok && m.error) return '<div class="bad">' + esc(m.error) + '</div>';
+      var rows = m.models || [];
+      var good = rows.filter(function (x) { return x.state === "available"; });
+      var sel = (m.current && m.current.brainId) || "";
+      function opt(x) {
+        var tag = x.state === "available" ? "✓" : (x.state === "blocked" ? "⛔" : (x.state === "failed" ? "✗" : "?"));
+        return '<option value="' + esc(x.id) + '"' + (x.id === sel ? " selected" : "") + (x.state === "blocked" ? " disabled" : "") + '>' +
+          tag + " " + esc(x.name || x.id) + (x.vision ? "（能看图）" : "") + (x.latencyMs ? " · " + x.latencyMs + "ms" : "") +
+          (x.lane ? " · " + esc(x.lane) : "") + '</option>';
+      }
+      var head = '<div class="ctl-row" style="gap:8px;align-items:center">' +
+        '<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ofm-brain-on"' + (m.current && m.current.brain ? " checked" : "") + '> 大脑走免费模型</label>' +
+        '<button class="btn-sm" id="btn-ofm-probe">检测可用模型</button>' +
+        '<span class="hint" style="margin:0">' + (good.length ? ("检测到 <b>" + good.length + "</b> 个可用") : "还没检测出可用的") +
+        (m.probeAt ? " · " + new Date(m.probeAt).toLocaleString() : "") + '</span></div>';
+      var pick = '<div class="ctl-row" style="margin-top:8px"><span style="min-width:96px">大脑用的模型</span>' +
+        '<select id="ofm-model" style="min-width:340px">' + (sel ? "" : '<option value="">（用兜底 kilo-auto/free）</option>') + rows.map(opt).join("") + '</select></div>';
+      var detail = '<div class="hint" style="margin-top:8px">车道会随上游变：Kilo 车道实测可用（成本 0，但更慢、不享前缀缓存）；OpenCode 那条 <code>*-free</code> 会 ECONNRESET，已标 ⛔ 不让选。</div>';
+      var table = '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px">全部 ' + rows.length + ' 个模型（含不可用的）</summary>' +
+        '<table><thead><tr><th>模型</th><th>车道</th><th>状态</th><th>说明</th></tr></thead><tbody>' +
+        rows.map(function (x) {
+          return '<tr><td><code>' + esc(x.id) + '</code>' + (x.vision ? ' <span class="tag ok">能看图</span>' : "") + '</td><td class="muted">' + esc(x.lane || "") + '</td>' +
+            '<td><span class="tag ' + (x.state === "available" ? "yes" : (x.state === "blocked" ? "no" : "grey")) + '">' + esc(x.state) + '</span></td>' +
+            '<td class="muted">' + esc(x.detail || "") + '</td></tr>';
+        }).join("") + '</tbody></table></details>';
+      return head + pick + detail + table + (S.ofmLog ? '<pre class="pre" style="margin-top:10px">' + esc(S.ofmLog) + '</pre>' : "");
+    }
+    return '<details class="card" open><summary>免费模型（Our Free Model）<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' +
+      ((S.models && (S.models.available || []).length) ? ("检测到 " + (S.models.available || []).length + " 个可用") : "先点检测") +
+      '</span></summary>' +
+      '<div class="body"><div id="ofm-body">' + ofmHtml() + '</div></div></details>' +
+      '<details class="card" open><summary>从 git 仓库更新<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' +
       (S.update && S.update.ok && !S.update.upToDate ? "有新版可以拉" : "一键拉取最新代码") + '</span></summary><div class="body">' +
       '<div class="ctl-row"><button class="btn-sm" id="btn-update-check">检查更新</button>' +
       '<button class="btn-sm good" id="btn-update-apply">一键更新</button>' +
@@ -718,6 +754,10 @@
       S.depsLoading = true;
       api("/api/deps").then(function (r) { S.deps = r; S.depsLoading = false; if (S.page === "settings") render(); });
     }
+    if (!S.models && !S.modelsLoading) {
+      S.modelsLoading = true;
+      api("/api/models").then(function (r) { S.models = r; S.modelsLoading = false; if (S.page === "settings") render(); });
+    }
   }
 
   function refreshTop() {
@@ -830,6 +870,31 @@
           else toast("更新失败：" + (r.error || ""), true);
           render();
         });
+      }
+      if (e.target.closest("#btn-ofm-probe")) {
+        toast("正在挨个试免费车道（每个几秒）…");
+        api("/api/models/probe", { method: "POST", body: {} }).then(function (r) {
+          S.models = r; S.ofmLog = null;
+          if (r && r.models) S.models = Object.assign({}, r, { current: S.models ? S.models.current : null });
+          toast(r && r.ok ? ("检测完成：可用 " + (r.okCount || 0) + "/" + (r.total || 0)) : ("检测失败：" + esc((r && r.error) || "?")));
+          if (S.page === "settings") render();
+        });
+        return;
+      }
+      if (e.target.closest("#ofm-model") && e.type === "change") {
+        var v = e.target.value;
+        api("/api/config", { patch: { "plugins.ourFreeModelBrainId": v } }).then(function () {
+          if (S.models && S.models.current) S.models.current.brainId = v;
+          toast("大脑的免费模型已设为 " + (v || "（兜底）"));
+        });
+        return;
+      }
+      if (e.target.closest("#ofm-brain-on")) {
+        var on = !!e.target.checked;
+        api("/api/config", { patch: { "plugins.ourFreeModelBrain": on } }).then(function () {
+          toast(on ? "大脑改走免费模型（重启或下一轮生效）" : "大脑回到官方默认模型");
+        });
+        return;
       }
       if (e.target.closest("#btn-deps-check")) {
         S.deps = null; S.depLog = null; toast("正在检测…");
