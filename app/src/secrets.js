@@ -35,6 +35,16 @@ export function maskKey(key) {
   return k.slice(0, 6) + "..." + k.slice(-4);
 }
 
+// 给界面用：当前这把 key 从哪来、遮蔽成什么样（不填=没有）
+export function apiKeyInfo(env, file) {
+  const e = env || process.env;
+  const fromFile = loadSecrets(file).deepseekApiKey;
+  if (fromFile && String(fromFile).trim()) return { set: true, masked: maskKey(fromFile), source: "secrets.json（配置端填的）" };
+  const fromEnv = e && e.DEEPSEEK_API_KEY;
+  if (fromEnv && String(fromEnv).trim()) return { set: true, masked: maskKey(fromEnv), source: "环境变量 DEEPSEEK_API_KEY" };
+  return { set: false, masked: null, source: null };
+}
+
 // 优先级：工作区文件 > 进程环境变量。返回 null 表示没有可用密钥。
 export function pickApiKey(env, file) {
   const e = env || process.env;

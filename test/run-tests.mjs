@@ -21,6 +21,7 @@ import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
 import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
+import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
@@ -112,6 +113,26 @@ t("字段表：大脑 API Key 与三档思考强度都在（配置端可填）",
   const kf = fields.filter(function (f) { return f.键 === "llm.deepseekApiKey"; })[0];
   eq(kf.类型, "secret", "key 是 secret：界面遮蔽、日志不落明文");
   for (const k of ["brain.effort.low", "brain.effort.mid", "brain.effort.high"]) ok(keys.indexOf(k) >= 0, "有 " + k);
+});
+
+
+t("secrets: 大脑 key 的来源与状态（不填＝没有）", function () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-key-"));
+  const f = path.join(dir, "secrets.json");
+  eq(apiKeyInfo({}, f).set, false, "什么都没配 → 没 key");
+  eq(pickApiKey({}, f), null);
+  fs.writeFileSync(f, JSON.stringify({ deepseekApiKey: "sk-abc123456789" }));
+  const i1 = apiKeyInfo({}, f);
+  eq(i1.set, true);
+  eq(i1.masked, "sk-abc...6789", "只给遮蔽值，不吐明文");
+  ok(String(i1.source).indexOf("secrets.json") >= 0, "来源要说清是文件：" + i1.source);
+  eq(pickApiKey({}, f), "sk-abc123456789");
+  const i2 = apiKeyInfo({ DEEPSEEK_API_KEY: "sk-env987654321" }, path.join(dir, "nope.json"));
+  eq(i2.set, true);
+  ok(String(i2.source).indexOf("环境变量") >= 0, "文件没有就用环境变量：" + i2.source);
+  const table = loadFieldTable();
+  const kf = table.分组.flatMap(function (g) { return g.字段; }).filter(function (x) { return x.键 === "llm.deepseekApiKey"; })[0];
+  ok(String(kf.说明).indexOf("不填＝没有大脑密钥") >= 0, "说明第一句就回答「不填会怎样」");
 });
 
 
@@ -427,9 +448,9 @@ t("secrets: pickApiKey 文件优先于环境变量", function () {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "sec-" + Date.now());
   const f = path.join(dir, "secrets.json");
   saveSecrets({ deepseekApiKey: "sk-from-file" }, f);
-  eq(pickApiKey({ DEEPSEEK_API_KEY: "sk-from-env" }, f), "sk-from-file");
-  eq(pickApiKey({ DEEPSEEK_API_KEY: "sk-from-env" }, path.join(dir, "missing.json")), "sk-from-env");
-  eq(pickApiKey({}, path.join(dir, "missing.json")), null);
+  eq(pickKeyForTest({ DEEPSEEK_API_KEY: "sk-from-env" }, f), "sk-from-file");
+  eq(pickKeyForTest({ DEEPSEEK_API_KEY: "sk-from-env" }, path.join(dir, "missing.json")), "sk-from-env");
+  eq(pickKeyForTest({}, path.join(dir, "missing.json")), null);
   eq(loadSecrets(f).deepseekApiKey, "sk-from-file");
 });
 

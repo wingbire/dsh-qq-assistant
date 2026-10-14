@@ -19,7 +19,7 @@ import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, wri
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
 import { visionCapability } from "./src/vision.js";
 import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from "./src/paths.js";
-import { pickApiKey, saveSecrets, maskKey } from "./src/secrets.js";
+import { pickApiKey, saveSecrets, maskKey, apiKeyInfo } from "./src/secrets.js";
 import { checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "./src/update.js";
 import { createPluginProbe, installPlugin } from "./src/plugins.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, readWebuiToken } from "./src/napcat.js";
@@ -457,6 +457,11 @@ const webui = createWebUi({
   secretValues: async function () {
     const k = pickApiKey();
     return k ? { llm: { deepseekApiKey: maskKey(k) } } : null;
+  },
+  // 「当前到底配没配、从哪来的」——界面在那行输入框下面直接显示，省得猜
+  keyStatus: async function () {
+    const info = apiKeyInfo();
+    return Object.assign({}, info, { ofm: !!(liveCfg && liveCfg.plugins && liveCfg.plugins.ourFreeModelBrain) });
   },
   onSecrets: async function (patch) {
     saveSecrets(patch || {});

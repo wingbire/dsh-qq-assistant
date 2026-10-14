@@ -147,6 +147,7 @@ export function createWebUi(deps) {
   const modelListFn = d.modelList || null;        // async () => { ok, models: [...], current }
   const modelProbeFn = d.modelProbe || null;      // async () => { ok, at, results, models }
   const secretValues = d.secretValues || null;    // async () => ({ llm: { deepseekApiKey: "sk-abc...1234" } }) 遮蔽值
+  const keyStatusFn = d.keyStatus || null;        // async () => ({ set, masked, source, ofm }) 当前 key 打哪来
   const onSecrets = d.onSecrets || null;          // async (patch) => 把真密钥写进工作区的 secrets.json
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
@@ -204,7 +205,9 @@ export function createWebUi(deps) {
           if (sv) for (const k of Object.keys(sv)) vals[k] = Object.assign({}, vals[k] || {}, sv[k]);
         } catch (e) { /* 显示不出来不影响 */ }
       }
-      return sendJson(res, 200, { ok: true, table: table, values: vals, runtime: runtimeConfig(cfg), defaults: defaultsFromTable(table) });
+      let keyInfo = null;
+      if (keyStatusFn) { try { keyInfo = await keyStatusFn(); } catch (e) { keyInfo = null; } }
+      return sendJson(res, 200, { ok: true, table: table, values: vals, runtime: runtimeConfig(cfg), defaults: defaultsFromTable(table), keyInfo: keyInfo });
     }
     if (p === "/api/config" && req.method === "POST") {
       const body = await readBody(req);

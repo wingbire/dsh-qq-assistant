@@ -155,6 +155,14 @@
   function fieldRow(f) {
     var key = f.键, type = f.类型, value = getPath(S.values, key);
     var hint = f.说明 ? '<div class="hint">' + esc(f.说明) + '</div>' : '';
+    // 大脑 key 这格：把"现在到底配没配、从哪来"直接写出来（光看占位符看不明白）
+    if (key === "llm.deepseekApiKey" && S.keyInfo) {
+      var ki = S.keyInfo;
+      hint = (ki.set
+        ? '<div class="hint" style="color:var(--ok)">当前<b>已配置</b>：' + esc(ki.masked) + '　来源：' + esc(ki.source) + '</div>'
+        : '<div class="hint" style="color:var(--bad)">当前<b>未配置</b>：大脑调不动，只能本地短答' +
+          (ki.ofm ? '（你已经开了「免费模型」，走免费车道就不需要 key）' : '') + '</div>') + hint;
+    }
     var ctrl = "";
     if (type === "string[]") {
       var arr = Array.isArray(value) ? value : [];
@@ -1093,7 +1101,7 @@
     } catch (e) {}
     bind();
     api("/api/config").then(function (c) {
-      S.table = c.table; S.values = c.values; S.runtime = c.runtime; S.defaults = c.defaults;
+      S.table = c.table; S.values = c.values; S.runtime = c.runtime; S.defaults = c.defaults; S.keyInfo = c.keyInfo || null;
       return loadGroups();
     }).then(refreshTop).then(render);
     setInterval(function () {

@@ -706,7 +706,7 @@
           "标签": "大脑 API Key（DeepSeek）",
           "类型": "secret",
           "默认": "",
-          "说明": "填你自己的 DeepSeek key（sk- 开头），保存后会写进 app/dsh-data/config/secrets.json，只存本机。也可以不走界面：直接编辑那个文件里的 deepseekApiKey，或设环境变量 DEEPSEEK_API_KEY。优先级：工作区文件 > 环境变量。程序是借 DSH 这条通道发请求，但用的**就是你自己的 key**，不会自动复用你桌面版 DSH 的凭据；想完全 0 成本可以改走上面「免费模型」"
+          "说明": "不填＝没有大脑密钥（小助手只能本地短答，回不了话）。填你自己 sk- 开头的 DeepSeek key，保存后只写进本机 secrets.json；也可以直接编辑那个文件里的 deepseekApiKey，或设环境变量 DEEPSEEK_API_KEY（优先级：文件 > 环境变量）。程序借 DSH 这条通道发请求，但用的就是你自己的 key，不会自动复用桌面版 DSH 的凭据（想迁移一次：node demo/import-key.mjs）。这里留空＝不改，想换就直接粘新的；想 0 成本可以走上面「免费模型」"
         },
         {
           "键": "llm.search.apiKey",
