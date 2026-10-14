@@ -32,10 +32,19 @@ static class Program
     static bool autoLaunch = true, autoClose = true, hideWindow = true;
     static int onebotPort = 3001;
     static int hideWatchdogTicks = 0;
+    static int napcatVisibleWindows = 0;
 
     [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     const int SW_HIDE = 0;
+
+    // 藏窗口不能只看 Process.MainWindowHandle —— 实测 NapCat 那几个进程的主窗口句柄全是 0，
+    // 真正露在外面的是 ConPTY 的 PseudoConsoleWindow。所以得按 PID 枚举所有顶层窗口。
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] static extern int GetClassName(IntPtr hWnd, StringBuilder sb, int max);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
 
     [STAThread]
     static void Main(string[] args)
@@ -87,8 +96,10 @@ static class Program
         menu.Items.Add(new ToolStripSeparator());
         miNapcatStart = new ToolStripMenuItem("只启动 NapCat", null, delegate { StartNapCat(); NapCatWaitForPort(20000); Refresh(); });
         miNapcatStop = new ToolStripMenuItem("只关闭 NapCat", null, delegate { StopNapCat(); Refresh(); });
+        var miNapcatHide = new ToolStripMenuItem("立刻隐藏 NapCat 窗口", null, delegate { HideNapCatWindows(); Refresh(); });
         menu.Items.Add(miNapcatStart);
         menu.Items.Add(miNapcatStop);
+        menu.Items.Add(miNapcatHide);
         menu.Items.Add(new ToolStripSeparator());
         miWeb = new ToolStripMenuItem("打开配置端", null, delegate { OpenWeb(); });
         menu.Items.Add(miWeb);
@@ -296,20 +307,53 @@ static class Program
         return any;
     }
 
-    // 只把 NapCat 目录下的进程藏起来，你自己的 QQ 窗口纹丝不动
+    // 只把 NapCat 目录下的进程藏起来，你自己的 QQ 窗口纹丝不动。
+    // 返回这次藏了几个；顺便记下现在还有没有露在外面的窗口。
     static void HideNapCatWindows()
     {
         if (!hideWindow) return;
-        foreach (var p in NapCatProcesses())
+        var procs = NapCatProcesses();
+        if (procs.Count == 0) return;
+        var pids = new System.Collections.Generic.HashSet<uint>();
+        foreach (var p in procs)
         {
-            try
-            {
-                p.Refresh();
-                if (p.MainWindowHandle != IntPtr.Zero) ShowWindow(p.MainWindowHandle, SW_HIDE);
-            }
-            catch (Exception) { }
+            try { pids.Add((uint)p.Id); } catch (Exception) { }
             finally { try { p.Dispose(); } catch (Exception) { } }
         }
+        int hiddenNow = 0;
+        try
+        {
+            EnumWindows(delegate (IntPtr h, IntPtr l)
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (!pids.Contains(pid)) return true;
+                if (!IsWindowVisible(h)) return true;
+                var cls = new StringBuilder(128);
+                GetClassName(h, cls, 128);
+                string c = cls.ToString();
+                // 别去动系统输入法/提示这类窗口，只收控制台与宿主窗口
+                if (c == "IME" || c == "MSCTFIME UI" || c == "TooltipWindow" || c == "SysShadow") return true;
+                if (ShowWindow(h, SW_HIDE)) hiddenNow++;
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch (Exception) { }
+        if (hiddenNow > 0) AppendLog("[napcat] 藏起了 " + hiddenNow + " 个窗口");
+        // 看看还剩下几个可见的（下一轮继续收）
+        int stillVisible = 0;
+        try
+        {
+            EnumWindows(delegate (IntPtr h, IntPtr l)
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (pids.Contains(pid) && IsWindowVisible(h)) stillVisible++;
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch (Exception) { }
+        napcatVisibleWindows = stillVisible;
     }
 
     static void StartNapCat()
@@ -503,9 +547,13 @@ static class Program
         miNapcatStop.Enabled = nc;
         miStatus.Text = mine ? ("● 小助手运行中  PID " + child.Id)
                              : (alive ? "● 小助手运行中（已有一个实例）" : "○ 小助手未运行");
-        miNapcat.Text = nc ? ("NapCat: 运行中" + (hideWindow ? "（已隐藏）" : "")) : (napcatExe == null ? "NapCat: 没找到启动程序" : "NapCat: 未运行");
+        miNapcat.Text = nc
+            ? ("NapCat: 运行中" + (hideWindow ? (napcatVisibleWindows > 0 ? "（还有 " + napcatVisibleWindows + " 个窗口）" : "（已隐藏）") : "（不隐藏）"))
+            : (napcatExe == null ? "NapCat: 没找到启动程序" : "NapCat: 未运行");
         tray.Text = AppName + (alive ? " · 运行中" : " · 已停止");
-        if (nc && hideWindow && hideWatchdogTicks > 0) { HideNapCatWindows(); }
+        // 每 3 秒收一次：不管 NapCat 是本次启动的还是之前就开着的，只要露头就藏。
+        // （旧版只在"自己启动 NapCat"后跑 12 个 tick，所以早就开着的那些永远藏不住。）
+        if (nc && hideWindow) HideNapCatWindows();
         if (hideWatchdogTicks > 0) hideWatchdogTicks--;
     }
 
