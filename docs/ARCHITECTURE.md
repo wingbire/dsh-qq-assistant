@@ -350,7 +350,7 @@ dsh --profile qq-brain --patch tier-mid.patch.yml headless --json "<本轮任务
 | `logs/bot.log` | 运行日志 | 滚动 |
 | `data/observe.jsonl` | 判定记录（**只存关键词与统计，不存原文**） | 满 5000 行滚动 |
 | `data/stages.json` | 分群阶段（含"手动跳过观察期"） | 改动即时落盘 |
-| `data/budget.json` | 今日已用 token | 攒 1.5s 写；重启后日熔断照样有效 |
+| `data/budget.json` | 今日已用 token | 攒 1.5s 写；重启后日熔断照样有效（**一条回复到底花多少钱，见 [COST.md](COST.md)**） |
 | `data/brakes.json` | 按群暂停（含配置端"关掉本群"） | 立即落盘 |
 | `data/bandit-state.json` | 话风臂与学习状态 | 攒着写 |
 | `data/localreplies.json` | 每群最近说过的本地短答 | **每群 6 条**，池子没说完不重复（防"嗯？啥事"复读） |

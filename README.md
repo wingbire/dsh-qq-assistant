@@ -377,6 +377,7 @@ Token 真的不对时状态会明确显示**被服务端拒绝**并带上 NapCat
 | [docs/INSTALL.md](docs/INSTALL.md) | 装 NapCat（大小号隔离）· 配置端导览 · 托盘启动器 · 分发 · 排查 |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | 数据分类 · 会外发的三样东西 · 凭据 · 上线前必做 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已知限制（含**没验过的部分**）与计划 |
+| [docs/COST.md](docs/COST.md) | **成本实测**：一条回复多少钱（中位数 / 均值 / 长尾）、prompt 构成、预算阈值怎么设（可复算） |
 
 ## 许可
 

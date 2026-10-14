@@ -2208,6 +2208,8 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
   for (const d of ["app/src", "app/src/webui"]) {
     try { for (const f of fs.readdirSync(d)) if (f.endsWith(".js")) files.push(d + "/" + f); } catch (e) {}
   }
+  // demo/ 也要查 —— 那里踩过同一处引号坑（字符串里混 ASCII 引号）
+  try { for (const f of fs.readdirSync("demo")) if (f.endsWith(".mjs")) files.push("demo/" + f); } catch (e) {}
   // 先自检这个防呆本身抓得到坏文件，别形同虚设
   const tmp = path.join(os.tmpdir(), "dshqq-broken-guard.mjs");
   fs.writeFileSync(tmp, "const a = \"x\" \"y\";" + String.fromCharCode(10));
