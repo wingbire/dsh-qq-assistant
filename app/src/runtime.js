@@ -428,7 +428,7 @@ export function createRuntime(deps) {
     if (evt.hasVoice) {
       stats.voices += 1;
       if (evt.voiceText) stats.voicesTranscribed += 1;
-      observe({ kind: "voice_seen", gid: evt.gid, uid: evt.uid, hasText: !!evt.voiceText, keys: evt.voiceKeys || [] });
+      observe({ kind: "voice_seen", gid: evt.gid, uid: evt.uid, hasText: !!evt.voiceText, keys: evt.voiceKeys || [], shape: evt.voiceShape || null });
     }
     const gs = gstat(evt.gid);
     gs.messages += 1;

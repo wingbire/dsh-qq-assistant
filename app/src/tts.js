@@ -30,16 +30,36 @@ export function buildSapiScript(text, outFile, cfg) {
 }
 
 // 本机可用音色（只在启用语音时探一次，spawn 一次 PowerShell）
+// 列出本机 SAPI 音色。两个来源合并：
+//   ① System.Speech 的 GetInstalledVoices（当前宿主视图）
+//   ② 注册表 Tokens（HKLM\Speech 与 WOW6432Node）—— 32/64 位视图各有一半音色，
+//      只查 ① 会漏（实测本机装了 5 个，① 只报出 2 个），于是"音色不在本机列表"的提示是错的。
 export function listSapiVoices(opts) {
   const o = opts || {};
   const run = o.run || function (script) {
     return spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15000 });
   };
-  try {
-    const r = run("Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }");
-    if (!r || r.status !== 0) return null;
-    return String(r.stdout || "").split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
-  } catch (e) { return null; }
+  const out = [];
+  const add = function (text) {
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const v = line.trim();
+      if (v && out.indexOf(v) < 0) out.push(v);
+    }
+  };
+  const sapi = "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }";
+  // 两个注册表位置都查：Speech（Desktop / SAPI5）与 Speech_OneCore（现代 UWP 音色，Yaoyao/Kangkang 常在那边）
+  const reg = "$b=@('HKLM:\\SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Speech\\Voices\\Tokens','HKLM:\\SOFTWARE\\Microsoft\\Speech_OneCore\\Voices\\Tokens','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Speech_OneCore\\Voices\\Tokens'); foreach($x in $b){ if(Test-Path $x){ Get-ChildItem $x | ForEach-Object { try { (Get-Item $_.PSPath).GetValue('') } catch {} } } }";
+  // 32 位宿主再看一遍：部分音色只在 WOW6432Node 视图里注册
+  const sapi32 = (o.pwsh32 || (process.env.SystemRoot ? process.env.SystemRoot + "\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe" : "")) + " -NoProfile -NonInteractive -Command \"" + sapi.replace(/"/g, "'") + "\"";
+  let okAny = false;
+  for (const script of [sapi, reg, sapi32]) {
+    try {
+      const r = run(script);
+      if (r && r.status === 0) { okAny = true; add(r.stdout); }
+    } catch (e) { /* 换下一个来源 */ }
+  }
+  if (!okAny && !out.length) return null;
+  return out.sort();
 }
 
 // runtime.voice 段 → { enabled, capable, voice, voices, source, note }
@@ -55,7 +75,12 @@ export function voiceCapability(cfg, opts) {
   if (voices && voices.length === 0) { out.source = "本机音色"; out.note = "本机没有任何 SAPI 音色"; return out; }
   out.capable = true;
   out.source = "SAPI";
-  if (voices && c.voice && voices.indexOf(c.voice) < 0) {
+  const hitVoice = function () {
+    if (!voices || !c.voice) return true;
+    const want = String(c.voice).toLowerCase();
+    return voices.some(function (v) { return String(v).toLowerCase().indexOf(want) >= 0; });
+  };
+  if (voices && c.voice && !hitVoice()) {
     out.note = "配置的音色「" + c.voice + "」不在本机列表里 → 会退回默认音色（可用：" + voices.slice(0, 5).join(" / ") + "）";
   } else {
     out.note = "音色 " + (c.voice || "默认") + " 可用";

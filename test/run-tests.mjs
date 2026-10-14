@@ -36,6 +36,7 @@ import { personaFromConfig } from "../app/src/dshprofile.js";
 import { createMockOneBotServer } from "../app/src/mock-onebot-server.js";
 import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, modelHasVision, visionCapability, VISION_DEFAULTS, VISION_PROFILE_ID } from "../app/src/vision.js";
 import { createTts, parseVoiceTag, buildSapiScript, voiceCapability, listSapiVoices, TTS_DEFAULTS } from "../app/src/tts.js";
+import { maskCqShape } from "../app/src/onebot.js";
 import fs from "node:fs";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
@@ -2568,6 +2569,29 @@ t("vision: 模型视觉能力识别（自动 / 有 / 无）", function () {
   eq(same.capable, true, "默认「同大脑」= 显式选择用大脑模型，按有视觉处理");
   eq(same.source, "跟随大脑模型");
   eq(visionCapability({ enabled: true, mode: "dsh", model: "" }).capable, true, "空也按同大脑");
+});
+
+t("tts: 音色枚举合并多来源 + 配置名容错匹配", function () {
+  const calls = [];
+  const fakeRun = function (script) {
+    calls.push(String(script).slice(0, 24));
+    if (/System[.]Speech/.test(script)) return { status: 0, stdout: "Microsoft Huihui Desktop" + String.fromCharCode(10) + "Microsoft Zira Desktop" + String.fromCharCode(10) };
+    return { status: 0, stdout: "Microsoft Yaoyao - Chinese (Simplified, PRC)" + String.fromCharCode(10) + "Microsoft Kangkang - Chinese (Simplified, PRC)" + String.fromCharCode(10) };
+  };
+  const list = listSapiVoices({ run: fakeRun });
+  eq(list.length, 4, "两个来源合并去重：" + JSON.stringify(list));
+  eq(list.indexOf("Microsoft Yaoyao - Chinese (Simplified, PRC)") >= 0, true, "注册表那一份也要进来");
+  ok(calls.length >= 2, "不止查一个来源");
+  const cap = voiceCapability({ enabled: true, voice: "Microsoft Yaoyao" }, { voices: list });
+  eq(cap.capable, true);
+  eq(cap.note.indexOf("不在本机列表") < 0, true, "系统注册名是长名，短名要算命中");
+});
+
+t("onebot: CQ 形状脱敏（只留字段名，不落内容）", function () {
+  eq(maskCqShape("[CQ:record,file=a.amr,text=5L2g5aW9]"), "[CQ:record{file,text}]");
+  eq(maskCqShape("[CQ:image,file=x.jpg,url=http://a/b.jpg]"), "[CQ:image{file,url}]");
+  eq(maskCqShape("纯文本"), "纯文本");
+  ok(maskCqShape("[CQ:record,file=secret.amr]").indexOf("secret.amr") < 0, "值不能出现");
 });
 
 t("tts: 语音输出能力跟着平台与音色走", function () {

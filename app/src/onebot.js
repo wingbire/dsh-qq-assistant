@@ -61,6 +61,14 @@ export function withToken(url, token) {
 // QQ 官方"语音转文字"的文本可能落在这几个地方（取决于 NapCat 版本）：
 //   message[].data.text / transcription / summary，或 raw_message 的 [CQ:record,text=...]。
 // 内容是明文 / URL 编码 / base64 三种都可能，这里都试一遍；解不出来就当没有（绝不编）。
+// 把 CQ 码脱敏成"字段名清单"（如 [CQ:record{file,text}]）—— 用来确认 NapCat 到底上报了哪些字段，**不含任何内容**
+export function maskCqShape(raw) {
+  return String(raw == null ? "" : raw).replace(/\[CQ:([a-zA-Z_]+)((?:,[a-zA-Z_]+=[^\],]*)*)\]/g, function (m, type, rest) {
+    const keys = (String(rest || "").match(/,[a-zA-Z_]+=/g) || []).map(function (s) { return s.slice(1, -1); });
+    return "[CQ:" + type + "{" + (keys.length ? keys.join(",") : "无字段") + "}]";
+  });
+}
+
 export function decodeCqText(v) {
   let s = String(v == null ? "" : v).trim();
   if (!s) return "";
@@ -167,6 +175,7 @@ export function normalizeEvent(raw, ctx) {
     hasVoice: hasVoice,
     voiceText: voiceText || null,          // QQ 官方转写（有就有，没有就是 null）
     voiceKeys: voiceKeys,                  // 只记字段名（不落内容），用来确认 NapCat 到底给不给转写
+    voiceShape: voiceKeys.length ? maskCqShape(raw.raw_message || "") : null,   // 脱敏后的 CQ 形状
     now: c.now != null ? c.now : Date.now()
   };
 }
