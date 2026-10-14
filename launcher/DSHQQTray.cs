@@ -23,6 +23,15 @@ static class Program
 
     static NotifyIcon tray;
     static Process child;
+    static bool childStartFailed;   // 起过一次失败就别每 3 秒再弹一次窗（新机器没装 Node 时就是这种）
+    static bool nodeChecked;
+    static bool lastNodeOk;
+
+    // 进程对象在"没真正起来"或"已经退出"时，.NET 会抛 InvalidOperationException
+    // 「没有与此对象关联的进程」—— 一律吞掉，绝不让它弹窗。
+    static bool AliveProc(Process p) { if (p == null) return false; try { return !p.HasExited; } catch { return false; } }
+    static int PidOf(Process p) { if (p == null) return -1; try { return p.Id; } catch { return -1; } }
+    static string NameOf(Process p) { if (p == null) return "?"; try { return p.ProcessName; } catch { return "?"; } }
     static string root, entry, nodeExe, dataDir, logDir, logFile, configFile, napcatDir, napcatExe;
     static ToolStripMenuItem miStart, miStop, miWeb, miAuto, miStatus, miNapcat, miNapcatStart, miNapcatStop, miNapcatShow, miPorts;
     static Timer timer;
@@ -56,6 +65,10 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // 任何没接住的异常都变成"人话弹窗 + 写日志"，不再让用户看到 .NET 的原始报错
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += delegate (object s, System.Threading.ThreadExceptionEventArgs e) { ReportCrash(e.Exception); };
+        AppDomain.CurrentDomain.UnhandledException += delegate (object s, UnhandledExceptionEventArgs e) { ReportCrash(e.ExceptionObject as Exception); };
         root = FindRoot();
         entry = Path.Combine(root, "app", "main.js");
         dataDir = Path.Combine(root, "app", "dsh-data");
@@ -102,6 +115,7 @@ static class Program
         menu.Items.Add(miStart);
         menu.Items.Add(miStop);
         menu.Items.Add(new ToolStripMenuItem("重启", null, delegate { StopAll(); StartAll(); }));
+        menu.Items.Add(new ToolStripMenuItem("诊断信息（出问题发我）", null, delegate { ShowDiag(); }));
         menu.Items.Add(new ToolStripSeparator());
         miNapcatStart = new ToolStripMenuItem("只启动 NapCat", null, delegate { StartNapCat(); NapCatWaitForPort(20000); Refresh(); });
         miNapcatStop = new ToolStripMenuItem("只关闭 NapCat", null, delegate { StopNapCat(); Refresh(); });
@@ -516,7 +530,7 @@ static class Program
             psi.CreateNoWindow = true;
             psi.WindowStyle = ProcessWindowStyle.Hidden;
             var p = Process.Start(psi);
-            if (p != null) { AppendLog("[napcat] 已拉起 PID " + p.Id); p.Dispose(); }
+            if (p != null) { AppendLog("[napcat] 已拉起 PID " + PidOf(p)); p.Dispose(); }
         }
         catch (Exception ex) { AppendLog("[napcat] 启动失败：" + ex.Message); }
         HideNapCatWindows();
@@ -531,8 +545,10 @@ static class Program
         {
             try
             {
-                AppendLog("[napcat] 关闭 " + p.ProcessName + " PID " + p.Id);
-                var kill = new ProcessStartInfo("taskkill", "/PID " + p.Id + " /T /F");
+                int np = PidOf(p);
+                AppendLog("[napcat] 关闭 " + NameOf(p) + " PID " + np);
+                if (np <= 0) continue;
+                var kill = new ProcessStartInfo("taskkill", "/PID " + np + " /T /F");
                 kill.UseShellExecute = false;
                 kill.CreateNoWindow = true;
                 Process.Start(kill).WaitForExit(4000);
@@ -595,8 +611,10 @@ static class Program
 
     static void StartBot()
     {
-        if (child != null && !child.HasExited) return;
-        if (!File.Exists(entry)) { MessageBox.Show("找不到 " + entry, AppName); return; }
+        if (AliveProc(child)) return;
+        if (childStartFailed) return;      // 上次就起不来，等用户自己再点「启动」（别每 3 秒弹一次）
+        if (!File.Exists(entry)) { MessageBox.Show("找不到 " + entry, AppName); childStartFailed = true; return; }
+        if (!NodeOk()) return;             // 没装 Node.js 就地讲清楚，别让它去抛 .NET 异常
         // 配置端端口已经在听 = 已经有一个小助手在跑（可能是上一次启动器留下的），不要再起第二个
         int webPort = ReadPort();
         if (PortOpenOn(webPort))
@@ -615,33 +633,38 @@ static class Program
         psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
-        child = new Process();
-        child.StartInfo = psi;
-        child.OutputDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) AppendLog(e.Data); };
-        child.ErrorDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) AppendLog("[err] " + e.Data); };
-        child.EnableRaisingEvents = true;
-        child.Exited += delegate { AppendLog("=== 进程结束 ==="); };
         try
         {
-            child.Start();
-            child.BeginOutputReadLine();
-            child.BeginErrorReadLine();
+            var p = new Process();
+            p.StartInfo = psi;
+            p.OutputDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) AppendLog(e.Data); };
+            p.ErrorDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) AppendLog("[err] " + e.Data); };
+            p.EnableRaisingEvents = true;
+            p.Exited += delegate { AppendLog("=== 进程结束 ==="); };
+            p.Start();
+            child = p;
+            childStartFailed = false;
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
         }
         catch (Exception ex)
         {
             AppendLog("[启动失败] " + ex.Message);
-            MessageBox.Show("启动失败：" + ex.Message, AppName);
             child = null;
+            childStartFailed = true;
+            MessageBox.Show("启动失败：" + ex.Message + "\r\n\r\n日志：" + logFile, AppName);
         }
         Refresh();
     }
 
     static void StopBot()
     {
-        if (child == null || child.HasExited) { Refresh(); return; }
+        if (!AliveProc(child)) { child = null; Refresh(); return; }
         try
         {
-            var kill = new ProcessStartInfo("taskkill", "/PID " + child.Id + " /T /F");
+            int cp = PidOf(child);
+            if (cp <= 0) { child = null; Refresh(); return; }
+            var kill = new ProcessStartInfo("taskkill", "/PID " + cp + " /T /F");
             kill.UseShellExecute = false;
             kill.CreateNoWindow = true;
             Process.Start(kill).WaitForExit(4000);
@@ -653,7 +676,7 @@ static class Program
 
     static void OpenWeb()
     {
-        if (child == null || child.HasExited) StartAll();
+        if (!AliveProc(child)) StartAll();
         Shell("http://127.0.0.1:" + ReadPort());
     }
 
@@ -690,14 +713,14 @@ static class Program
 
     static void Refresh()
     {
-        bool mine = child != null && !child.HasExited;
+        bool mine = AliveProc(child);
         bool alive = mine || PortOpenOn(ReadPort());      // 端口在听 = 有人在跑（哪怕不是本启动器拉起的）
         bool nc = NapCatAlive();
         miStart.Enabled = !alive;
         miStop.Enabled = mine;
         miNapcatStart.Enabled = !nc;
         miNapcatStop.Enabled = nc;
-        miStatus.Text = mine ? ("● 小助手运行中  PID " + child.Id)
+        miStatus.Text = mine ? ("● 小助手运行中  PID " + PidOf(child))
                              : (alive ? "● 小助手运行中（已有一个实例）" : "○ 小助手未运行");
         miNapcat.Text = nc
             ? ("NapCat: 运行中" + (hideWindow ? (napcatVisibleWindows > 0 ? "（还有 " + napcatVisibleWindows + " 个窗口）" : "（已隐藏）") : "（不隐藏）"))
@@ -751,6 +774,71 @@ static class Program
     }
 
     static string Quote(string s) { return "\"" + s + "\""; }
+
+    // 没装 Node.js 是新机器最常见的坑（以前会直接抛 .NET 异常弹一个看不懂的窗）
+    static bool NodeOk()
+    {
+        if (CanRunNode()) return true;
+        AppendLog("[启动失败] 找不到可用的 Node.js（本程序需要 Node 22+）：" + nodeExe);
+        childStartFailed = true;
+        var r = MessageBox.Show(
+            "没找到 Node.js —— 本程序需要 Node.js 22 或更高版本。\r\n\r\n" +
+            "装完（安装时一路默认即可）再点托盘菜单的「启动」。\r\n" +
+            "下载页：https://nodejs.org/zh-cn/download\r\n\r\n" +
+            "要我现在打开下载页吗？", AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (r == DialogResult.Yes) { try { Process.Start("https://nodejs.org/zh-cn/download"); } catch (Exception) { } }
+        return false;
+    }
+
+    static bool CanRunNode()
+    {
+        if (nodeChecked && lastNodeOk) return true;
+        nodeChecked = true; lastNodeOk = false;
+        if (string.IsNullOrEmpty(nodeExe)) return false;
+        try
+        {
+            var psi = new ProcessStartInfo(nodeExe, "--version");
+            psi.UseShellExecute = false; psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+            var p = Process.Start(psi);
+            if (p == null) return false;
+            string v = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(5000);
+            bool ok = v.StartsWith("v") && v.Length >= 2;
+            if (ok)
+            {
+                AppendLog("[node] " + nodeExe + " → " + v);
+                lastNodeOk = true;
+            }
+            try { p.Dispose(); } catch (Exception) { }
+            return ok;
+        }
+        catch (Exception) { return false; }
+    }
+
+    static void ReportCrash(Exception ex)
+    {
+        string msg = ex == null ? "未知错误" : (ex.GetType().Name + "：" + ex.Message);
+        try { AppendLog("[崩溃] " + msg + "\r\n" + (ex == null ? "" : ex.StackTrace)); } catch (Exception) { }
+        try { MessageBox.Show("程序内部出错了（已记进日志）：\r\n" + msg + "\r\n\r\n日志：" + logFile, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); } catch (Exception) { }
+    }
+
+    static void ShowDiag()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("安装目录：" + root);
+        sb.AppendLine("入口文件：" + entry + (File.Exists(entry) ? "（存在）" : "（缺失）"));
+        sb.AppendLine("Node：" + nodeExe + " → " + (CanRunNode() ? "可用" : "不可用"));
+        sb.AppendLine("NapCat 启动器：" + (napcatExe == null ? "没配置/没找到" : napcatExe));
+        sb.AppendLine("端口：OneBot " + onebotPort + " " + PortMark(onebotPort) + "　配置端 " + webuiPort + " " + PortMark(webuiPort));
+        sb.AppendLine("小助手子进程：" + (child == null ? "未启动（本启动器）" : ("PID " + PidOf(child))));
+        sb.AppendLine("日志：" + logFile);
+        sb.AppendLine();
+        sb.AppendLine("（把这段整段发给作者即可定位问题）");
+        try { AppendLog("[诊断] " + sb.ToString().Replace("\r\n", " / ")); } catch (Exception) { }
+        MessageBox.Show(sb.ToString(), AppName + " 诊断信息", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        try { Process.Start("explorer", "/select,\"" + logFile + "\""); } catch (Exception) { }
+    }
 
     static void AppendLog(string line)
     {
