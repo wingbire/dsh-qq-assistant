@@ -337,7 +337,13 @@ export function createWebUi(deps) {
       if (req.method === "GET") {
         if (!gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
         const prof = store.loadProfile(gid);
-        return sendJson(res, 200, { ok: true, gid: String(gid), profile: prof || null, prompt: prof ? buildProfilePrompt(prof) : "" });
+        const st = (prof && prof.interestStats) || {};
+        const watch = (prof && prof.interestWatch) || Object.keys(st).filter(function (k) { return !st[k].stable; }).slice(0, 12);
+        return sendJson(res, 200, {
+          ok: true, gid: String(gid), profile: prof || null,
+          interests: (prof && prof.interests) || [], watch: watch, stats: st, log: (prof && prof.interestLog) || null,
+          prompt: prof ? buildProfilePrompt(prof) : ""
+        });
       }
       if (req.method === "POST") {
         const body = await readBody(req);
@@ -348,6 +354,20 @@ export function createWebUi(deps) {
         const next = Object.assign({}, cur);
         for (const k of ["interests", "dislikes", "habits", "notes", "pace", "activeHours", "personaText"]) {
           if (b[k] !== undefined) next[k] = b[k];
+        }
+        // 管理员手写的常聊话题一律"钉住"：不进观察区、永不按时间淘汰（自动学到的才走生命周期）
+        if (b.interests !== undefined) {
+          const stats = Object.assign({}, next.interestStats || {});
+          const nowMs = Date.now();
+          const d0 = new Date(nowMs).toISOString().slice(0, 10);
+          for (const term of (next.interests || [])) {
+            if (!term) continue;
+            const s = stats[term] || { hits: 0, days: [], firstAt: nowMs, lastAt: nowMs, stable: false };
+            const days = Array.isArray(s.days) ? s.days.slice(-8) : [];
+            if (days.indexOf(d0) < 0) days.push(d0);
+            stats[term] = Object.assign({}, s, { pinned: true, stable: true, lastAt: nowMs, days: days });
+          }
+          next.interestStats = stats;
         }
         next.rounds = Number(cur.rounds) || 0;
         next.updatedAt = new Date().toISOString();

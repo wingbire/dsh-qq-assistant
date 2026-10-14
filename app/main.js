@@ -148,8 +148,16 @@ log("判定阈值：开口线 " + rc.gates.bounds.lo + " / 灰区上界 " + rc.g
   + "（点名·求展开·问句另有「至少中档」的地板）");
 
 const store = createStore(path.join(DATA_ROOT, "data"));
+// 话题词条生命周期（临时起意的会过期，持续稳定的固化）
+const interestRules = {
+  stableHits: Number(getPath(cfg, "profile.interestStableHits")) || 4,
+  stableDays: Number(getPath(cfg, "profile.interestStableDays")) || 2,
+  watchDays: Number(getPath(cfg, "profile.interestWatchDays")) || 3,
+  stableKeepDays: Number(getPath(cfg, "profile.interestStableKeepDays")) || 21,
+  maxInterests: Number(getPath(cfg, "profile.interestMax")) || 8
+};
 const bot = createBot({
-  dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName],
+  dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName], interestRules: interestRules,
   bounds: rc.gates.bounds, tiers: rc.gates.tiers, utilityWeights: rc.gates.weights,  // 判定阈值现在真的生效
   rescueAsk: rc.gates.rescueAsk, blockInjected: rc.gates.blockInjected, audit: rc.audit
 });

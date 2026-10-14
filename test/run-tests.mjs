@@ -220,19 +220,46 @@ t("proactive: 跨群配额独立", function () {
   eq(p.consider({ gid: "B", text: "今晚开黑吗", now: 1001000 }, { action: "ignore" }, { interests: ["开黑"] }).speak, true, "B 配额独立");
 });
 
-t("profile: 小助手自己的名字不被学成兴趣", function () {
+t("profile: 小助手自己的名字不被学成兴趣（新词先进观察区）", function () {
   const prof = refitProfile([
     { gid: "A", outcome: "continued_with_bot", tokens: ["小肥鱼", "报错"] },
     { gid: "A", outcome: "continued_with_bot", tokens: ["小肥鱼"] }
   ], null, { exclude: ["小肥鱼", "肥鱼", "小助手"] });
-  ok(!prof.interests.includes("小肥鱼"), "不应把名字学成兴趣");
-  ok(prof.interests.includes("报错"), "正常词应保留");
+  const learned = prof.interests.concat(prof.interestWatch || []);
+  ok(!learned.includes("小肥鱼"), "不应把名字学成兴趣");
+  ok(learned.includes("报错"), "正常词要被学到");
+  ok((prof.interestWatch || []).includes("报错"), "一次命中先在观察区，不直接固化");
 });
 
 t("profile: 代词助词碎片被过滤", function () {
   const prof = refitProfile([{ gid: "A", outcome: "continued_with_bot", tokens: ["你在吗", "游戏"] }], null, { exclude: [] });
-  eq(prof.interests.includes("游戏"), true);
-  eq(prof.interests.includes("你在吗"), false);
+  const learned = prof.interests.concat(prof.interestWatch || []);
+  eq(learned.includes("游戏"), true);
+  eq(learned.includes("你在吗"), false);
+});
+
+t("profile: 话题词条生命周期（临时的会过期 / 稳定的固化 / 手写的钉住）", function () {
+  const D = 86400000, t0 = Date.parse("2026-10-14T10:00:00Z");
+  let p = { interests: [], dislikes: [], rounds: 0 };
+  const step = function (tokens, at) {
+    p = refitProfile([{ gid: "G", outcome: "continued_with_bot", tokens: tokens }], p, { now: at, exclude: [] });
+    return p;
+  };
+  step(["临时梗"], t0);
+  eq(p.interests.length, 0, "一次命中不固化（不写进提示词）");
+  ok((p.interestWatch || []).includes("临时梗"), "先进观察区");
+  step([], t0 + 4 * D);
+  ok(!(p.interestWatch || []).includes("临时梗"), "4 天没再提 → 按「临时起意」清掉");
+  for (let i = 0; i < 4; i++) step(["长期话题"], t0 + 10 * D + i * D);
+  eq(p.interests.includes("长期话题"), true, "累计 4 次 + 跨 4 天 → 固化");
+  eq(p.interests.filter(function (x) { return x === "长期话题"; }).length, 1);
+  eq(p.interestStats["长期话题"].stable, true);
+  eq(p.interestLog.promoted.includes("长期话题"), true, "日志里看得到固化动作");
+  step([], t0 + 10 * D + 3 * D + 30 * D);
+  eq(p.interests.includes("长期话题"), false, "固化后沉寂过久 → 退出固化");
+  ok((p.interestWatch || []).includes("长期话题"), "降级回观察区（不直接删，防回潮误伤）");
+  const pinned = refitProfile([], { interests: ["手写话题"], interestStats: { "手写话题": { hits: 4, days: ["2026-01-01"], lastAt: t0 - 60 * D, stable: true, pinned: true } } }, { now: t0, exclude: [] });
+  eq(pinned.interests.includes("手写话题"), true, "管理员手写的钉住：不降级也不淘汰");
 });
 
 t("端到端隔离：B 群事件不会写进 A 群档案", function () {
@@ -242,8 +269,9 @@ t("端到端隔离：B 群事件不会写进 A 群档案", function () {
   const r = bot.observe({ gid: "B", uid: "u2", arm: "terse", bucket: "general", outcome: "continued_with_bot", tokens: ["追星"], inTokens: 10, outTokens: 5 });
   ok(r && r.refit, "第 2 次回复应触发重炼");
   const profB = bot.store.loadProfile("B");
-  eq(profB.interests.includes("追星"), true, "B 应学到自己的词");
-  eq(profB.interests.includes("开黑"), false, "B 不应学到 A 的词");
+  const learnedB = profB.interests.concat(profB.interestWatch || []);
+  eq(learnedB.includes("追星"), true, "B 应学到自己的词");
+  eq(learnedB.includes("开黑"), false, "B 不应学到 A 的词");
   eq(bot.store.loadProfile("A"), null, "此时 A 还没有档案，不应被创建");
 });
 

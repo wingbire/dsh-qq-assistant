@@ -62,7 +62,7 @@ export function createBot(opts) {
     if (replies % refN === 0) {
       const gid = fb.gid || "unknown";
       const prev = store.loadProfile(gid);
-      const prof = refitProfile(feedback.filter(function (x) { return String(x.gid) === String(gid); }), prev, { exclude: (o.botNames || []).concat(o.nicknames || []) });
+      const prof = refitProfile(feedback.filter(function (x) { return String(x.gid) === String(gid); }), prev, { exclude: (o.botNames || []).concat(o.nicknames || []), now: Date.now(), rules: o.interestRules || null });
       store.saveProfile(gid, prof);
       const flipRate = auditOutcomes.length ? auditOutcomes.filter(function (x) { return x === 0; }).length / auditOutcomes.length : 0;
       const missedRate = feedback.slice(-refN).filter(function (x) { return x.outcome === "no_one_replied"; }).length / Math.min(refN, Math.max(1, feedback.length));

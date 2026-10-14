@@ -53,6 +53,88 @@ export function buildProfilePrompt(profile) {
   return [buildProfileFactsPrompt(profile), buildProfileInterestsPrompt(profile)].filter(Boolean).join(NL + NL);
 }
 
+// 话题词条的生命周期规则（可按群/全局覆盖）：
+//   临时起意 → 只进「观察区」，3 天没再提就丢；
+//   持续稳定（累计命中 ≥4 次 且 跨 ≥2 天）→ 固化，21 天没再提才降级回观察区。
+// 为什么要它：原来是"旧词永远粘住 + 新词被 slice 挤掉"（只会加、不会删），
+// 于是"是什么 / 给小 / 看史"这种一次性的碎片一直占着名额，长期话题反而挤不进来。
+export const INTEREST_RULES = {
+  stableHits: 4,
+  stableDays: 2,
+  watchDays: 3,
+  stableKeepDays: 21,
+  maxInterests: 8,
+  maxWatch: 12
+};
+
+function dayOf(ts) { return new Date(ts).toISOString().slice(0, 10); }
+const DAY_MS = 86400000;
+
+// 纯函数：喂一批"本轮命中的话题词"，返回新的固化列表 / 观察区 / 统计 / 本轮动作日志
+export function updateInterests(prev, seen, now, opts) {
+  const o = Object.assign({}, INTEREST_RULES, opts || {});
+  const t = now || Date.now();
+  const stats = {};
+  // 旧档案没有 stats：把老 interests 当成"已经固化"，别把历史一把清空
+  const prevStats = (prev && prev.interestStats) || {};
+  // 旧档案（只有 interests 数组、没有 stats）迁移成"已固化"。关键：lastAt 用**上次更新时间**而不是现在，
+  // 否则每次提炼都把 lastAt 刷成当下，沉寂天数永远算不出来 → 老话题永远不会降级/淘汰。
+  const legacyAt = (prev && prev.updatedAt ? Date.parse(prev.updatedAt) : 0) || t;
+  for (const term of (prev && prev.interests) || []) {
+    if (prevStats[term]) continue;                  // 有统计的以统计为准，别动它的 lastAt
+    const byAdmin = prev && prev.updatedBy === "admin";   // 管理员手写过的老档案：钉住，别让生命周期把它清掉
+    stats[term] = { hits: o.stableHits, days: [dayOf(legacyAt)], firstAt: legacyAt, lastAt: legacyAt, stable: true, pinned: byAdmin };
+  }
+  for (const k of Object.keys(prevStats)) {
+    const s = prevStats[k] || {};
+    const keep = stats[k] || { hits: 0, days: [], firstAt: s.firstAt || t };
+    stats[k] = {
+      hits: Math.max(keep.hits || 0, Number(s.hits) || 0),
+      days: (Array.isArray(s.days) && s.days.length ? s.days.slice(-8) : keep.days) || [],
+      firstAt: keep.firstAt || s.firstAt || t,
+      lastAt: Math.max(keep.lastAt || 0, Number(s.lastAt) || 0) || t,
+      stable: !!s.stable || !!keep.stable,
+      pinned: !!s.pinned || !!keep.pinned     // 管理员手写的钉住不动
+    };
+  }
+  const added = [];
+  for (const item of seen || []) {
+    const term = typeof item === "string" ? item : (item && item.term);
+    if (!term) continue;
+    const w = typeof item === "string" ? 1 : Math.max(1, Number(item.hits) || 1);
+    let s = stats[term];
+    if (!s) { s = { hits: 0, days: [], firstAt: t, lastAt: t, stable: false }; added.push(term); }
+    s.hits += w;
+    s.lastAt = t;
+    const d = dayOf(t);
+    if (s.days.indexOf(d) < 0) s.days.push(d);
+    if (s.days.length > 8) s.days = s.days.slice(-8);
+    stats[term] = s;
+  }
+  const promoted = [], demoted = [], dropped = [];
+  for (const term of Object.keys(stats)) {
+    const s = stats[term];
+    if (s.pinned) { s.stable = true; continue; }        // 钉住的：既不降级也不淘汰
+    const idleDays = (t - (Number(s.lastAt) || t)) / DAY_MS;
+    if (!s.stable) {
+      if (s.hits >= o.stableHits && s.days.length >= o.stableDays) { s.stable = true; promoted.push(term); }
+      else if (idleDays > o.watchDays) { delete stats[term]; dropped.push(term); }
+    } else if (idleDays > o.stableKeepDays) {
+      s.stable = false; demoted.push(term);       // 先降级回观察区，不直接删（避免误伤）
+    }
+  }
+  const terms = Object.keys(stats);
+  const stableList = terms.filter(function (x) { return stats[x].stable; })
+    .sort(function (a, b) { return (stats[b].hits - stats[a].hits) || (stats[b].lastAt - stats[a].lastAt); });
+  const watchList = terms.filter(function (x) { return !stats[x].stable; })
+    .sort(function (a, b) { return stats[b].lastAt - stats[a].lastAt; });
+  return {
+    interests: stableList.slice(0, o.maxInterests),
+    watch: watchList.slice(0, o.maxWatch),
+    stats: stats, added: added, promoted: promoted, demoted: demoted, dropped: dropped
+  };
+}
+
 const FLAG_NOISE = ["帮我", "求", "教我", "写个", "给个", "推荐", "麻烦", "顺便", "详细", "解释", "原因", "原理", "文档", "步骤", "教程", "深入", "展开", "具体", "怎么", "为什么", "什么", "吗", "呢", "吧", "啊", "呀", "呢"];
 const STOP = ["这个", "那个", "什么", "怎么", "就是", "然后", "可以", "应该", "还是", "因为", "所以", "你们", "我们"];
 
@@ -78,17 +160,27 @@ export function refitProfile(events, prev, opts) {
       target.set(t, (target.get(t) || 0) + 1);
     }
   }
-  function top(m) {
-    return Array.from(m.entries()).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 10).map(function (x) { return x[0]; });
+  function top(m, n) {
+    return Array.from(m.entries()).sort(function (a, b) { return b[1] - a[1]; }).slice(0, n || 10).map(function (x) { return x[0]; });
   }
-  const interests = Array.from(new Set(base.interests.concat(top(good)))).slice(0, 10);
-  const dislikes = Array.from(new Set(base.dislikes.concat(top(bad)))).slice(0, 8);
+  // 常聊话题走生命周期（临时的会过期、反复出现的固化）；"少碰"沿用原来的并集但一样限量
+  const now = (opts && opts.now) || Date.now();
+  const seen = Array.from(good.entries()).map(function (x) { return { term: x[0], hits: x[1] }; });
+  const li = updateInterests(base, seen, now, (opts && opts.rules) || null);
+  const dislikes = Array.from(new Set((base.dislikes || []).concat(top(bad, 8)))).slice(0, 8);
   return {
-    interests: interests,
+    interests: li.interests,
+    interestWatch: li.watch,                 // 观察区：还没固化，先不给提示词用
+    interestStats: li.stats,                 // 每个词的命中次数 / 跨天 / 是否固化
+    interestLog: {                            // 便于排查："这词为什么不见了"
+      at: now,
+      added: li.added, promoted: li.promoted, demoted: li.demoted, dropped: li.dropped,
+      watch: li.watch.slice(0, 6), stable: li.interests
+    },
     dislikes: dislikes,
     habits: base.habits || "句短、爱接梗、不爱长篇",
     notes: base.notes || "",
     rounds: (base.rounds || 0) + 1,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date(now).toISOString()
   };
 }
