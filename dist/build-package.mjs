@@ -52,11 +52,17 @@ export const FORBIDDEN_PATH = [
   { re: /(^|\/)dsh-data\//, why: "运行期数据" },
   { re: /(^|\/)dsh-home\//, why: "大脑 profile 运行期状态" },
   { re: /(^|\/)\.git\//, why: "版本库" },
-  { re: /node_modules\//, why: "依赖目录" }
+  { re: /node_modules\//, why: "依赖目录" },
+  { re: /(^|\/)_probe\//, why: "本地探针脚本（里面可能有真实群号/uid）" },
+  { re: /(^|\/)logs?\//, why: "运行日志" },
+  { re: /(^|\/)ui-messages\.json$/, why: "配置端消息缓冲（群聊内容）" },
+  { re: /(^|\/)localreplies\.json$/, why: "本地短答历史（群聊内容）" }
 ];
 export const FORBIDDEN_CONTENT = [
   { re: /sk-[A-Za-z0-9]{16,}/, why: "疑似真实 API key" },
-  { re: /DEEPSEEK_API_KEY\s*[:=]\s*["']?[A-Za-z0-9_-]{16,}/, why: "疑似写死的密钥" }
+  { re: /DEEPSEEK_API_KEY\s*[:=]\s*["']?[A-Za-z0-9_-]{16,}/, why: "疑似写死的密钥" },
+  { re: /[A-Za-z]:[\\/]Users[\\/][^\\/\s"']+/, why: "本机绝对路径（含用户名）" },
+  { re: /(^|[\s"'])access_token=[^&\s"']+/, why: "疑似接入 token" }
 ];
 
 const SKIP_DIRS = new Set([".git", "app\\dsh-data", "app\\dsh-home", "node_modules", "dist"]);
