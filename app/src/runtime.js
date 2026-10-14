@@ -253,14 +253,46 @@ export function createRuntime(deps) {
   function stageOf(gid, nowMs) {
     if (rc.observe === true) return { stage: STAGE_OBSERVE, observed: 0, forced: true };   // 强制观察
     if (rc.observe === false) return { stage: STAGE_FULL, observed: 0, forced: true };     // 强制实际发送
-    if (rc.stageMode === "live") return { stage: STAGE_FULL, observed: 0, forced: true };
-    if (rc.stageMode === "observe") return { stage: STAGE_OBSERVE, observed: 0, forced: true };
     const key = String(gid);
     let s = stages.get(key);
+    // 管理员在配置端手动点过「跳过观察期 / 回到观察」→ 以它为准。
+    // 优先级放在强制观察(observe:true)之下、stageMode 之上：手动跳一次不该被全局 stageMode 抵消。
+    if (s && s.skippedStage) return s;
+    if (rc.stageMode === "live") return { stage: STAGE_FULL, observed: 0, forced: true };
+    if (rc.stageMode === "observe") return { stage: STAGE_OBSERVE, observed: 0, forced: true };
     if (!s) { s = { stage: STAGE_OBSERVE, observed: 0, semiUntil: null, since: nowMs }; stages.set(key, s); }
     if (s.stage === STAGE_OBSERVE && s.observed >= OBSERVE_UNTIL_MESSAGES) { s.stage = STAGE_SEMI; s.semiUntil = nowMs + SEMI_AUTO_DAYS * 86400000; s.advancedAt = nowMs; }
     if (s.stage === STAGE_SEMI && s.semiUntil && nowMs >= s.semiUntil) { s.stage = STAGE_FULL; s.advancedAt = nowMs; }
     return s;
+  }
+
+  // 手动设定某个群的阶段（配置端那个小按钮走这里）
+  //   "full" = 跳过观察期直接全自动；"semi" = 跳到半自动；"auto" = 取消手动、交回阶段机
+  function setStage(gid, target) {
+    const key = String(gid);
+    const t = String(target || "").toLowerCase();
+    if (t === "auto") {
+      // 交回阶段机：清掉手动标记，并让 stage 回到"按已观察条数重新判定"的状态
+      const cur = stages.get(key);
+      if (cur) {
+        delete cur.skippedStage;
+        delete cur.skippedAt;
+        cur.stage = cur.observed >= OBSERVE_UNTIL_MESSAGES ? STAGE_SEMI : STAGE_OBSERVE;
+        if (cur.stage === STAGE_SEMI) cur.semiUntil = now() + SEMI_AUTO_DAYS * 86400000;
+      }
+      const s2 = stageOf(key, now());
+      return { gid: key, stage: s2.stage, manual: false };
+    }
+    if (t !== STAGE_OBSERVE && t !== STAGE_SEMI && t !== STAGE_FULL) return { gid: key, error: "阶段只能是 observe / semi / full / auto" };
+    let s = stages.get(key);
+    if (!s) { s = { stage: STAGE_OBSERVE, observed: 0, semiUntil: null, since: now() }; stages.set(key, s); }
+    s.stage = t;
+    s.skippedStage = t;                       // 记住"这是手动跳的"
+    s.skippedAt = now();
+    if (t === STAGE_SEMI) s.semiUntil = now() + SEMI_AUTO_DAYS * 86400000;
+    if (t === STAGE_FULL) s.semiUntil = null;
+    observe({ kind: "stage_manual", gid: key, stage: t });
+    return { gid: key, stage: t, manual: true };
   }
 
   function rememberMembers(batch) {
@@ -567,6 +599,7 @@ export function createRuntime(deps) {
     members: function (gid) { const m = members.get(String(gid)); return m ? Object.fromEntries(m) : {}; },
     history: function (gid) { return (history.get(String(gid)) || []).slice(); },
     stage: function (gid) { return Object.assign({}, stageOf(gid, now())); },
+    setStage: setStage,
     tracker: tracker, labels: labels,
     groups: function () { return Array.from(perGroup.values()).sort(function (a, b) { return b.lastAt - a.lastAt; }); },
     groupStats: function (gid) { return Object.assign({}, gstat(gid)); },

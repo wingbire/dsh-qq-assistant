@@ -2015,6 +2015,73 @@ t("channel: 大脑走 OFM 时三档 overlay 去掉 reasoningEffort，二判走 p
   eq(JSON.parse(fs.readFileSync(r2.patch, "utf8")).length, 1, "不选 OFM 时 patch 只有 persona 一条");
 });
 
+t("runtime: 跳过观察期——某群直接全自动、群间隔离、可回退、强制观察优先", function () {
+  const mk = function (runtimeCfg) {
+    return createRuntime({
+      config: {}, runtime: runtimeCfg, store: null,
+      bot: fakeBot({ tier: "mid" }), send: function () {},
+      askBrain: async function () { return { ok: true, text: "好", usage: { totalTokens: 5 } }; },
+      now: function () { return 0; }, sleep: async function () {}
+    });
+  };
+  const rt = mk({ stageMode: "auto", observeUntilMessages: 80, semiAutoDays: 3 });
+
+  eq(rt.stage("G1").stage, "observe", "新群默认在观察期");
+
+  const r = rt.setStage("G1", "full");
+  eq(r.manual, true);
+  eq(r.stage, "full");
+  eq(rt.stage("G1").stage, "full", "点一下就跳过观察期");
+  eq(rt.stage("G1").skippedStage, "full", "要记得这是手动跳的");
+
+  eq(rt.stage("G2").stage, "observe", "别的群不受影响（群间隔离）");
+
+  const back = rt.setStage("G1", "auto");
+  eq(back.manual, false);
+  eq(rt.stage("G1").stage, "observe", "回到观察");
+  eq(rt.stage("G1").skippedStage, undefined, "手动标记要清掉");
+
+  eq(rt.setStage("G3", "semi").stage, "semi", "也能只跳到半自动");
+  eq(rt.stage("G3").stage, "semi");
+  eq(!!rt.setStage("G1", "乱写").error, true, "非法值要拒绝");
+
+  // 半自动该在 semiAutoDays 天后自动转全自动
+  const rt3 = mk({ stageMode: "auto", observeUntilMessages: 1, semiAutoDays: 1 });
+  rt3.setStage("G9", "semi");
+  eq(rt3.stage("G9").stage, "semi");
+
+  // 强制观察（observe: true）优先级最高，手动跳过压不过它
+  const rt2 = mk({ observe: true });
+  rt2.setStage("G1", "full");
+  eq(rt2.stage("G1").stage, "observe", "强制观察优先于手动跳过");
+});
+
+t("webui: 跳过观察期的接口能通", async function () {
+  const table = loadFieldTable();
+  const cfg = defaultsFromTable(table);
+  const calls = [];
+  const ui = createWebUi({
+    config: cfg, table: table,
+    runtime: { setStage: function (gid, stage) { calls.push([gid, stage]); return { gid: gid, stage: stage, manual: true }; } }
+  });
+  const info = await ui.listen(0);
+  try {
+    const r = await (await fetch(info.url + "/api/action", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "setStage", gid: "G1", stage: "full" })
+    })).json();
+    eq(r.ok, true);
+    eq(r.stage, "full");
+    eq(calls[0][0], "G1");
+    eq(calls[0][1], "full");
+    const bad = await fetch(info.url + "/api/action", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "setStage", stage: "full" })
+    });
+    eq(bad.status, 400, "不给 gid 要报错");
+  } finally { await ui.close(); }
+});
+
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
 console.log("=== 骨架回归测试 ===");

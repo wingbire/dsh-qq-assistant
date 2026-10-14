@@ -230,18 +230,22 @@
       return '<option value="' + esc(g.group_id) + '"' + (String(S.gid) === String(g.group_id) ? " selected" : "") + '>' + esc(name) + '</option>';
     }).join("");
     var enabled = S.gid ? (st.brakes && !(st.brakes.groups && st.brakes.groups[String(S.gid)]) && !st.brakes.stopFile && !st.brakes.configPaused) : null;
+    var stageNow = (st.stage && st.stage.stage) || "";
 
     var bar = '<div class="card"><div class="head"><span>控制台</span>' +
       '<span class="muted" style="font-size:12px">' + esc(ob.state === "open" ? "OneBot 已连接" : "OneBot " + (ob.state || "未知")) + '</span></div><div class="body">' +
       '<div class="ctl-row">' +
       '<button class="btn-sm" id="btn-refresh">刷新</button>' +
+      (S.gid ? (stageNow === "observe"
+        ? '<button class="btn-sm good" id="btn-skip-observe" title="不再等 80 条，本群直接进全自动">跳过观察期</button>'
+        : '<button class="btn-sm" id="btn-back-observe" title="交回阶段机，重新按观察期来">回到观察</button>') : "") +
       '<button class="btn-sm good" id="btn-enable"' + (S.gid ? "" : " disabled") + '>启用本群</button>' +
       '<button class="btn-sm bad" id="btn-disable"' + (S.gid ? "" : " disabled") + '>停用本群</button>' +
       '<button class="btn-sm bad" id="btn-global-stop">全局停用</button>' +
       '<button class="btn-sm good" id="btn-global-resume">恢复全局</button>' +
       '<button class="btn-sm" id="btn-napcat">NapCat 配置</button>' +
       '</div>' +
-      (S.gid ? '<div class="hint" style="margin-top:8px">本群当前：<b>' + (enabled ? "服务中" : "已停用") + '</b>　开口阶段：<b>' + esc(stageText(st.stage)) + '</b></div>' : '<div class="hint" style="margin-top:8px">当前显示<b>全部群</b>的汇总；选一个群可以单独看它的消息与判定过程</div>') +
+      (S.gid ? '<div class="hint" style="margin-top:8px">本群当前：<b>' + (enabled ? "服务中" : "已停用") + '</b>　开口阶段：<b>' + esc(stageText(st.stage)) + '</b>' + (st.stage && st.stage.skippedStage ? '　<span style="color:var(--warn)">（管理员手动跳过，点「回到观察」可恢复）</span>' : '') + '</div>' : '<div class="hint" style="margin-top:8px">当前显示<b>全部群</b>的汇总；选一个群可以单独看它的消息与判定过程</div>') +
       '</div></div>';
 
     // 成本卡片（预算卡片带调节杆）
@@ -642,6 +646,20 @@
       if (e.target.closest("#btn-refresh")) { loadGroups().then(refreshTop).then(function () { render(); }); toast("已刷新"); return; }
       if (e.target.closest("#btn-enable")) { if (!S.gid) return toast("先选一个群", true); return doAction({ action: "groupEnable", gid: S.gid }, "本群已启用"); }
       if (e.target.closest("#btn-disable")) { if (!S.gid) return toast("先选一个群", true); return doAction({ action: "groupDisable", gid: S.gid }, "本群已停用"); }
+      if (e.target.closest("#btn-skip-observe")) {
+        if (!S.gid) return toast("先选一个群", true);
+        return api("/api/action", { action: "setStage", gid: S.gid, stage: "full" }).then(function (r) {
+          toast(r.ok ? "已跳过观察期 —— 本群直接进全自动" : ("失败：" + (r.error || "")), !r.ok);
+          return refreshTop().then(render);
+        });
+      }
+      if (e.target.closest("#btn-back-observe")) {
+        if (!S.gid) return toast("先选一个群", true);
+        return api("/api/action", { action: "setStage", gid: S.gid, stage: "auto" }).then(function (r) {
+          toast(r.ok ? "已交回阶段机（重新从观察期算起）" : ("失败：" + (r.error || "")), !r.ok);
+          return refreshTop().then(render);
+        });
+      }
       if (e.target.closest("#btn-global-stop")) return doAction({ action: "globalStop" }, "已全局停用（配置里 paused=true）");
       if (e.target.closest("#btn-global-resume")) return doAction({ action: "globalResume" }, "已恢复");
       if (e.target.closest("#btn-budget")) {
@@ -819,6 +837,11 @@
       document.documentElement.setAttribute("data-theme", saved === "dark" ? "dark" : "light");
       var g = localStorage.getItem("dshqq-gid");
       if (g) S.gid = g;
+      // ?gid=100000001 可以直接落到某个群（分享链接 / 截图用）
+      try {
+        var qg = new URLSearchParams(location.search).get("gid");
+        if (qg) S.gid = qg;
+      } catch (err) {}
       // 支持 #状态 这种深链（分享某一页用）
       var h = String(location.hash || "").replace(/^#\/?/, "");
       if (h && PAGES.some(function (p) { return p.id === h; })) S.page = h;

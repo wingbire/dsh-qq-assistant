@@ -226,6 +226,12 @@ export function createWebUi(deps) {
         if (configFile) { try { saveConfig(cfg, configFile); } catch (e) {} }
         return sendJson(res, 200, { ok: true, action: act, paused: v });
       }
+      if (act === "setStage") {
+        if (!runtime || !runtime.setStage) return sendJson(res, 500, { ok: false, error: "没有运行中的实例" });
+        if (!b.gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+        const r = runtime.setStage(b.gid, b.stage);
+        return sendJson(res, 200, Object.assign({ ok: !r.error, action: act }, r));
+      }
       if (act === "reconnect") {
         if (!reconnectFn) return sendJson(res, 500, { ok: false, error: "没有接重连服务" });
         const r = await reconnectFn();
