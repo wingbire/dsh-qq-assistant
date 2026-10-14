@@ -133,6 +133,11 @@ log("人设：" + persona.botName + " / " + persona.age);
 log("接入：" + rc.onebot.wsUrl + (rc.onebot.token ? "（已带令牌）" : "（无令牌）") + (napcatBoot.aligned ? " · 与 NapCat 一致" : ""));
 log("预算：日 " + rc.budget.dailyTokens + " token，超 " + (rc.budget.softRatio * 100) + "% 关主动");
 log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / 8s 超时 → 不确定");
+// 判定阈值直接打出来：配置端「调整」页改了到底有没有吃进去，看这一行就知道
+log("判定阈值：开口线 " + rc.gates.bounds.lo + " / 灰区上界 " + rc.gates.bounds.hi
+  + " / 三档线 " + rc.gates.tiers.speakAt + "·" + rc.gates.tiers.terseAt + "·" + rc.gates.tiers.detailedAt
+  + " / 成本权重 λ " + rc.gates.weights.lambda
+  + "（点名·求展开·问句另有「至少中档」的地板）");
 
 const store = createStore(path.join(DATA_ROOT, "data"));
 const bot = createBot({
