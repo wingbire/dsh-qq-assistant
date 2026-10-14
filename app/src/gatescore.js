@@ -16,12 +16,19 @@ export function valve(pSay, bounds) {
   return { verdict: "grey", bounds: b };
 }
 
+// 三条线各管一段：< speakAt 只配短句；[speakAt, terseAt) 也是低档（同一档，只是解释不同）；
+// >= terseAt 才进中档 = 走大脑；>= detailedAt 高深度。
+// 注意顺序：terseAt 一旦小于 speakAt，第二条分支永远走不到 —— UI 上就会写着一个假的"进中档线"。
+// 所以这里先把两个数顺序纠正过来，保证"常规线"就是真正的进中档线。
 export function depthTier(U, tiers) {
-  const t = Object.assign({}, { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 }, tiers || {});
-  if (U < t.speakAt) return { tier: "low", maxChars: 20, reason: "U < 开口线" };
-  if (U < t.terseAt) return { tier: "low", maxChars: 20, reason: "U < 常规线" };
-  if (U < t.detailedAt) return { tier: "mid", maxChars: 60, reason: "U < 多讲线" };
-  return { tier: "high", maxChars: 200, reason: "U >= 多讲线" };
+  const t = Object.assign({}, { speakAt: 0.15, terseAt: 0.20, detailedAt: 0.65 }, tiers || {});
+  if (t.terseAt < t.speakAt) t.terseAt = t.speakAt;
+  // 三档字数：配置给了就用配置的（和 brain.depthPolicy 用同一份，免得流水里记的和实际约束不一致）
+  const mc = (Array.isArray(t.maxChars) && t.maxChars.length >= 3) ? t.maxChars : [20, 60, 200];
+  if (U < t.speakAt) return { tier: "low", maxChars: mc[0], reason: "U < 开口线" };
+  if (U < t.terseAt) return { tier: "low", maxChars: mc[0], reason: "U < 常规线" };
+  if (U < t.detailedAt) return { tier: "mid", maxChars: mc[1], reason: "U < 多讲线" };
+  return { tier: "high", maxChars: mc[2], reason: "U >= 多讲线" };
 }
 
 export function searchPlan(tier, keywords) {

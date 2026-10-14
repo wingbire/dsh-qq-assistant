@@ -493,7 +493,11 @@ export function createRuntime(deps) {
       text = localReply(dec, { rng: rng, text: evt.text });
     } else if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
-      const policy = depthPolicy(dec.tier, { contextWindow: rc.contextWindow });
+      const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [20, 60, 200];
+      const policy = depthPolicy(dec.tier, {
+        contextWindow: rc.contextWindow,
+        depthPolicy: { low: { maxChars: dc[0] }, mid: { maxChars: dc[1] }, high: { maxChars: dc[2] } }   // 配置里的"三档字数"真的生效
+      });
       let taskText = buildTaskText(dec.tier, policy, dec.keywords);
       // N12：需要搜索时先搜一次，把摘要作为消息体注入（不进系统提示词，前缀缓存不受影响）
       if (dec.search > 0 && searchSvc) {

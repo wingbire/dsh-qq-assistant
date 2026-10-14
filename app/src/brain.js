@@ -117,9 +117,11 @@ export const DEPTH_POLICY_DEFAULT = {
 };
 
 export function depthPolicy(depth, cfg) {
-  const p = Object.assign({}, DEPTH_POLICY_DEFAULT, (cfg && cfg.depthPolicy) || {});
-  const one = p[depth] || p.mid;
-  const cw = (cfg && cfg.contextWindow != null) ? cfg.contextWindow : one.contextWindow;
+  const c = cfg || {};
+  // 按档位深合并：配置只想改某一档的 maxChars 时，不能把那一档的 model/effort/search 冲掉
+  const over = (c.depthPolicy || {})[depth] || {};
+  const one = Object.assign({}, DEPTH_POLICY_DEFAULT[depth] || DEPTH_POLICY_DEFAULT.mid, over);
+  const cw = c.contextWindow != null ? c.contextWindow : one.contextWindow;
   return Object.assign({}, one, { contextWindow: cw });
 }
 

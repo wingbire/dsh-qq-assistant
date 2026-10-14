@@ -101,6 +101,16 @@ export function mergeConfigSafe(cur, patch, table) {
 
 function numOf(v, d) { const n = Number(v); return isFinite(n) ? n : d; }
 
+// 三档字数上限 [短评, 总结, 详细]：gates.depthChars 一处配置，判定流水与大脑提示词共用
+export function depthCharsOf(cfg) {
+  const v = getPath(cfg || {}, "gates.depthChars");
+  if (Array.isArray(v) && v.length >= 3) {
+    const a = v.slice(0, 3).map(function (x) { return numOf(x, 0); });
+    if (a.every(function (n) { return n > 0; })) return a;
+  }
+  return [20, 60, 200];
+}
+
 // 判定阈值（开口线/三档线/灰区/六因子权重）。
 // 以前这几项只写在字段表里、**没有任何代码读它们** —— 配置端改了没反应，等于摆设。
 export function gatesFromConfig(cfg) {
@@ -112,9 +122,10 @@ export function gatesFromConfig(cfg) {
   return {
     bounds: { lo: numOf(getPath(c, "gates.greyLo"), 0.40), hi: numOf(getPath(c, "gates.greyHi"), 0.75) },
     tiers: {
-      speakAt: numOf(getPath(c, "gates.utilitySpeakAt"), 0.20),
-      terseAt: numOf(getPath(c, "gates.utilityTerseAt"), 0.15),
-      detailedAt: numOf(getPath(c, "gates.utilityDetailedAt"), 0.65)
+      speakAt: numOf(getPath(c, "gates.utilitySpeakAt"), 0.15),
+      terseAt: numOf(getPath(c, "gates.utilityTerseAt"), 0.20),
+      detailedAt: numOf(getPath(c, "gates.utilityDetailedAt"), 0.65),
+      maxChars: depthCharsOf(c)
     },
     weights: Object.assign({ lambda: numOf(getPath(c, "gates.utilityLambda"), 0.5) }, weights || {})
   };

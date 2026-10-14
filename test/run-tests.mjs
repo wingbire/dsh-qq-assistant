@@ -2,12 +2,13 @@ import { classify, CLASSIFY_TABLE, extractKeywords } from "../app/src/classify.j
 import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { createGates } from "../app/src/gates.js";
+import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL } from "../app/src/localreply.js";
 import { engagementOf, reward, costOf } from "../app/src/score.js";
 import { createProactive } from "../app/src/proactive.js";
 import { createStore } from "../app/src/store.js";
 import { createAddressee } from "../app/src/addressee.js";
-import { parseEvents, buildArgs, brainEnv, cacheHitRate, PROFILE_DEFAULT, DEPTH_POLICY_DEFAULT, ensureBrainProfile } from "../app/src/brain.js";
+import { parseEvents, buildArgs, brainEnv, cacheHitRate, depthPolicy, PROFILE_DEFAULT, DEPTH_POLICY_DEFAULT, ensureBrainProfile } from "../app/src/brain.js";
 import { maskKey, parseRefsApiKey, pickApiKey, loadSecrets, saveSecrets } from "../app/src/secrets.js";
 import { buildPersonaText, renderProfilePatch, writeProfilePatch, writeTierOverlay, renderTierOverlay, writeAllTierOverlays, TIER_EFFORT, DEFAULT_PERSONA, PROFILE_ID } from "../app/src/dshprofile.js";
 import { DATA_ROOT, DSH_HOME, APP_ROOT, BRAIN_TMP_DIR } from "../app/src/paths.js";
@@ -559,7 +560,7 @@ t("config: 字段表默认值可展开，secret 回前端被遮蔽", function ()
   const table = loadFieldTable();
   const cfg = defaultsFromTable(table);
   eq(getPath(cfg, "napcat.wsUrl"), "ws://127.0.0.1:3001");
-  eq(getPath(cfg, "gates.utilitySpeakAt"), 0.2);
+  eq(getPath(cfg, "gates.utilitySpeakAt"), 0.15);
   eq(getPath(cfg, "gates.utilityDetailedAt"), 0.65, "N19：以前端实取的三档线为准");
   const red = redactConfig(setPath(JSON.parse(JSON.stringify(cfg)), "napcat.token", "sekrit"), table);
   eq(getPath(red, "napcat.token"), "<已配置>");
@@ -2079,6 +2080,31 @@ t("gates: 被点名 / 要求展开不许被成本压成「本地短句」", asyn
   eq(plain.action !== "brain", true, "没人搭理你的闲聊，别自己花钱开口");
 });
 
+t("gatescore: 两条分档线的顺序不会打架（常规线必须是真正的进中档线）", function () {
+  // 参数写反了（terseAt < speakAt）也不能出现"常规线永远走不到"的假旋钮
+  eq(depthTier(0.10, { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 }).tier, "low");
+  eq(depthTier(0.30, { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 }).tier, "mid", "中档线按较大的那条算，不是按 0.15");
+  eq(depthTier(0.30, TIERS).tier, "mid", "默认参数：0.30 >= 常规线 0.20");
+  eq(depthTier(0.15, TIERS).tier, "low", "0.15 还没到 0.20，只配短句");
+  eq(depthTier(0.20, TIERS).tier, "mid", "到线就进中档");
+  eq(depthTier(0.70, TIERS).tier, "high");
+  ok(TIERS.terseAt >= TIERS.speakAt, "默认值本身也要满足 terseAt >= speakAt");
+});
+
+t("config: 三档字数（depthChars）真的会进提示词（原来硬编码 20/60/200）", function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), { gates: { depthChars: [10, 30, 90] } });
+  const rc2 = runtimeConfig(cfg);
+  eq(rc2.gates.tiers.maxChars, [10, 30, 90], "分档时用配置的字数");
+  eq(depthTier(0.5, rc2.gates.tiers).maxChars, 30, "流水里记的中档字数也跟着走");
+  eq(depthTier(0.9, rc2.gates.tiers).maxChars, 90);
+  const pol = depthPolicy("mid", { contextWindow: 10, depthPolicy: { low: { maxChars: 10 }, mid: { maxChars: 30 }, high: { maxChars: 90 } } });
+  eq(pol.maxChars, 30, "大脑提示词里的字数上限也跟着走");
+  eq(pol.callBrain, true, "按档深合并：不能把中档的 callBrain/search 冲掉");
+  eq(pol.search, 1);
+  eq(depthPolicy("mid", { contextWindow: 10 }).maxChars, 60, "没配就用默认");
+});
+
 t("localreply: 被点名和打招呼不再回「啥事」", function () {
   const zero = function () { return 0; };
   eq(localReply({ bucket: "general", hardStrength: 1, hardHits: ["at"] }, { rng: zero, text: "打个招呼" }), GREET_POOL[0], "打招呼 → 寒暄池");
@@ -2093,7 +2119,9 @@ t("localreply: 被点名和打招呼不再回「啥事」", function () {
 t("config: 调整页的开口线 / 三档线真的会进判定（原来没人读）", function () {
   const table = loadFieldTable();
   const def = runtimeConfig(defaultsFromTable(table));
-  eq(def.gates.tiers.terseAt, 0.15, "常规线默认改成 0.15 了");
+  eq(def.gates.tiers.terseAt, 0.2, "常规线（进中档）默认 0.20");
+  eq(def.gates.tiers.speakAt, 0.15, "下限 0.15：低于它只配短句");
+  ok(def.gates.tiers.terseAt >= def.gates.tiers.speakAt, "两条线不能打架");
   eq(def.gates.bounds.lo, 0.4);
   eq(def.gates.weights.w1, 0.4);
   eq(def.gates.weights.lambda, 0.5);

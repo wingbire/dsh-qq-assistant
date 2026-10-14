@@ -8,7 +8,9 @@ export const TOPIC_DEPTH_K = 0.10;
 // terseAt = "进中档（走大脑）"的线。定 0.15 而不是 0.35：U 里含成本惩罚，
 // 实测一句普通的"打个招呼" U 只有 0.27、一句"展开说说"甚至 -238 —— 0.35 那条线等于
 // 把绝大部分正常发言都压在"本地短句"档。
-export const TIERS = { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 };
+// speakAt：低于它只配本地短句；terseAt：到它才进中档（走大脑）。
+// terseAt 必须 >= speakAt，否则"常规线"分支走不到（见 depthTier 里的顺序纠正）。
+export const TIERS = { speakAt: 0.15, terseAt: 0.20, detailedAt: 0.65 };
 
 export function clamp01(x) {
   if (!isFinite(x)) return 0;
