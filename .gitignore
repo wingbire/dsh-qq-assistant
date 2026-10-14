@@ -19,6 +19,9 @@ desktop.ini
 # === 分发版产物不进库：只留打包脚本，zip 由使用者自己打 ===
 dist/DSHQQ-Assistant-*/
 dist/*.zip
+# === 本地交接文档：不进版本库（里面可能有账号/环境信息）===
+交接-本地.md
+
 # === 社区插件一键安装产生的内容：不进版本库，点配置端的按钮即可重建 ===
 vendor/
 app/dsh-home/skills/
