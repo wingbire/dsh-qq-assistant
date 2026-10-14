@@ -29,6 +29,9 @@ export function createStore(root, limits) {
     weights: path.join(dataDir, "addressee-weights.json"),
     bandit: path.join(dataDir, "bandit-state.json"),
     cache: path.join(dataDir, "reply-cache.json"),
+    stages: path.join(dataDir, "stages.json"),        // 分群阶段（含"手动跳过观察期"）—— 要活过重启
+    budget: path.join(dataDir, "budget.json"),        // 今日已用 token —— 不落盘的话日熔断重启即失效
+    brakes: path.join(dataDir, "brakes.json"),        // 按群暂停（含配置端"关掉本群"）—— 重启后还得停着
     schema: path.join(dataDir, "schema.json"),
     observe: path.join(dataDir, "observation.jsonl"),
     brain: brainDir
@@ -128,6 +131,10 @@ export function createStore(root, limits) {
     saveProfile: function (gid, prof) { return writeJson(path.join(paths.profiles, "g-" + String(gid) + ".json"), prof); },
     loadBandit: function () { return readJson(paths.bandit, null); },
     saveBandit: function (s) { return writeJson(paths.bandit, s); },
+    loadStages: function () { return readJson(paths.stages, null); },
+    saveStages: function (s) { return writeJson(paths.stages, s); },
+    loadBrakes: function () { return readJson(paths.brakes, null); },
+    saveBrakes: function (s) { return writeJson(paths.brakes, s); },
     addLabel: function (rec) { return appendJsonl(paths.labels, Object.assign({ at: new Date().toISOString() }, rec), { maxLines: 2000 }); },
     addObservation: function (rec) { return appendJsonl(paths.observe, Object.assign({ at: new Date().toISOString() }, rec)); },
     pruneProfiles: pruneProfiles, pruneBrainTemp: pruneBrainTemp, writeSchema: writeSchema

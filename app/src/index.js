@@ -50,6 +50,7 @@ export function createBot(opts) {
       const r = reward(rec, score, costScaleOf(feedback, 900));
       bandit.update(rec.bucket, rec.arm, r, rec.gid);
       rec.reward = Math.round(r * 1000) / 1000;
+      scheduleSave();                       // 学到的 arm 权重也要活过重启（托盘是强杀，SIGINT 那条路不会走）
     }
     store.appendJsonl(store.paths.feedback, rec);
     replies += 1;
@@ -70,7 +71,15 @@ export function createBot(opts) {
   }
 
   function saveState() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     store.saveBandit({ state: bandit.state(), at: new Date().toISOString() });
+  }
+
+  let saveTimer = null;
+  function scheduleSave() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(function () { saveTimer = null; saveState(); }, 2000);
+    if (saveTimer.unref) saveTimer.unref();
   }
 
   function considerProactive(evt, decision, ctx) {

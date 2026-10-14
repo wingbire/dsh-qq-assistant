@@ -29,6 +29,10 @@ export function createBudget(opts) {
   let used = 0;
   const groupCounters = new Map();
   let hardStops = 0;
+  // 今日用量必须活过重启：托盘是 taskkill /F 收尾，SIGINT 那套"退出时才存"根本不会执行，
+  // 结果日预算（超 80% 关主动 / 超 100% 只回点名）每次重启都从头开始 —— 等于没有熔断。
+  const file = o.file || null;
+  let saveTimer = null;
 
   function roll(nowMs) {
     const k = dayKeyOf(nowMs);
@@ -38,7 +42,19 @@ export function createBudget(opts) {
   function record(tokens, nowMs) {
     roll(nowMs == null ? nowFn() : nowMs);
     used += Math.max(0, Number(tokens) || 0);
+    scheduleSave();
     return used;
+  }
+
+  function scheduleSave() {
+    if (!file || saveTimer) return;
+    saveTimer = setTimeout(function () { saveTimer = null; save(file); }, 1500);
+    if (saveTimer.unref) saveTimer.unref();
+  }
+
+  function flush(nowMs) {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    return save(file, nowMs);
   }
 
   function ratio() { roll(nowFn()); return lim.dailyTokens > 0 ? used / lim.dailyTokens : 0; }
@@ -100,10 +116,12 @@ export function createBudget(opts) {
     return { day: day, used: used, limit: lim.dailyTokens, ratio: Math.round(ratio() * 1000) / 1000, mode: mode(), hardStops: hardStops };
   }
 
+  if (file) load(file);                   // 起来先把今天的用量接上
+
   return {
     limits: lim, record: record, ratio: ratio, mode: mode,
     allowProactive: allowProactive, allowReply: allowReply,
     groupAllow: groupAllow, countGroup: countGroup,
-    status: status, load: load, save: save
+    status: status, load: load, save: save, flush: flush, file: file
   };
 }

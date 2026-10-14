@@ -50,6 +50,36 @@ export function createRuntime(deps) {
   const history = new Map();                    // gid -> [{ speaker, text, at }]  最多 contextWindow 条
   // N9（修订）：观察只在新群初期，攒满 observeUntilMessages 条后进半自动，semiAutoDays 天后全自动
   const stages = new Map();                     // gid -> { stage, observed, semiUntil, since }
+  // N9 补丁：分群阶段（尤其是"手动跳过观察期"）必须**活过重启**。
+  // 之前这份状态只活在内存 Map 里：用户点了「跳过观察期」，程序一重启就回到观察期，
+  // 看起来像"按钮没用"—— 其实是被重启复位了。观察计数同理（否则永远攒不够 80 条）。
+  const stageFile = d.stageFile || (store && store.paths ? store.paths.stages : null);
+  function loadStages() {
+    if (!stageFile) return;
+    let raw = null;
+    try { raw = JSON.parse(fs.readFileSync(stageFile, "utf8")); } catch (e) { return; }
+    for (const k of Object.keys(raw || {})) {
+      const v = raw[k];
+      if (v && typeof v === "object") stages.set(String(k), v);
+    }
+  }
+  let stageSaveTimer = null;
+  function saveStages(immediate) {
+    if (!stageFile) return;
+    if (!immediate) {                                  // 普通路径攒一下再写，别每条消息都落盘
+      if (stageSaveTimer) return;
+      stageSaveTimer = setTimeout(function () { stageSaveTimer = null; saveStages(true); }, 1000);
+      if (stageSaveTimer.unref) stageSaveTimer.unref();
+      return;
+    }
+    try {
+      const out = {};
+      for (const [k, v] of stages.entries()) out[k] = v;
+      fs.mkdirSync(path.dirname(stageFile), { recursive: true });
+      fs.writeFileSync(stageFile, JSON.stringify(out, null, 1), "utf8");
+    } catch (e) {}
+  }
+  loadStages();
   // 配置端「状态」页要用的：分群计数 + 最近收到的消息（内存环形缓冲，重启即空；
   // 需要跨重启看判定过程时配置端会回落到 observation.jsonl）
   const perGroup = new Map();                   // gid -> { messages, replies, tokens, brainCalls, searches, memes, voice, lastAt }
@@ -58,8 +88,8 @@ export function createRuntime(deps) {
   const tracker = d.tracker || createTracker({ windowMs: rc.feedbackWindowMs != null ? rc.feedbackWindowMs : 90000 });
   const labels = d.labels || (store ? createLabelQueue({ store: store, minSamples: rc.labelMinSamples || 30 }) : null);
   const coalescer = createCoalescer({ windowMs: rc.coalesceWindowMs, maxBatch: rc.coalesceMaxBatch });
-  const budget = d.budget || createBudget({ limits: rc.budget, now: now });
-  const brakes = d.brakes || createBrakes({ config: cfg, now: now });
+  const budget = d.budget || createBudget({ limits: rc.budget, now: now, file: d.budgetFile || (store && store.paths ? store.paths.budget : null) });
+  const brakes = d.brakes || createBrakes({ config: cfg, now: now, file: d.brakesFile || (store && store.paths ? store.paths.brakes : null) });
   // 指令注册表要拿到真的 brakes / budget，所以必须在这两行之后建
   const commands = d.commands || createDefaultCommands({ brakes: brakes, budget: budget, now: now, stopMinutes: rc.stopMinutes || 60 });
   // N18：/说 用来试 TTS（指令清单整体留空，所以这条也走注册表加）
@@ -261,8 +291,8 @@ export function createRuntime(deps) {
     if (rc.stageMode === "live") return { stage: STAGE_FULL, observed: 0, forced: true };
     if (rc.stageMode === "observe") return { stage: STAGE_OBSERVE, observed: 0, forced: true };
     if (!s) { s = { stage: STAGE_OBSERVE, observed: 0, semiUntil: null, since: nowMs }; stages.set(key, s); }
-    if (s.stage === STAGE_OBSERVE && s.observed >= OBSERVE_UNTIL_MESSAGES) { s.stage = STAGE_SEMI; s.semiUntil = nowMs + SEMI_AUTO_DAYS * 86400000; s.advancedAt = nowMs; }
-    if (s.stage === STAGE_SEMI && s.semiUntil && nowMs >= s.semiUntil) { s.stage = STAGE_FULL; s.advancedAt = nowMs; }
+    if (s.stage === STAGE_OBSERVE && s.observed >= OBSERVE_UNTIL_MESSAGES) { s.stage = STAGE_SEMI; s.semiUntil = nowMs + SEMI_AUTO_DAYS * 86400000; s.advancedAt = nowMs; saveStages(); }
+    if (s.stage === STAGE_SEMI && s.semiUntil && nowMs >= s.semiUntil) { s.stage = STAGE_FULL; s.advancedAt = nowMs; saveStages(); }
     return s;
   }
 
@@ -280,6 +310,7 @@ export function createRuntime(deps) {
         cur.stage = cur.observed >= OBSERVE_UNTIL_MESSAGES ? STAGE_SEMI : STAGE_OBSERVE;
         if (cur.stage === STAGE_SEMI) cur.semiUntil = now() + SEMI_AUTO_DAYS * 86400000;
       }
+      saveStages(true);
       const s2 = stageOf(key, now());
       return { gid: key, stage: s2.stage, manual: false };
     }
@@ -292,6 +323,7 @@ export function createRuntime(deps) {
     if (t === STAGE_SEMI) s.semiUntil = now() + SEMI_AUTO_DAYS * 86400000;
     if (t === STAGE_FULL) s.semiUntil = null;
     observe({ kind: "stage_manual", gid: key, stage: t });
+    saveStages(true);                                        // 手动改的立刻落盘：下一秒重启也不能丢
     return { gid: key, stage: t, manual: true };
   }
 
@@ -420,6 +452,7 @@ export function createRuntime(deps) {
     pushHistory(batch);                     // N8：无论观察还是发送，窗口都要推进
     const stageState = stageOf(batch.gid, at);
     stageState.observed += batch.count;
+    saveStages();                                             // 观察计数也要活过重启，否则永远攒不满 80 条
     // N21：观察期把所有判定（**含判否的**）都记成待标注样本。
     // 只记判「要回」的样本是拿不到漏接率的 —— 漏接恰恰藏在判否那些里。
     if (stageState.stage === STAGE_OBSERVE && labels) {

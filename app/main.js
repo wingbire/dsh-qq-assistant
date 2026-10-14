@@ -390,8 +390,8 @@ setInterval(function () {
 
 process.on("SIGINT", function () {
   log("收到 SIGINT，收尾中…");
-  runtime.budget.save(path.join(DATA_ROOT, "data", "budget.json"));
-  store.saveBandit({ state: bot.bandit.state(), at: new Date().toISOString() });
+  try { runtime.budget.flush(); } catch (e) {}          // 用量平时就攒着写，这里只是最后一次
+  try { bot.saveState(); } catch (e) {}                // 学习权重同理
   if (link.ob) link.ob.close();
   clearInterval(timer);
   setTimeout(function () { process.exit(0); }, 200);

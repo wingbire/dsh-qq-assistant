@@ -42,6 +42,28 @@ export function createBrakes(opts) {
   const stopFiles = (o.stopFiles || STOP_FILES).map(function (f) { return path.join(root, f); });
   let cfgPaused = !!(o.config && o.config.paused);
   const groupUntil = new Map();     // gid -> 到期毫秒
+  // 按群暂停（群里的「/停」以及配置端"关掉本群"其实都走这里）必须活过重启：
+  // 否则用户让它闭嘴，程序一重启它又开口了 —— 这种"刹车失效"比不回话更糟。
+  const file = o.file || null;
+  function loadGroups() {
+    if (!file) return;
+    try {
+      const v = JSON.parse(fs.readFileSync(file, "utf8"));
+      const groups = (v && v.groups) || {};
+      for (const k of Object.keys(groups)) groupUntil.set(String(k), Number(groups[k]) || 0);
+    } catch (e) {}
+  }
+  function saveGroups() {
+    if (!file) return null;
+    try {
+      const groups = {};
+      for (const [k, v] of groupUntil.entries()) groups[k] = v;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ groups: groups, at: new Date().toISOString() }, null, 1), "utf8");
+    } catch (e) {}
+    return file;
+  }
+  loadGroups();
 
   function fileStopped() {
     for (const f of stopFiles) { try { if (fs.existsSync(f)) return f; } catch (e) {} }
@@ -64,12 +86,20 @@ export function createBrakes(opts) {
     const mins = Number(minutes) > 0 ? Number(minutes) : DEFAULT_STOP_MINUTES;
     const until = mins >= 999999 ? Number.MAX_SAFE_INTEGER : t + mins * 60000;
     groupUntil.set(String(gid), until);
+    saveGroups();
     return until;
   }
 
-  function resumeGroup(gid) { return groupUntil.delete(String(gid)); }
+  function resumeGroup(gid) {
+    const had = groupUntil.delete(String(gid));
+    saveGroups();
+    return had;
+  }
   function setConfigPaused(v) { cfgPaused = !!v; return cfgPaused; }
   function info() { return { stopFile: fileStopped(), configPaused: cfgPaused, groups: Object.fromEntries(groupUntil) }; }
 
-  return { state: state, stopGroup: stopGroup, resumeGroup: resumeGroup, setConfigPaused: setConfigPaused, info: info };
+  return {
+    state: state, stopGroup: stopGroup, resumeGroup: resumeGroup, setConfigPaused: setConfigPaused, info: info,
+    file: file, load: loadGroups, save: saveGroups
+  };
 }

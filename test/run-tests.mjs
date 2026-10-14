@@ -2057,6 +2057,67 @@ t("runtime: 跳过观察期——某群直接全自动、群间隔离、可回�
   eq(rt2.stage("G1").stage, "observe", "强制观察优先于手动跳过");
 });
 
+t("runtime: 同类问题扫一遍——预算 / 群内停 / 学习权重都要活过重启", function () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-persist-"));
+  try {
+    // ① 今日已用 token：不落盘的话日熔断重启即失效（能反复花满预算）
+    const bf = path.join(dir, "budget.json");
+    const b1 = createBudget({ limits: { dailyTokens: 1000 }, now: function () { return 0; }, file: bf });
+    b1.record(900, 0);
+    b1.flush();
+    const b2 = createBudget({ limits: { dailyTokens: 1000 }, now: function () { return 0; }, file: bf });
+    eq(b2.status().used, 900, "重启后今天的用量要接上");
+    eq(b2.mode(), "noProactive", "超 80% 该关主动，不能重启一次就又有额度");
+
+    // ② 群内「/停」和配置端"关掉本群"都走 brakes：重启后必须还停着
+    const kf = path.join(dir, "brakes.json");
+    const k1 = createBrakes({ now: function () { return 0; }, file: kf });
+    k1.stopGroup("G1", 60, 0);
+    const k2 = createBrakes({ now: function () { return 0; }, file: kf });
+    eq(k2.state("G1", 0).stopped, true, "重启后仍然停着（刹车不能因为重启就失效）");
+    k2.resumeGroup("G1");
+    eq(createBrakes({ now: function () { return 0; }, file: kf }).state("G1", 0).stopped, false, "/开 也要落盘");
+
+    // ③ 学到的 arm 权重：原来只在没人调用的 saveState 里存，重启即丢
+    const st = createStore(dir);
+    const bot1 = createBot({ dataRoot: dir });
+    bot1.observe({ gid: "A", uid: "u1", arm: "terse", bucket: "game", outcome: "continued_with_bot", tokens: ["开黑"], inTokens: 10, outTokens: 5 });
+    bot1.saveState();
+    const bot2 = createBot({ dataRoot: dir });
+    eq(JSON.stringify(bot2.bandit.state()), JSON.stringify(bot1.bandit.state()), "重启后权重还在");
+    eq(!!st.loadBandit().state, true, "落盘文件也要真的写出来");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+t("runtime: 「跳过观察期」要活过重启（不然点了也白点）", function () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-stages-"));
+  const file = path.join(dir, "stages.json");
+  const mk = function () {
+    return createRuntime({
+      config: {}, runtime: { stageMode: "auto", observeUntilMessages: 80, semiAutoDays: 3 },
+      store: null, stageFile: file,
+      bot: fakeBot({ tier: "mid" }), send: function () {},
+      askBrain: async function () { return { ok: true, text: "好", usage: { totalTokens: 5 } }; },
+      now: function () { return 0; }, sleep: async function () {}
+    });
+  };
+  const rt1 = mk();
+  eq(rt1.stage("G1").stage, "observe", "新群默认观察期");
+  rt1.setStage("G1", "full");
+  eq(JSON.parse(fs.readFileSync(file, "utf8")).G1.skippedStage, "full", "手动跳过要立刻落盘");
+
+  const rt2 = mk();                                   // 假装重启：新实例、同一个状态文件
+  eq(rt2.stage("G1").stage, "full", "重启后仍然是全自动（这就是用户点了按钮却没用的原因）");
+  eq(rt2.stage("G1").skippedStage, "full", "手动标记也要在");
+  eq(rt2.stage("G2").stage, "observe", "没动过的群还是观察期");
+
+  rt2.setStage("G1", "auto");
+  const rt3 = mk();
+  eq(rt3.stage("G1").stage, "observe", "回退也要落盘，别重启又变回全自动");
+  eq(JSON.parse(fs.readFileSync(file, "utf8")).G1.skippedStage, undefined);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 t("webui: 跳过观察期的接口能通", async function () {
   const table = loadFieldTable();
   const cfg = defaultsFromTable(table);
