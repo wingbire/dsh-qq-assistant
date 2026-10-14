@@ -18,7 +18,7 @@ import { splitReply, splitSentences, cutAtSentence } from "../app/src/split.js";
 import { createCoalescer, mergeBucket, pickAnchor } from "../app/src/coalesce.js";
 import { createBudget, dayKeyOf } from "../app/src/budget.js";
 import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
-import { createOneBot, normalizeEvent, withToken, errorText, probePort } from "../app/src/onebot.js";
+import { createOneBot, normalizeEvent, normalizeNotice, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
@@ -2231,6 +2231,96 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("onebot: 引用段与戳一戳事件的解析", function () {
+  const raw = { post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 11, sender: { nickname: "甲" }, message: [{ type: "reply", data: { id: 77, text: "被引用的原文" } }, { type: "text", data: { text: "对" } }] };
+  const ev = normalizeEvent(raw, { selfId: "9", sentIds: new Set(), now: 0 });
+  eq(ev.replyId, "77");
+  eq(ev.replyQuote, "被引用的原文", "事件里带原文就直接用，不用再调 get_msg");
+  eq(ev.replyToOther, true);
+  const ev2 = normalizeEvent(raw, { selfId: "9", sentIds: new Set(["77"]), now: 0 });
+  eq(ev2.replyToBot, true, "引用的是我自己发的 → replyToBot");
+
+  const p1 = normalizeNotice({ post_type: "notice", notice_type: "notify", sub_type: "poke", group_id: 1, user_id: 2, target_id: 9, self_id: 9 }, { selfId: "9" });
+  eq(p1.kind, "poke"); eq(p1.pokeMe, true); eq(p1.uid, "2"); eq(p1.gid, "1");
+  const p2 = normalizeNotice({ post_type: "notice", notice_type: "poke", group_id: 1, user_id: 3, target_id: 9, self_id: 9 }, { selfId: "9" });
+  eq(p2.kind, "poke", "另一种字段形状（notice_type=poke）也要认");
+  eq(normalizeNotice({ post_type: "notice", notice_type: "group_recall", group_id: 1 }, { selfId: "9" }), null, "其它通知不管");
+  eq(normalizeNotice({ post_type: "notice", notice_type: "notify", sub_type: "poke", group_id: 1, user_id: 9, target_id: 2, self_id: 9 }, { selfId: "9" }), null, "自己戳的不理");
+  eq(p1.pokeMe && p2.pokeMe, true);
+});
+
+t("onebot: 引用回复的动作组装（reply 段在前）", function () {
+  const sent = [];
+  const sock = { send: function (s) { sent.push(JSON.parse(s)); }, close: function () {} };
+  const ob = createOneBot({ url: "ws://x", transport: function () { return sock; }, now: function () { return 0; } });
+  ob.connect(); sock.onopen();
+  ob.sendGroupMsg("1", "在的", { replyTo: "77" });
+  eq(Array.isArray(sent[0].params.message), true);
+  eq(sent[0].params.message[0].type, "reply");
+  eq(sent[0].params.message[0].data.id, "77");
+  eq(sent[0].params.message[1].type, "text");
+  eq(sent[0].params.message[1].data.text, "在的");
+  ob.sendGroupMsg("1", "不引用");
+  eq(sent[1].params.message, "不引用", "不带 replyTo 时还是纯文本（保持兼容）");
+});
+
+t("runtime: 被戳一戳 → 零成本短答/回戳 + 同人限流 + 不插手别人互戳", async function () {
+  const sent = []; const pokes = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, pokeBackRate: 1, pokeGapSec: 60 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({}), send: function (g, t) { sent.push(t); }, sendImage: function () {},
+    sendPoke: async function (g, u) { pokes.push(u); return { ok: true }; },
+    askBrain: async function () { return { ok: true, text: "x", usage: { totalTokens: 1 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0, rng: function () { return 0; }
+  });
+  const r1 = await rt.onEvent({ kind: "poke", gid: "G1", uid: "u1", targetId: "9", selfId: "9", pokeMe: true, now: 0 });
+  eq(r1.action, "poke_replied");
+  eq(pokes.length, 1, "回戳了");
+  eq(sent.length, 1, "也说了一句（零成本短答）");
+  const r2 = await rt.onEvent({ kind: "poke", gid: "G1", uid: "u1", targetId: "9", selfId: "9", pokeMe: true, now: 1000 });
+  eq(r2.action, "poke_limited", "同一个人 60 秒内只反应一次");
+  const r3 = await rt.onEvent({ kind: "poke", gid: "G1", uid: "u2", targetId: "5", selfId: "9", pokeMe: false, now: 0 });
+  eq(r3.action, "poke_ignored", "别人互戳不插手");
+  eq(rt.stats().pokes, 3);
+});
+
+t("runtime: 引用原文进正文（参与本地一判）+ 对方用引用接话时回复也用引用", async function () {
+  const sent = []; let captured = null;
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, quoteReply: "自动" },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    send: function (g, t, o) { sent.push({ t: t, o: o || null }); }, sendImage: function () {},
+    getQuote: async function () { return { ok: true, text: "这个报错怎么解", speaker: "甲" }; },
+    askBrain: async function (o) { captured = o.promptText; return { ok: true, text: "好", usage: { totalTokens: 3 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u2", speaker: "乙", text: "对", replyId: "77", messageId: "88", now: 0 });
+  await rt.tick(500);
+  ok(String(captured || "").indexOf("[引用 甲：这个报错怎么解]") >= 0, "引用原文进了本轮上下文");
+  eq(sent.length, 1);
+  eq(sent[0].o && sent[0].o.replyTo, "88", "对方在用引用接话 → 回复也带引用");
+});
+
+t("runtime: 识图提前到判定之前（纯图片不再被当无意义文本），且同一张图只识别一次", async function () {
+  const seen = []; let calls = 0;
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function (r) { seen.push(r); } },
+    vision: { enabled: function () { return true; }, describe: async function () { calls += 1; return { ok: true, text: "蓝发鲸鱼女仆" }; } },
+    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "local_short", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
+    send: function () {}, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[图片]", hasImage: true, images: [{ file: "C:/a.jpg" }], now: 0 });
+  await rt.tick(500);
+  const j = seen.filter(function (x) { return x.kind === "judge"; })[0];
+  ok(j && j.text.indexOf("蓝发鲸鱼女仆") >= 0, "本地判定看到的是识别后的正文：" + (j && j.text));
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[图片]", hasImage: true, images: [{ file: "C:/a.jpg" }], now: 2000 });
+  await rt.tick(3000);
+  eq(calls, 1, "同一张图十分钟内只识别一次");
+});
 
 t("prompt: 装配顺序按缓存优先级（专属人设/画像 → 兴趣词条 → 本轮任务 → 上下文）", async function () {
   const prof = { rounds: 3, interests: ["打游戏", "做视频"], dislikes: ["政治"], habits: "短句", notes: "爱用梗", pace: "快", activeHours: "20-23", personaText: "别叫我助手" };

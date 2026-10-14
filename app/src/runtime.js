@@ -21,6 +21,14 @@ import { createLabelQueue } from "./label.js";
 
 // P1 接入层装配。所有外部副作用（send / askBrain / now / rng / store）都可注入，
 // 所以整套流程能在没有 QQ、没有模型的情况下被测试。
+// 大脑在正文里写 [引用] → 这条回复做成"引用回复"（引用它正在回应的那条消息）
+export function parseQuoteMarker(text) {
+  const s = String(text == null ? "" : text);
+  const m = s.match(/\[引用(?:\s*[:：]\s*([^\]]*))?\]/);
+  if (!m) return { text: s, wanted: false };
+  return { text: s.replace(m[0], "").trim(), wanted: true };
+}
+
 export function createRuntime(deps) {
   const d = deps || {};
   const cfg = d.config || {};
@@ -93,6 +101,10 @@ export function createRuntime(deps) {
   const budget = d.budget || createBudget({ limits: rc.budget, now: now, file: d.budgetFile || (store && store.paths ? store.paths.budget : null) });
   // 本地短答"记住自己说过什么"：同一群最近 6 条不重复，且活过重启
   const localReplies = d.localReplies || createLocalReplies({ rng: rng, file: d.localFile || (store && store.paths ? store.paths.localreplies : null) });
+  const getQuote = d.getQuote || null;        // (messageId) => {ok, text, uid, speaker} ：取被引用原文
+  const sendPoke = d.sendPoke || null;        // (gid, uid) => {ok} ：回戳
+  const pokeSeen = new Map();                 // "gid:uid" -> 上次反应时间（限流，内存态够用）
+  const visionCache = new Map();              // 图片 file/url -> {at,text}：同一张图十分钟内只识别一次
   const brakes = d.brakes || createBrakes({ config: cfg, now: now, file: d.brakesFile || (store && store.paths ? store.paths.brakes : null) });
   // 指令注册表要拿到真的 brakes / budget，所以必须在这两行之后建
   const commands = d.commands || createDefaultCommands({ brakes: brakes, budget: budget, now: now, stopMinutes: rc.stopMinutes || 60 });
@@ -111,7 +123,7 @@ export function createRuntime(deps) {
     });
   }
 
-  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0 };
+  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0 };
   let busy = false;
 
   function observe(rec) {
@@ -199,12 +211,18 @@ export function createRuntime(deps) {
     if (!imgs.length) return [];
     const out = [];
     for (const im of imgs.slice(0, 2)) {
+      // 同一张图（同 file/url）十分钟内只识别一次 —— 群里常有人反复发同一张图
+      const vkey = String(im.file || im.url || "");
+      if (vkey) {
+        const hit = visionCache.get(vkey);
+        if (hit && Date.now() - hit.at < 10 * 60 * 1000) { stats.visionCached += 1; out.push(hit.text); continue; }
+      }
       let local = resolveLocalImage(im, { maxBytes: (rc.vision && rc.vision.maxBytes) || undefined });
       if (!local.ok && local.needDownload && im.url && imageDir) local = await downloadImage(im.url, imageDir, {});
       if (!local.ok && im.url && imageDir) local = await downloadImage(im.url, imageDir, {});
       stats.visionCalls += 1;
       const r = await vision.describe(local, {});
-      if (r.ok) { stats.visionOk += 1; out.push(r.text); }
+      if (r.ok) { stats.visionOk += 1; if (vkey) { visionCache.set(vkey, { at: Date.now(), text: r.text }); if (visionCache.size > 100) { const k = visionCache.keys().next().value; visionCache.delete(k); } } out.push(r.text); }
       else { stats.visionFail += 1; observe({ kind: "vision_fail", gid: batch.gid, error: r.error, file: (im.file || im.url || "").slice(0, 80) }); }
     }
     return out;
@@ -226,6 +244,14 @@ export function createRuntime(deps) {
     return { ok: true, chars: v.chars, bytes: v.bytes, file: v.file };
   }
 
+  // 引用：把被引用的原文拼进正文（前缀形式），这样它同时参与**本地判定**、进大脑、也进配置端的消息表。
+  // 注意：这是"每轮都可能不同"的内容，只会跟着消息体走，不进 system prompt，缓存前缀不受影响。
+  function injectQuote(text, quote, from) {
+    const q = String(quote || "").trim();
+    if (!q) return text;
+    const who = String(from || "").trim();
+    return "[引用" + (who ? " " + who : "") + "：" + q.slice(0, 200) + "]" + (text ? " " + text : "");
+  }
   function groupInterests(gid) {
     if (!store || typeof store.loadProfile !== "function") return [];
     const p = store.loadProfile(gid);
@@ -372,7 +398,31 @@ export function createRuntime(deps) {
       + arr.map(function (e) { return (e.speaker ? e.speaker + "：" : "") + e.text; }).join(String.fromCharCode(10));
   }
 
+  // 被戳一戳：不进判定中枢（它不是消息，也不该吃观察期/预算那套），直接走零成本表达层
+  async function onPoke(evt) {
+    stats.pokes += 1;
+    observe({ kind: "poke", gid: evt.gid, uid: evt.uid, targetId: evt.targetId, pokeMe: !!evt.pokeMe });
+    if (!evt.pokeMe) return { gid: evt.gid, action: "poke_ignored" };              // 群里互相戳不插手
+    if (rc.poke === "关") { stats.pokesSkipped += 1; return { gid: evt.gid, action: "poke_off" }; }
+    const nowMs = evt.now || now();
+    if (brakes.state(evt.gid, nowMs).stopped) { stats.pokesSkipped += 1; return { gid: evt.gid, action: "poke_blocked" }; }
+    const key = String(evt.gid) + ":" + String(evt.uid);
+    const last = pokeSeen.get(key);
+    const gapMs = rc.pokeGapSec != null ? rc.pokeGapSec * 1000 : 60000;
+    if (last != null && nowMs - last < gapMs) { stats.pokesSkipped += 1; observe({ kind: "poke_skipped", gid: evt.gid, uid: evt.uid, reason: "同人限流" }); return { gid: evt.gid, action: "poke_limited" }; }
+    pokeSeen.set(key, nowMs);
+    const rate = rc.pokeBackRate != null ? Number(rc.pokeBackRate) : 0.35;
+    let back = null;
+    if (sendPoke && rng() < rate) { try { back = await sendPoke(evt.gid, evt.uid); } catch (e) { back = { ok: false, error: String(e && e.message) }; } }
+    const line = back && back.ok ? (rng() < 0.5 ? "别戳我，我也戳你" : "戳回去了") : localReplies.reply({ reason: ["被戳"] }, { gid: evt.gid, text: "__poke__", poke: true, rng: rng });
+    if (line) send(evt.gid, line);
+    stats.pokesReplied += 1;
+    observe({ kind: "poke_replied", gid: evt.gid, uid: evt.uid, back: !!(back && back.ok), text: line });
+    return { gid: evt.gid, action: "poke_replied", text: line };
+  }
+
   async function onEvent(evt) {
+    if (evt && evt.kind === "poke") return onPoke(evt);
     stats.events += 1;
     const gs = gstat(evt.gid);
     gs.messages += 1;
@@ -427,13 +477,39 @@ export function createRuntime(deps) {
     const decisions = [];
     for (const rawEvt of batch.evts) {
       const evt = Object.assign({}, evtDefaults, lastBot.get(String(rawEvt.gid)) || {}, rawEvt);
+      // 引用：事件里没带原文就用 get_msg 补一次，然后拼进正文 ——
+      // 这样"引用我那条问题回个'对'"这类消息，本地一判也能看懂（不是无意义文本），配置端也看得到。
+      if (evt.replyId && !evt.replyQuote && getQuote) {
+        try {
+          const q = await getQuote(evt.replyId);
+          if (q && q.ok && q.text) {
+            evt.replyQuote = q.text;
+            evt.replyQuoteFrom = q.speaker || q.uid || "";
+            evt.text = injectQuote(evt.text, q.text, evt.replyQuoteFrom);
+          }
+        } catch (e) { /* 取不到就按没有引用处理，绝不编 */ }
+      } else if (evt.replyQuote) {
+        evt.text = injectQuote(evt.text, evt.replyQuote, evt.replyFrom || "");
+      }
+      // 图片：识别在这里做（判定之前），描述拼进正文 ——
+      // 以前识图在合并之后才注入，纯图片消息在本地就被当"无意义文本"判否，描述白花钱、配置端也看不到。
+      if (evt.hasImage && evt.images && evt.images.length) {
+        const desc = await describeImages({ gid: batch.gid, evts: [evt] });
+        if (desc.length) { evt.visionText = desc.join(" / "); evt.text = injectVision(evt.text, desc); }
+        else evt.visionText = null;
+      }
       const dec = await bot.handleEvent(evt);
       decisions.push(Object.assign({}, dec, { evt: evt }));
       const wantText = rawEvt.text || (rawEvt.hasImage ? "[图片]" : "");
-      uiMessages.update(batch.gid, function (r) { return !r.verdict && r.text === wantText; }, {
+      const patch = {
         verdict: dec.verdict, action: dec.action, pSay: dec.pSay,
         tier: dec.tier, reason: (dec.reason || []).slice(0, 3)
-      });
+      };
+      // 正文被富化过（拼了引用原文 / 识图描述）就把配置端那条也更新掉 —— 否则你在状态页只看到 [图片]
+      if (evt.text && evt.text !== wantText) patch.text = evt.text;
+      uiMessages.update(batch.gid, function (r) { return !r.verdict && r.text === wantText; }, patch);
+      // 历史也用它，进大脑的上下文里才带引用原文 / 识图描述
+      if (evt.text) rawEvt.text = evt.text;
       observe({
         kind: "decision", gid: batch.gid, uid: batch.uid, speaker: evt.speaker,
         text: evt.text, atBot: !!evt.atBot, replyToBot: !!evt.replyToBot,
@@ -445,7 +521,9 @@ export function createRuntime(deps) {
     // N23：整批当成一轮来判定 —— 这样这一串里任何一条带 @/回复的硬触发都能生效；
     // 锚点仍取「最近一条单独判定过得去的」，用于把这次回复归属到具体那个人/那条消息。
     const visionTexts = await describeImages(batch);
-    let baseText = batch.plainText || batch.text;
+    // 判定时那份正文（含引用原文、逐条识图描述）优先 —— plainText 是合并前拼的，看不到这些补充
+    const judgedText = decisions.map(function (x) { return x.evt && x.evt.text; }).filter(Boolean).join(" ").trim();
+    let baseText = judgedText || batch.plainText || batch.text;
     // 有图但一条描述都没拿到（识图没开 / 模型没视觉 / 调用失败）→ 在正文里说清楚，
     // 否则人设写着"你看得到图"、正文只有一个 [图片]，模型会顺着编。
     if (!visionTexts.length && (batch.evts || []).some(function (e) { return e && e.hasImage; })) {
@@ -454,7 +532,7 @@ export function createRuntime(deps) {
     const mergedEvt = Object.assign({}, evtDefaults, lastBot.get(String(batch.gid)) || {}, {
       gid: batch.gid, uid: batch.uid,
       speaker: (batch.evts[batch.evts.length - 1] || {}).speaker || "",
-      text: visionTexts.length ? injectVision(baseText, visionTexts) : baseText,
+      text: (visionTexts.length && !visionTexts.every(function (t) { return baseText.indexOf(t) >= 0; })) ? injectVision(baseText, visionTexts) : baseText,
       atBot: !!batch.atBot, replyToBot: !!batch.replyToBot,
       now: batch.lastAt, mergedCount: batch.count
     });
@@ -514,7 +592,7 @@ export function createRuntime(deps) {
     let usage = null;
     let searchInfo = null;
     if (dec.action === "local_short") {
-      text = localReplies.reply(dec, { rng: rng, text: evt.text, gid: evt.gid });
+      text = localReplies.reply(dec, { rng: rng, text: evt.text, gid: evt.gid, quoted: !!evt.replyId });
     } else if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
       const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [20, 60, 200];
@@ -562,6 +640,12 @@ export function createRuntime(deps) {
       return { gid: batch.gid, action: "noop" };
     }
 
+    const quoted2 = parseQuoteMarker(text || "");    // [引用] → 这条做成引用回复
+    text = quoted2.text;
+    // 什么时候引用（不定死）：模型主动写 [引用]，或对方这条本来就是用引用发来的（在接某条线）。
+    // "自动"= 这两种情况；"仅标记"= 只听模型的；"关"= 从不引用。高档长回答不引用（像客服）。
+    const useQuoteReply = !!evt.messageId && dec.tier !== "high" &&
+      (quoted2.wanted || (rc.quoteReply === "自动" && !!evt.replyId));
     const voiced = parseVoiceTag(text || "");        // N18：先摘 [语音: 文本]
     const drawn = parseIllustration(voiced.text);    // 再摘 [立绘] / [立绘: 幼年]
     const chart = parseChart(drawn.text);            // 再摘 [图表: 路径]（archify 画的图）
@@ -570,7 +654,7 @@ export function createRuntime(deps) {
     const sent = [];
     for (let i = 0; i < segments.length; i++) {
       if (!segments[i]) continue;
-      send(evt.gid, segments[i]);
+      send(evt.gid, segments[i], (i === 0 && useQuoteReply) ? { replyTo: evt.messageId } : undefined);
       sent.push(segments[i]);
       stats.segments += 1;
       if (i < segments.length - 1 && sendGapMs > 0) await sleep(sendGapMs);

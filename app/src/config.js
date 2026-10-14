@@ -166,6 +166,10 @@ export function runtimeConfig(cfg) {
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
     maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 3,                    // N6
     uiMessageLimit: numOf(getPath(c, "runtime.uiMessageLimit"), 30),   // 配置端"收到的消息"每群保留多少条（满了丢最旧）
+    quoteReply: getPath(c, "runtime.quoteReply") || "自动",            // 引用回复：关 / 自动 / 仅标记
+    poke: getPath(c, "runtime.poke") || "短答",                        // 被戳：关 / 短答
+    pokeBackRate: numOf(getPath(c, "runtime.pokeBackRate"), 0.35),     // 回戳概率
+    pokeGapSec: numOf(getPath(c, "runtime.pokeGapSec"), 60),           // 同一个人两次反应的间隔（秒）
     budget: {
       dailyTokens: getPath(c, "runtime.budget.dailyTokens") != null ? getPath(c, "runtime.budget.dailyTokens") : 5000000, // N23
       softRatio: 0.8,

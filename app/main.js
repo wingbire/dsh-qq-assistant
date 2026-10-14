@@ -152,6 +152,8 @@ const bot = createBot({
   rescueAsk: rc.gates.rescueAsk, blockInjected: rc.gates.blockInjected, audit: rc.audit
 });
 const cli = resolveDshCli();
+const quoteCache = new Map();   // 被引用消息原文（10 分钟）
+
 const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg) });
 log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));
 
@@ -167,6 +169,32 @@ function buildOneBot(c) {
   return createOneBot({
     url: o.url, token: o.token, reconnectMs: o.reconnectMs,
     onEvent: function (evt) { runtime.onEvent(evt); },
+    // 引用原文：get_msg 取一次并缓存（同一条引用可能被反复引用；OneBot 调用是本机的，0 token）
+    getQuote: async function (messageId) {
+      const id = String(messageId || "");
+      if (!id || !link.ob) return { ok: false };
+      const hit = quoteCache.get(id);
+      if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
+      const r = await link.ob.callActionAsync("get_msg", { message_id: Number(id) || id }, 4000);
+      const value = (r && r.ok && r.data) ? {
+        ok: true,
+        text: String(r.data.message == null ? (r.data.raw_message || "") : (typeof r.data.message === "string" ? r.data.message : (Array.isArray(r.data.message) ? r.data.message.filter(function (s) { return s && s.type === "text"; }).map(function (s) { return String((s.data || {}).text || ""); }).join("") : ""))).slice(0, 300),
+        uid: r.data.user_id != null ? String(r.data.user_id) : "",
+        speaker: (r.data.sender && (r.data.sender.card || r.data.sender.nickname)) || ""
+      } : { ok: false };
+      if (value.ok && value.text) quoteCache.set(id, { at: Date.now(), value: value });
+      if (quoteCache.size > 200) { const first = quoteCache.keys().next().value; quoteCache.delete(first); }
+      return value;
+    },
+    // 回戳：动作名因实现而异，先 group_poke 再退 send_poke
+    sendPoke: async function (gid, uid) {
+      if (!link.ob) return { ok: false };
+      const p = { group_id: Number(gid), user_id: Number(uid) };
+      const r1 = await link.ob.callActionAsync("group_poke", p, 4000);
+      if (r1 && r1.ok) return { ok: true, action: "group_poke" };
+      const r2 = await link.ob.callActionAsync("send_poke", p, 4000);
+      return { ok: !!(r2 && r2.ok), action: "send_poke" };
+    },
     onStatus: function (s) {
       if (s.state === "rejected") { log("onebot: 被服务端拒绝 —— " + s.message + "（retcode " + s.retcode + "）"); return; }
       if (s.state !== "reconnecting" || (s.retry || 0) % 5 === 0) {
@@ -248,7 +276,7 @@ const runtime = createRuntime({
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },
   sendImage: function (gid, file) { log("→图 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupImage(gid, file) : false; },
   evtDefaults: { botNames: [persona.botName], nicknames: [persona.botName], interests: persona.interests, dislikes: persona.dislikes },
-  send: function (gid, text) { log("→ " + gid + " : " + text); return link.ob ? link.ob.sendGroupMsg(gid, text) : false; },
+  send: function (gid, text, opts) { log("→ " + gid + " : " + text + (opts && opts.replyTo ? "（引用）" : "")); return link.ob ? link.ob.sendGroupMsg(gid, text, opts) : false; },
   askBrain: async function (o) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
     return runBrain({ cliPath: cli, promptText: o.promptText, timeoutMs: 60000 });

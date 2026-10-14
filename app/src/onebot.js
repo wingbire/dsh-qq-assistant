@@ -73,7 +73,7 @@ export function normalizeEvent(raw, ctx) {
   if (selfId && uid === selfId) return null;                  // 自己的消息不回
 
   const segs = Array.isArray(raw.message) ? raw.message : [];
-  let atBot = false, atAll = false, replyToBot = false, replyToOther = false;
+  let atBot = false, atAll = false, replyToBot = false, replyToOther = false, replyId = null, replyQuote = "";
   const texts = [];
   for (const s of segs) {
     if (!s || typeof s !== "object") continue;
@@ -85,6 +85,10 @@ export function normalizeEvent(raw, ctx) {
       else if (qq === selfId) atBot = true;
     } else if (s.type === "reply") {
       const id = String(d.id);
+      replyId = id;
+      // 有些实现（含 NapCat 的部分版本）会顺手把被引用的原文塞在 data 里；没有就得靠 get_msg 补
+      const q = (d.text != null ? d.text : (d.content != null ? d.content : (d.message != null ? d.message : "")));
+      if (q) replyQuote = String(q).slice(0, 300);
       if (c.sentIds && c.sentIds.has(id)) replyToBot = true; else replyToOther = true;
     }
   }
@@ -122,12 +126,36 @@ export function normalizeEvent(raw, ctx) {
     atAll: atAll,
     replyToBot: replyToBot,
     replyToOther: replyToOther,
+    replyId: replyId,                 // 被引用消息的 id（要用 get_msg 取原文，或直接用于引用回复）
+    replyQuote: replyQuote || null,   // 事件里自带的引用原文（有就不用再调 get_msg）
     messageId: raw.message_id != null ? String(raw.message_id) : null,
     role: String(sender.role || ""),
     segments: segs,
     images: images,
     hasImage: images.length > 0,
     hasVoice: hasVoice,
+    now: c.now != null ? c.now : Date.now()
+  };
+}
+
+// 通知类事件（戳一戳等）→ 内部事件。目前只认"戳"，其它通知返回 null。
+// 兼容两种形状：{"notice_type":"notify","sub_type":"poke"}（go-cqhttp / NapCat）与 {"notice_type":"poke"}。
+export function normalizeNotice(raw, ctx) {
+  const c = ctx || {};
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.post_type !== "notice") return null;
+  if (raw.message_type && raw.message_type !== "group") return null;
+  const isPoke = (raw.notice_type === "notify" && raw.sub_type === "poke") || raw.notice_type === "poke";
+  if (!isPoke) return null;
+  const selfId = String(c.selfId != null ? c.selfId : raw.self_id != null ? raw.self_id : "");
+  const from = String(raw.user_id != null ? raw.user_id : "");
+  const target = String(raw.target_id != null ? raw.target_id : (raw.user_id != null ? raw.user_id : ""));
+  const gid = raw.group_id != null ? String(raw.group_id) : null;
+  if (!gid) return null;
+  if (selfId && from === selfId) return null;            // 自己戳的不理
+  return {
+    kind: "poke", gid: gid, uid: from, targetId: target, selfId: selfId,
+    pokeMe: !!selfId && target === selfId,               // 戳的是不是她
     now: c.now != null ? c.now : Date.now()
   };
 }
@@ -189,6 +217,11 @@ export function createOneBot(opts) {
       }
       if (o.onAction) { try { o.onAction(data); } catch (e) {} }
       if (data.data && data.data.message_id != null) remember(data.data.message_id);
+      return;
+    }
+    if (data.post_type === "notice") {
+      const pe = normalizeNotice(data, { selfId: selfId, now: nowFn() });
+      if (pe && o.onEvent) { try { o.onEvent(pe); } catch (e) {} }
       return;
     }
     if (data.post_type) {
@@ -261,9 +294,21 @@ export function createOneBot(opts) {
   }
 
   // 发送正文；N6 的多条发送由上层 split 后逐条调用本函数。
-  function sendGroupMsg(gid, text) {
+  // text 直发；opts.replyTo 有值时改成"引用回复"（reply 段必须排在 text 段前面）
+  function sendGroupMsg(gid, text, opts) {
     const echo = "dshqq-" + nowFn() + "-" + Math.floor(Math.random() * 1e6);
-    return send({ action: "send_group_msg", params: { group_id: Number(gid), message: String(text) }, echo: echo });
+    const rid = opts && opts.replyTo != null ? String(opts.replyTo) : "";
+    const message = rid
+      ? [{ type: "reply", data: { id: rid } }, { type: "text", data: { text: String(text) } }]
+      : String(text);
+    return send({ action: "send_group_msg", params: { group_id: Number(gid), message: message }, echo: echo });
+  }
+
+  // 回戳：不同实现动作名不一样，先 group_poke 再退到 send_poke
+  function sendPoke(gid, uid) {
+    const echo = "dshqq-poke-" + nowFn() + "-" + Math.floor(Math.random() * 1e6);
+    return send({ action: "group_poke", params: { group_id: Number(gid), user_id: Number(uid) }, echo: echo })
+      || send({ action: "send_poke", params: { group_id: Number(gid), user_id: Number(uid) }, echo: echo });
   }
 
   // 发图：OneBot v11 的 image 段。NapCat 认绝对路径（统一成正斜杠更稳）
@@ -314,7 +359,7 @@ export function createOneBot(opts) {
 
   return {
     connect: connect, close: close, send: send, sendGroupMsg: sendGroupMsg, sendGroupImage: sendGroupImage,
-    sendGroupRecord: sendGroupRecord, callAction: callAction, callActionAsync: callActionAsync,
+    sendGroupRecord: sendGroupRecord, sendPoke: sendPoke, callAction: callAction, callActionAsync: callActionAsync,
     pendingActions: function () { return pendingActions.size; },
     state: function () { return state; }, selfId: function () { return selfId; },
     url: function () { return o.url; }, tokenSet: function () { return !!o.token; },

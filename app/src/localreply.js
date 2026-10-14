@@ -36,6 +36,12 @@ export const GREET_POOL = ["在的～咋啦？", "在的在的，什么事？", 
 export const VENT_POOL = ["咋了？", "又崩了？", "这也太离谱了", "别气别气", "哎，难绷", "气死个人", "缓缓，别急"];
 
 // 图片 / 语音：没看到就直说。这条最要紧 —— 用户发的图和语音不能拿"嗯？"糊过去
+// 被戳一戳：别没反应，也别复读"嗯？"—— 一句带情绪的短话
+export const POKE_POOL = ["干嘛～", "别戳了", "戳我干嘛", "哎，在呢", "痒", "你戳我我就看你一眼", "再戳一下试试"];
+
+// 引用场景：这回是在答复某条具体消息（我自己或别人），指向明确的短答比"嗯？"自然
+export const QUOTE_POOL = ["嗯，就是我说的那个", "对，上一条", "就那个意思", "你往上翻翻", "我说的是那个", "嗯，那条"];
+
 export const MEDIA_POOL = {
   image: ["图我这边没看到内容，你描述下？", "这图我识别不了，说说是啥？", "图没看出来，文字讲讲？", "我这边看不到图，你说说我猜"],
   voice: ["语音我听不了，打字吧", "语音听不到内容，打个字哈", "发语音我这边听不了", "语音没转写，打个字？"],
@@ -62,10 +68,12 @@ export function poolFor(decision, opts) {
   const text = String(o.text != null ? o.text : (d.text || ""));
   const bucket = bucketOf(d);
   const reasonText = (Array.isArray(d.reason) ? d.reason : []).join(" ");
+  if (o.poke || reasonText.indexOf("被戳") >= 0) return { scene: "poke", pool: POKE_POOL };
   if (text.indexOf("[图片]") >= 0) return { scene: "image", pool: MEDIA_POOL.image };
   if (text.indexOf("[语音]") >= 0) return { scene: "voice", pool: MEDIA_POOL.voice };
   if (text.indexOf("[多媒体]") >= 0) return { scene: "media", pool: MEDIA_POOL.other };
   if (reasonText.indexOf("情绪宣泄") >= 0) return { scene: "vent", pool: VENT_POOL };
+  if (o.quoted || reasonText.indexOf("引用") >= 0) return { scene: "quote", pool: QUOTE_POOL };
   if (isGreeting(text)) return { scene: "greet", pool: GREET_POOL };
   if (addressedOf(d)) return { scene: "addressed:" + bucket, pool: ADDRESSED_POOL[bucket] || ADDRESSED_POOL.general };
   return { scene: bucket, pool: LOCAL_POOL[bucket] || LOCAL_POOL.general };
