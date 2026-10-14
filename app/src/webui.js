@@ -1,0 +1,383 @@
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, runtimeConfig, saveConfig, getPath, setPath } from "./config.js";
+import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
+import { buildProfilePrompt } from "./profile.js";
+
+// N25 决策：有设计感的配置端 —— 本地 HTTP 服务，只听 127.0.0.1，无登录。
+// 前端是零依赖的原生 HTML/CSS/JS（不分发 node_modules 也能跑）。
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const PUBLIC_DIR = path.join(HERE, "webui");
+export const DEFAULT_PORT = 8799;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon"
+};
+
+function sendJson(res, code, obj) {
+  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(obj));
+}
+function sendText(res, code, text, type) {
+  res.writeHead(code, { "Content-Type": type || "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(text);
+}
+function readBody(req, limit) {
+  return new Promise(function (resolve) {
+    let data = "";
+    req.on("data", function (c) { data += c; if (data.length > (limit || 2e6)) req.destroy(); });
+    req.on("end", function () { resolve(data); });
+    req.on("error", function () { resolve(""); });
+  });
+}
+
+export function startOfToday(nowMs) {
+  const d = new Date(nowMs == null ? Date.now() : nowMs);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// 成本口径（技术架构文档 §7.1）：输入 ×1 + 输出 ×2
+export function summarizeCost(rows, opts) {
+  const o = opts || {};
+  const gid = o.gid ? String(o.gid) : null;
+  const since = o.since != null ? o.since : startOfToday();
+  const per = new Map();
+  const perTier = {};
+  let units = 0, outTokens = 0, inTokens = 0, cacheRead = 0, cacheInput = 0;
+  let replies = 0, messages = 0, brainCalls = 0, searches = 0, cacheHits = 0, memes = 0, voice = 0, proactives = 0;
+  for (const r of (rows || [])) {
+    if (!r) continue;
+    const t = r.at ? Date.parse(r.at) : NaN;
+    // 设了下界就只认带时间戳、且在界内的记录；没设下界（since=0）则宽容处理
+    if (since && (isNaN(t) || t < since)) continue;
+    const g = String(r.gid || "-");
+    if (gid && g !== gid) continue;
+    let b = per.get(g);
+    if (!b) { b = { gid: g, units: 0, replies: 0, messages: 0 }; per.set(g, b); }
+    if (r.kind === "decision" || r.kind === "observe_only" || r.kind === "merged_ignore") {
+      messages += 1; b.messages += 1;
+      if (r.tier) perTier[r.tier] = (perTier[r.tier] || 0) + 1;
+    }
+    if (r.kind === "sent") {
+      replies += 1; b.replies += 1;
+      if (r.usage && r.usage.totalTokens) brainCalls += 0;  // 次数由下行的 usage 判定
+      if (r.search && r.search.ok) { searches += 1; if (r.search.cached) cacheHits += 1; }
+      if (r.meme) memes += 1;
+      if (r.voice && r.voice.bytes) voice += 1;
+      const u = r.usage || {};
+      const i2 = Number(u.inputTokens) || 0, o2 = Number(u.outputTokens) || 0;
+      const cr = Number(u.cacheReadTokens) || 0, cw = Number(u.cacheWriteTokens) || 0;
+      const u2 = i2 + 2 * o2;
+      units += u2; b.units += u2;
+      inTokens += i2; outTokens += o2; cacheRead += cr; cacheInput += i2 + cr + cw;
+      if (u2 > 0) brainCalls += 1;
+    }
+    if (r.kind === "proactive_sent") proactives += 1;
+  }
+  return {
+    gid: gid, since: since,
+    units: units, inTokens: inTokens, outTokens: outTokens,
+    replies: replies, messages: messages, brainCalls: brainCalls,
+    searches: searches, searchCacheHits: cacheHits, memes: memes, voice: voice, proactives: proactives,
+    cacheHitRate: cacheInput > 0 ? Math.round((cacheRead / cacheInput) * 1000) / 1000 : null,
+    avgUnitsPerReply: replies > 0 ? Math.round(units / replies) : 0,
+    perGroup: Array.from(per.values()).sort(function (a, b) { return b.units - a.units; }),
+    perTier: perTier
+  };
+}
+
+// 兼容旧的状态页（观察日志统计）
+export function summarizeObservations(rows) {
+  const c = summarizeCost(rows, { since: 0 });
+  const verdicts = {}, tiers = {}, hours = new Array(24).fill(0);
+  for (const r of (rows || [])) {
+    if (!r) continue;
+    if (r.kind === "decision" || r.kind === "observe_only") {
+      if (r.verdict) verdicts[r.verdict] = (verdicts[r.verdict] || 0) + 1;
+      if (r.tier) tiers[r.tier] = (tiers[r.tier] || 0) + 1;
+      hours[new Date(r.at || Date.now()).getHours()] += 1;
+    }
+  }
+  return {
+    verdicts: verdicts, tiers: tiers, hours: hours, rows: (rows || []).length,
+    tokens: c.units, replies: c.replies, memes: c.memes, proactives: c.proactives,
+    cacheHitRate: c.cacheHitRate
+  };
+}
+
+export function createWebUi(deps) {
+  const d = deps || {};
+  let cfg = d.config || {};
+  const table = d.table || loadFieldTable();
+  const store = d.store || null;
+  const memes = d.memes || null;
+  const runtime = d.runtime || null;
+  const configFile = d.configFile;
+  const labels = d.labels || (store ? createLabelQueue({ store: store }) : null);
+  const onConfigSaved = d.onConfigSaved || null;  // async (nextCfg) => void —— 人设改了要重渲染 profile patch
+  const checkUpdateFn = d.checkUpdate || null;    // async () => 更新检查结果
+  const applyUpdateFn = d.applyUpdate || null;    // async () => 执行更新
+  const depsProbeFn = d.depsProbe || null;        // async () => { items: [...] }
+  const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
+  const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
+  const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
+  const pluginInstallFn = d.installPlugin || null;
+  const probeOnebot = d.probeOnebot || null;      // async (force) => { state, selfId, online, version, nickname }
+  const listGroups = d.listGroups || null;        // async () => [{ group_id, group_name, member_count }]
+  const startedAt = Date.now();
+
+  function currentConfig() { return cfg; }
+
+  function statusPayload(url) {
+    const gid = url.searchParams.get("gid") || null;
+    const limit = Number(url.searchParams.get("limit")) || 40;
+    const rt = runtime && runtime.status ? runtime.status() : null;
+    const obs = store ? store.readJsonl(store.paths.observe) : [];
+    const budget = runtime && runtime.budget ? runtime.budget.status() : { used: 0, limit: 0, ratio: 0, mode: "normal" };
+    const live = runtime && runtime.groups ? runtime.groups() : [];
+    return {
+      ok: true,
+      uptimeMs: Date.now() - startedAt,
+      mode: rt ? rt.mode : null,
+      stats: rt ? rt.stats : null,
+      brakes: rt ? rt.brakes : null,
+      budget: budget,
+      cost: summarizeCost(obs, { gid: gid }),
+      scope: gid,
+      stage: (gid && runtime && runtime.stage) ? runtime.stage(gid) : null,
+      group: (gid && runtime && runtime.groupStats) ? runtime.groupStats(gid) : null,
+      allGroups: live,
+      messages: (gid && runtime && runtime.recentMessages) ? runtime.recentMessages(gid, limit) : (runtime && runtime.allRecent ? runtime.allRecent(limit) : []),
+      labels: labels ? labels.status() : null,
+      memes: memes && memes.ready ? { rows: memes.rows.length, tags: memes.tags().length, pack: path.basename(memes.packDir || "") } : null
+    };
+  }
+
+  async function handle(req, res) {
+    const url = new URL(req.url, "http://127.0.0.1");
+    const p = url.pathname;
+
+    if (p === "/api/config" && req.method === "GET") {
+      return sendJson(res, 200, { ok: true, table: table, values: redactConfig(cfg, table), runtime: runtimeConfig(cfg), defaults: defaultsFromTable(table) });
+    }
+    if (p === "/api/config" && req.method === "POST") {
+      const body = await readBody(req);
+      let patch = null;
+      try { patch = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      cfg = deepMerge(cfg, (patch && patch.patch) || patch || {});
+      if (configFile) { try { saveConfig(cfg, configFile); } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message) }); } }
+      let personaNote = null;
+      if (onConfigSaved) { try { personaNote = await onConfigSaved(cfg); } catch (e) { personaNote = { ok: false, error: String(e && e.message) }; } }
+      return sendJson(res, 200, { ok: true, values: redactConfig(cfg, table), runtime: runtimeConfig(cfg), persona: personaNote });
+    }
+
+    if (p === "/api/status") return sendJson(res, 200, statusPayload(url));
+
+    if (p === "/api/onebot") {
+      if (!probeOnebot) return sendJson(res, 200, { ok: true, state: "unknown", note: "没有接 OneBot" });
+      const info = await probeOnebot(url.searchParams.get("force") === "1");
+      return sendJson(res, 200, Object.assign({ ok: true }, info));
+    }
+
+    if (p === "/api/groups") {
+      const seen = new Map();
+      if (store) {
+        for (const r of store.readJsonl(store.paths.observe)) {
+          if (r && r.gid && !seen.has(String(r.gid))) seen.set(String(r.gid), { group_id: String(r.gid), group_name: "", seenLocal: true });
+        }
+      }
+      if (listGroups) {
+        try {
+          const list = await listGroups();
+          for (const g of (list || [])) {
+            const k = String(g.group_id);
+            seen.set(k, Object.assign(seen.get(k) || {}, { group_id: k, group_name: g.group_name || "", member_count: g.member_count, max_member_count: g.max_member_count }));
+          }
+        } catch (e) {}
+      }
+      for (const s of (runtime && runtime.groups ? runtime.groups() : [])) {
+        seen.set(s.gid, Object.assign(seen.get(s.gid) || { group_id: s.gid, group_name: "" }, { live: true, stats: s }));
+      }
+      return sendJson(res, 200, { ok: true, groups: Array.from(seen.values()) });
+    }
+
+    if (p === "/api/action" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      const act = String((b && b.action) || "");
+      if (act === "groupEnable" || act === "groupDisable") {
+        if (!runtime || !runtime.setGroupEnabled) return sendJson(res, 500, { ok: false, error: "没有运行中的实例" });
+        if (!b.gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+        const r = runtime.setGroupEnabled(b.gid, act === "groupEnable");
+        return sendJson(res, 200, { ok: true, action: act, gid: r.gid, enabled: r.enabled });
+      }
+      if (act === "globalStop" || act === "globalResume") {
+        const v = act === "globalStop";
+        if (runtime && runtime.setGlobalPaused) runtime.setGlobalPaused(v);
+        cfg.paused = v;
+        if (configFile) { try { saveConfig(cfg, configFile); } catch (e) {} }
+        return sendJson(res, 200, { ok: true, action: act, paused: v });
+      }
+      if (act === "reconnect") {
+        if (!reconnectFn) return sendJson(res, 500, { ok: false, error: "没有接重连服务" });
+        const r = await reconnectFn();
+        return sendJson(res, 200, Object.assign({ ok: true, action: act }, r || {}));
+      }
+      if (act === "setBudget") {
+        const v = Math.max(0, Math.round(Number(b.value) || 0));
+        setPath(cfg, "runtime.budget.dailyTokens", v);
+        if (runtime && runtime.budget && runtime.budget.limits) runtime.budget.limits.dailyTokens = v;
+        if (configFile) { try { saveConfig(cfg, configFile); } catch (e) {} }
+        return sendJson(res, 200, { ok: true, action: act, dailyTokens: v });
+      }
+      return sendJson(res, 400, { ok: false, error: "未知动作：" + act });
+    }
+
+    // 设置页：git 更新 + 依赖体检
+    if (p === "/api/update") {
+      if (req.method === "GET") return sendJson(res, 200, checkUpdateFn ? await checkUpdateFn() : { ok: false, error: "没有接更新服务" });
+      if (req.method === "POST") return sendJson(res, 200, applyUpdateFn ? await applyUpdateFn() : { ok: false, error: "没有接更新服务" });
+      return sendJson(res, 405, { ok: false, error: "不支持的方法" });
+    }
+    if (p === "/api/plugins" && req.method === "GET") {
+      return sendJson(res, 200, pluginsProbeFn ? await pluginsProbeFn() : { ok: false, items: [] });
+    }
+    if (p === "/api/plugins/install" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      if (!b || !b.id) return sendJson(res, 400, { ok: false, error: "缺少 id" });
+      return sendJson(res, 200, pluginInstallFn ? await pluginInstallFn(String(b.id)) : { ok: false, error: "没有接插件安装服务" });
+    }
+
+    if (p === "/api/deps" && req.method === "GET") {
+      return sendJson(res, 200, depsProbeFn ? await depsProbeFn() : { ok: false, items: [] });
+    }
+    if (p === "/api/deps/install" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      if (!b || !b.id) return sendJson(res, 400, { ok: false, error: "缺少 id" });
+      return sendJson(res, 200, depFixFn ? await depFixFn(String(b.id)) : { ok: false, error: "没有接依赖服务" });
+    }
+
+    // 群档案：管理员可以直接改提炼结果，也可以写本群专属人设
+    if (p === "/api/profile") {
+      if (!store) return sendJson(res, 200, { ok: false, error: "没有可用的存储" });
+      const gid = url.searchParams.get("gid") || (req.method === "POST" ? null : null);
+      if (req.method === "GET") {
+        if (!gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+        const prof = store.loadProfile(gid);
+        return sendJson(res, 200, { ok: true, gid: String(gid), profile: prof || null, prompt: prof ? buildProfilePrompt(prof) : "" });
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        let b = null;
+        try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+        if (!b || !b.gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+        const cur = store.loadProfile(b.gid) || {};
+        const next = Object.assign({}, cur);
+        for (const k of ["interests", "dislikes", "habits", "notes", "pace", "activeHours", "personaText"]) {
+          if (b[k] !== undefined) next[k] = b[k];
+        }
+        next.rounds = Number(cur.rounds) || 0;
+        next.updatedAt = new Date().toISOString();
+        next.updatedBy = "admin";
+        store.saveProfile(b.gid, next);
+        return sendJson(res, 200, { ok: true, gid: String(b.gid), profile: next, prompt: buildProfilePrompt(next) });
+      }
+      if (req.method === "DELETE") {
+        if (!gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+        try { fs.unlinkSync(path.join(store.paths.profiles, "g-" + String(gid) + ".json")); } catch (e) {}
+        return sendJson(res, 200, { ok: true, gid: String(gid), cleared: true });
+      }
+      return sendJson(res, 405, { ok: false, error: "不支持的方法" });
+    }
+
+    if (p === "/api/labels" && req.method === "GET") {
+      if (!labels) return sendJson(res, 200, { ok: true, pending: [], stats: agreementStats([]) });
+      const limit = Number(url.searchParams.get("limit")) || 100;
+      const all = labels.rows();
+      return sendJson(res, 200, {
+        ok: true, pending: pendingOf(all).slice(-limit).reverse(),
+        labeled: labeledOf(all).slice(-limit).reverse(),
+        stats: agreementStats(all)
+      });
+    }
+    if (p === "/api/labels" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      if (!labels || !b || !b.id) return sendJson(res, 400, { ok: false, error: "缺少 id" });
+      labels.label(b.id, b.human, b.labeler);
+      return sendJson(res, 200, { ok: true, stats: labels.status() });
+    }
+    if (p === "/api/observe") {
+      if (!store) return sendJson(res, 200, { ok: true, rows: [] });
+      const limit = Number(url.searchParams.get("limit")) || 100;
+      const gid = url.searchParams.get("gid");
+      let rows = store.readJsonl(store.paths.observe);
+      if (gid) rows = rows.filter(function (r) { return String(r.gid) === String(gid); });
+      return sendJson(res, 200, { ok: true, rows: rows.slice(-limit).reverse() });
+    }
+    if (p === "/api/memes") {
+      if (!memes || !memes.ready) return sendJson(res, 200, { ok: true, ready: false, items: [] });
+      const tag = url.searchParams.get("tag");
+      const rows = (tag ? memes.byTag(tag) : memes.rows).slice(0, 60);
+      return sendJson(res, 200, {
+        ok: true, ready: true, pack: memes.packDir, tags: memes.tags(),
+        items: rows.map(function (r) { return { tag: r.tag, file: r.file_name, caption: r.caption, keywords: r.keywords, url: "/meme/" + encodeURIComponent(r.tag) + "/" + encodeURIComponent(r.file_name) }; })
+      });
+    }
+    if (p.startsWith("/meme/")) {
+      if (!memes || !memes.ready) return sendText(res, 404, "no meme library");
+      const parts = decodeURIComponent(p.slice("/meme/".length)).split("/");
+      if (parts.length !== 2) return sendText(res, 400, "bad path");
+      const row = memes.rows.filter(function (r) { return r.tag === parts[0] && r.file_name === parts[1]; })[0];
+      if (!row) return sendText(res, 404, "not found");
+      const rootAbs = path.resolve(memes.packDir);
+      const fileAbs = path.resolve(row.path);
+      if (!fileAbs.startsWith(rootAbs)) return sendText(res, 403, "forbidden");
+      try {
+        const buf = fs.readFileSync(fileAbs);
+        res.writeHead(200, { "Content-Type": MIME[path.extname(fileAbs).toLowerCase()] || "application/octet-stream", "Cache-Control": "max-age=60" });
+        return res.end(buf);
+      } catch (e) { return sendText(res, 404, "read failed"); }
+    }
+    if (p === "/api/health") return sendJson(res, 200, { ok: true });
+
+    let rel = p === "/" ? "/index.html" : p;
+    const abs = path.resolve(PUBLIC_DIR, "." + rel);
+    if (!abs.startsWith(path.resolve(PUBLIC_DIR))) return sendText(res, 403, "forbidden");
+    try {
+      const buf = fs.readFileSync(abs);
+      res.writeHead(200, { "Content-Type": MIME[path.extname(abs).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-store" });
+      return res.end(buf);
+    } catch (e) { return sendText(res, 404, "not found: " + rel); }
+  }
+
+  const server = http.createServer(function (req, res) {
+    handle(req, res).catch(function (e) { try { sendJson(res, 500, { ok: false, error: String(e && e.message) }); } catch (err) {} });
+  });
+
+  return {
+    server: server,
+    listen: function (port, host) {
+      return new Promise(function (resolve) {
+        server.listen(port == null ? DEFAULT_PORT : port, host || "127.0.0.1", function () { resolve({ port: server.address().port, url: "http://127.0.0.1:" + server.address().port }); });
+      });
+    },
+    close: function () { return new Promise(function (r) { server.close(function () { r(true); }); }); },
+    getConfig: currentConfig,
+    setConfig: function (c) { cfg = c; return cfg; },
+    status: function () { return statusPayload(new URL("http://127.0.0.1/api/status")); }
+  };
+}

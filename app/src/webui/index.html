@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH-QQ 群小助手 · 配置端</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="dot" id="live-dot"></div>
+      <div>
+        <div class="brand-name">群小助手</div>
+        <div class="brand-sub" id="brand-sub">连接中…</div>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <button class="ghost" id="theme-btn" title="切换明暗">◐ 主题</button>
+      <button class="primary" id="save-btn" disabled>保存</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="page-title">状态</h1>
+      <div class="topbar-right">
+        <select id="group-select" title="看哪个群"></select>
+        <div class="badges" id="badges"></div>
+      </div>
+    </header>
+    <section id="page" class="page"></section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

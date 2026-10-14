@@ -1,0 +1,2023 @@
+import { classify, CLASSIFY_TABLE, extractKeywords } from "../app/src/classify.js";
+import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
+import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
+import { engagementOf, reward, costOf } from "../app/src/score.js";
+import { createProactive } from "../app/src/proactive.js";
+import { createStore } from "../app/src/store.js";
+import { createAddressee } from "../app/src/addressee.js";
+import { parseEvents, buildArgs, brainEnv, cacheHitRate, PROFILE_DEFAULT, DEPTH_POLICY_DEFAULT, ensureBrainProfile } from "../app/src/brain.js";
+import { maskKey, parseRefsApiKey, pickApiKey, loadSecrets, saveSecrets } from "../app/src/secrets.js";
+import { buildPersonaText, renderProfilePatch, writeProfilePatch, writeTierOverlay, renderTierOverlay, writeAllTierOverlays, TIER_EFFORT, DEFAULT_PERSONA, PROFILE_ID } from "../app/src/dshprofile.js";
+import { DATA_ROOT, DSH_HOME, APP_ROOT, BRAIN_TMP_DIR } from "../app/src/paths.js";
+import { splitReply, splitSentences, cutAtSentence } from "../app/src/split.js";
+import { createCoalescer, mergeBucket, pickAnchor } from "../app/src/coalesce.js";
+import { createBudget, dayKeyOf } from "../app/src/budget.js";
+import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
+import { createOneBot, normalizeEvent, withToken } from "../app/src/onebot.js";
+import { createRuntime } from "../app/src/runtime.js";
+import { defaultsFromTable, redactConfig, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
+import { parseAuditVerdict, auditStub, createAuditor, setAuditChannel, audit as runAudit, AUDIT_PROFILE_ID, AUDIT_TIMEOUT_MS } from "../app/src/audit.js";
+import { createSearch, buildSummary, normalizeResults, injectSummary, cacheKeyOf, parseBingHtml, stripTags, httpSearch, SEARCH_PROFILE_ID } from "../app/src/search.js";
+import { DEFAULT_BOUNDS } from "../app/src/gatescore.js";
+import { createTracker, isAnnoyed, calledBot } from "../app/src/feedback.js";
+import { createLabelQueue, foldLabels, pendingOf, labeledOf, agreementStats, shortHash } from "../app/src/label.js";
+import { buildProfilePrompt } from "../app/src/profile.js";
+import { createMemeLibrary, shouldAttachMeme, scoreRow, scanPack, resolveMemeRoots, MEME_DEFAULTS } from "../app/src/meme.js";
+import { createCommands, createDefaultCommands, permLevelOf, allow } from "../app/src/commands.js";
+import { createWebUi, summarizeObservations, summarizeCost, startOfToday, DEFAULT_PORT } from "../app/src/webui.js";
+import { gitInfo, checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "../app/src/update.js";
+import { personaFromConfig } from "../app/src/dshprofile.js";
+import { createMockOneBotServer } from "../app/src/mock-onebot-server.js";
+import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, VISION_DEFAULTS, VISION_PROFILE_ID } from "../app/src/vision.js";
+import { createTts, parseVoiceTag, buildSapiScript, TTS_DEFAULTS } from "../app/src/tts.js";
+import fs from "node:fs";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+let pass = 0; const fails = []; const pendingTests = [];
+function failTest(name, e) { fails.push(name + " :: " + String(e && e.message).slice(0, 160)); }
+function t(name, fn) {
+  try {
+    const r = fn();
+    if (r && typeof r.then === "function") { pendingTests.push(r.then(function () { pass += 1; }, function (e) { failTest(name, e); })); return; }
+    pass += 1;
+  } catch (e) { failTest(name, e); }
+}
+function eq(a, b, msg) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((msg || "") + " 期望 " + JSON.stringify(b) + " 实得 " + JSON.stringify(a)); }
+function ok(v, msg) { if (!v) throw new Error(msg || "应为真"); }
+
+t("classify: 提问桶", function () { ok(classify("这个报错怎么解").buckets.includes("question"), "应落 question"); });
+t("classify: 梗桶", function () { ok(classify("哈哈这波太典了笑死").buckets.includes("banter"), "应落 banter"); });
+t("classify: 游戏桶", function () { ok(classify("第五层那个 boss 怎么打").buckets.includes("game"), "应落 game"); });
+t("classify: 求助标记", function () { ok(classify("帮我写个 ffmpeg 命令").flags.isRequest, "isRequest 应为真"); });
+t("classify: 详细标记", function () { ok(classify("详细讲讲原理并写进文档").flags.isDetailAsk, "isDetailAsk 应为真"); });
+t("classify: 话题深度 3", function () { eq(classify("详细讲讲这个报错的原因和原理，我要写进文档里").topicDepth, 3); });
+t("classify: 闲聊深度 0", function () { eq(classify("大家晚饭吃了吗").topicDepth <= 1, true); });
+t("classify: 关键词非空", function () { ok(extractKeywords("这个报错怎么解", {}).length > 0); });
+t("classify: 兴趣命中", function () { eq(classify("今晚开黑吗", { interests: ["开黑"] }).interestHit, ["开黑"]); });
+
+t("utility: pSay 单调", function () {
+  const a = utilityScore({ pSay: 0.9, sem: 0.5, cont: 1, demand: 1, diff: 0.3, cost: 200, costScale: 900, gate: 0.5 });
+  const b = utilityScore({ pSay: 0.1, sem: 0.5, cont: 1, demand: 1, diff: 0.3, cost: 200, costScale: 900, gate: 0.5 });
+  ok(a.U > b.U, "高 pSay 的 U 应更大");
+});
+t("utility: gate 地板", function () { ok(gateFactor(1) > gateFactor(0), "硬触发 gate 应更大"); });
+t("utility: 成本拉低 U", function () {
+  const a = utilityScore({ pSay: 0.8, sem: 0.5, cont: 1, demand: 1, diff: 0.9, cost: 2000, costScale: 900 });
+  const b = utilityScore({ pSay: 0.8, sem: 0.5, cont: 1, demand: 1, diff: 0.9, cost: 200, costScale: 900 });
+  ok(a.U < b.U, "成本高的 U 应更小");
+});
+
+t("gatescore: 阀门三态", function () {
+  eq(valve(0.1, null).verdict, "no");
+  eq(valve(0.9, null).verdict, "yes");
+  eq(valve(0.5, null).verdict, "grey");
+});
+t("gatescore: 深档映射", function () {
+  eq(depthTier(0.1, null).tier, "low");
+  eq(depthTier(0.4, null).tier, "mid");
+  eq(depthTier(0.8, null).tier, "high");
+});
+t("gatescore: 低档不搜", function () { eq(searchPlan("low", ["a"]).search, 0); eq(searchPlan("high", ["a"]).search, 1); });
+t("gatescore: 边界自适应有界", function () {
+  const b = adaptBounds({ lo: 0.4, hi: 0.75 }, { missedRate: 0.9, auditFlipRate: 0.9 });
+  ok(b.lo >= 0.25 && b.hi <= 0.92, "应在边界内");
+});
+
+t("score: engagement 档位", function () {
+  eq(engagementOf({ outcome: "continued_with_bot", nickCall: true }), 4);
+  eq(engagementOf({ outcome: "continued_with_bot" }), 2);
+  eq(engagementOf({ outcome: "went_to_others" }), -1);
+  eq(engagementOf({ outcome: "annoyed" }), -2);
+});
+t("score: 输出按 2 倍计费", function () { eq(costOf({ inTokens: 100, outTokens: 50 }), 200); });
+t("score: reward 随成本下降", function () {
+  const hi = reward({ outcome: "continued_with_bot", inTokens: 100, outTokens: 200 }, { lambda: 1 }, 100);
+  const lo = reward({ outcome: "continued_with_bot", inTokens: 100, outTokens: 20 }, { lambda: 1 }, 100);
+  ok(hi < lo, "成本高的 reward 应更低");
+});
+
+t("proactive: 未命中兴趣不插话", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1 } });
+  eq(p.consider({ text: "今天天气不错", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, false);
+});
+t("proactive: 兴趣命中 + 概率过 → 插话", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1 } });
+  eq(p.consider({ text: "今晚开黑吗", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, true);
+});
+t("proactive: 冷却生效", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1, minGapSec: 120 } });
+  ok(p.consider({ text: "今晚开黑吗", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak);
+  p.markSpoken(1000000);
+  eq(p.consider({ text: "今晚开黑吗", now: 1010000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, false);
+});
+t("proactive: 已有回复动作时让位", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1 } });
+  eq(p.consider({ text: "今晚开黑吗", now: 1000000 }, { action: "brain" }, { interests: ["开黑"] }).speak, false);
+});
+t("proactive: 每小时配额", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1, maxPerHour: 1, minGapSec: 0 } });
+  p.markSpoken(1000000);
+  eq(p.consider({ text: "今晚开黑吗", now: 1001000 }, { action: "ignore" }, { interests: ["开黑"] }).speak, false);
+});
+
+t("store: 追加与读取 jsonl", function () {
+  const BASE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test");
+  fs.mkdirSync(BASE, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(BASE, "a-"));
+  const s = createStore(dir, { jsonlMaxLines: 3 });
+  s.appendJsonl(s.paths.feedback, { a: 1 });
+  s.appendJsonl(s.paths.feedback, { a: 2 });
+  eq(s.readJsonl(s.paths.feedback).length, 2);
+  s.appendJsonl(s.paths.feedback, { a: 3 });
+  s.appendJsonl(s.paths.feedback, { a: 4 });
+  eq(s.jsonlCount(s.paths.feedback), 1, "超过 3 行应轮转");
+  eq(s.readJsonl(s.paths.feedback).length, 4, "读取应含上一代");
+  ok(fs.existsSync(s.paths.feedback + ".1"), "应存在上一代文件");
+});
+t("store: 群档案读写", function () {
+  const BASE2 = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test");
+  fs.mkdirSync(BASE2, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(BASE2, "b-"));
+  const s = createStore(dir, {});
+  s.saveProfile("123456789", { interests: ["开黑"] });
+  eq(s.loadProfile("123456789").interests, ["开黑"]);
+});
+
+t("addressee: @ 提升置信度", function () {
+  const a = createAddressee({});
+  const hi = a.judge("g", { text: "这个怎么解", atBot: true, botNames: ["小助手"] }).conf;
+  const lo = a.judge("g", { text: "这个怎么解", atBot: false, botNames: ["小助手"] }).conf;
+  ok(hi > lo, "@ 的置信度应更高");
+});
+t("addressee: 点到别人名字降权", function () {
+  const a = createAddressee({});
+  const withOther = a.judge("g", { text: "阿伟你会不会", botNames: ["小助手"], groupNames: ["阿伟"] }).conf;
+  const without = a.judge("g", { text: "你会不会", botNames: ["小助手"], groupNames: ["阿伟"] }).conf;
+  ok(withOther < without, "点到别人的名字应降权");
+});
+
+
+// ---------- 隔离性专项（跨群不串用） ----------
+import { createBandit, bucketOf } from "../app/src/bandit.js";
+import { refitProfile } from "../app/src/profile.js";
+import { createBot } from "../app/src/index.js";
+
+t("bandit: 跨群隔离（A 群学的不能影响 B 群）", function () {
+  const b = createBandit({ rng: function () { return 0.5; } });
+  for (let i = 0; i < 6; i++) b.update("question", "terse", 1, "groupA");
+  const keys = Object.keys(b.state());
+  ok(keys.length > 0 && keys.every(function (k) { return k.startsWith("groupA|"); }), "状态只应含 A 群");
+  const pick = b.choose("question", "groupB");
+  const anyLearned = pick.detail.some(function (x) { return x.n > 0; });
+  eq(anyLearned, false, "B 群应是全新先验");
+  ok(b.groups().includes("groupA") && !b.groups().includes("groupB"), "群列表应先只有 A");
+});
+
+t("proactive: 跨群冷却独立", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1, minGapSec: 120 } });
+  const evA = { gid: "A", text: "今晚开黑吗", now: 1000000 };
+  const evB = { gid: "B", text: "今晚开黑吗", now: 1000000 };
+  ok(p.consider(evA, { action: "ignore" }, { interests: ["开黑"] }).speak, "A 应先能说");
+  p.markSpoken(1000000, "A");
+  eq(p.consider(evB, { action: "ignore" }, { interests: ["开黑"] }).speak, true, "B 不应被 A 的冷却挡住");
+});
+
+t("proactive: 跨群配额独立", function () {
+  const p = createProactive({ rng: function () { return 0; }, config: { rate: 1, maxPerHour: 1, minGapSec: 0 } });
+  p.markSpoken(1000000, "A");
+  eq(p.consider({ gid: "A", text: "今晚开黑吗", now: 1001000 }, { action: "ignore" }, { interests: ["开黑"] }).speak, false, "A 配额已满");
+  eq(p.consider({ gid: "B", text: "今晚开黑吗", now: 1001000 }, { action: "ignore" }, { interests: ["开黑"] }).speak, true, "B 配额独立");
+});
+
+t("profile: 小助手自己的名字不被学成兴趣", function () {
+  const prof = refitProfile([
+    { gid: "A", outcome: "continued_with_bot", tokens: ["小肥鱼", "报错"] },
+    { gid: "A", outcome: "continued_with_bot", tokens: ["小肥鱼"] }
+  ], null, { exclude: ["小肥鱼", "肥鱼", "小助手"] });
+  ok(!prof.interests.includes("小肥鱼"), "不应把名字学成兴趣");
+  ok(prof.interests.includes("报错"), "正常词应保留");
+});
+
+t("profile: 代词助词碎片被过滤", function () {
+  const prof = refitProfile([{ gid: "A", outcome: "continued_with_bot", tokens: ["你在吗", "游戏"] }], null, { exclude: [] });
+  eq(prof.interests.includes("游戏"), true);
+  eq(prof.interests.includes("你在吗"), false);
+});
+
+t("端到端隔离：B 群事件不会写进 A 群档案", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "iso-" + Date.now());
+  const bot = createBot({ dataRoot: dir, score: { refN: 2 } });
+  bot.observe({ gid: "A", uid: "u1", arm: "terse", bucket: "game", outcome: "continued_with_bot", tokens: ["开黑"], inTokens: 10, outTokens: 5 });
+  const r = bot.observe({ gid: "B", uid: "u2", arm: "terse", bucket: "general", outcome: "continued_with_bot", tokens: ["追星"], inTokens: 10, outTokens: 5 });
+  ok(r && r.refit, "第 2 次回复应触发重炼");
+  const profB = bot.store.loadProfile("B");
+  eq(profB.interests.includes("追星"), true, "B 应学到自己的词");
+  eq(profB.interests.includes("开黑"), false, "B 不应学到 A 的词");
+  eq(bot.store.loadProfile("A"), null, "此时 A 还没有档案，不应被创建");
+});
+
+t("决策里带话风臂", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "arm-" + Date.now());
+  const bot = createBot({ dataRoot: dir, rng: function () { return 0.5; } });
+  return bot.handleEvent({ gid: "A", uid: "u1", text: "@小助手 在吗", atBot: true, botNames: ["小助手"], now: 1 }).then(function (d) {
+    ok(d.action !== "ignore", "应触发回复");
+    ok(["terse", "standard", "detailed"].includes(d.arm), "应带合法 arm，实得 " + d.arm);
+  });
+});
+
+t("bandit: 落盘后恢复，且恢复后跨群仍隔离", function () {
+  const b1 = createBandit({ rng: function () { return 0.5; } });
+  for (let i = 0; i < 4; i++) b1.update("question", "terse", 1, "A");
+  b1.update("question", "terse", -1, "B");
+  const snap = b1.state();
+  const b2 = createBandit({ rng: function () { return 0.5; } });
+  eq(b2.hydrate(snap), 2, "应恢复 2 个格子");
+  eq(b2.state(), snap, "恢复后状态应一致");
+  eq(Object.keys(b2.state()).every(function (k) { return k.indexOf("|") === 1 || k.split("|")[0] === "A" || k.split("|")[0] === "B"; }), true);
+  const pickB = b2.choose("question", "A");
+  ok(pickB.detail.some(function (x) { return x.n === 4; }), "A 的样本数应为 4（未被 B 污染）");
+});
+
+// ===== P0：大脑通道与真实 CLI 对齐 =====
+
+t("brain: 解析真实 CLI 事件（final 优先）", function () {
+  const raw = [
+    '{"type":"session","sessionId":"s1"}',
+    '{"type":"status","phase":"turn_start","turn":1}',
+    '{"type":"thinking","text":""}',
+    '{"type":"text","text":"我到了"}',
+    '{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":5646,"outputTokens":3,"cacheReadTokens":384,"cacheWriteTokens":0,"totalTokens":6033}}',
+    '{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}',
+    '{"type":"final","text":"我到了"}'
+  ].join(String.fromCharCode(10));
+  const p = parseEvents(raw);
+  eq(p.text, "我到了");
+  eq(p.sessionId, "s1");
+  eq(p.steps, 1);
+  eq(p.usage.inputTokens, 5646);
+  eq(p.error, null);
+});
+
+t("brain: 没有 final 时回落到 text 片段", function () {
+  const raw = '{"type":"text","text":"前半"}' + String.fromCharCode(10) + '{"type":"text","text":"后半"}';
+  eq(parseEvents(raw).text, "前半后半");
+});
+
+t("brain: 裸文本兜底（mock CLI 形状不回归）", function () {
+  const raw = '{"type":"status","phase":"step_end","usage":{"inputTokens":127,"outputTokens":45,"cacheReadTokens":1000,"cacheWriteTokens":90}}'
+    + String.fromCharCode(10) + "我上次也卡这儿。" + String.fromCharCode(10) + '{"type":"status","phase":"session_end"}';
+  const p = parseEvents(raw);
+  eq(p.text, "我上次也卡这儿。");
+  eq(p.usage.cacheReadTokens, 1000);
+  eq(Math.round(cacheHitRate(p.usage) * 1000) / 10, 82.2);
+});
+
+t("brain: turn_end 的错误会被识别", function () {
+  const raw = '{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"no API key","code":"MISSING_CREDENTIAL"}}}';
+  ok(String(parseEvents(raw).error).includes("no API key"));
+});
+
+t("brain: buildArgs 带 profile 与 --json，任务在最后", function () {
+  const args = buildArgs({ launch: { cliJs: "C:/x/cli.js" }, profile: "qq-brain", appName: "headless", promptText: "在吗" });
+  eq(args[args.length - 1], "在吗");
+  ok(args.includes("--json"), "应带 --json 才能拿到 usage");
+  ok(args.includes("qq-brain"), "应带 profile");
+  eq(args[args.indexOf("--profile") + 1], "qq-brain");
+  eq(args.indexOf("--json") < args.indexOf("在吗"), true, "--json 必须在任务文本之前（headless 只把最后一个位置当任务）");
+});
+
+t("brain: brainEnv 注入 DSH_HOME 与密钥", function () {
+  const env = brainEnv({ dshHome: "C:/ws/app/dsh-home", apiKey: "sk-test-1234567890" });
+  eq(env.DSH_HOME, "C:/ws/app/dsh-home");
+  eq(env.DEEPSEEK_API_KEY, "sk-test-1234567890");
+  const env2 = brainEnv({ dshHome: "C:/ws/app/dsh-home", apiKey: null, env: {} });
+  eq(env2.DEEPSEEK_API_KEY, undefined, "没有密钥时不应乱塞");
+});
+
+t("brain: 默认 profile 名与实际 profile 一致", function () { eq(PROFILE_DEFAULT, PROFILE_ID); eq(PROFILE_DEFAULT, "qq-brain"); });
+
+t("brain: N8 决策——进 prompt 的上下文窗口为 10", function () {
+  eq(DEPTH_POLICY_DEFAULT.mid.contextWindow, 10);
+  eq(DEPTH_POLICY_DEFAULT.high.contextWindow, 10);
+});
+
+t("dshprofile: 人设文本逐字节稳定", function () {
+  const a = buildPersonaText(DEFAULT_PERSONA);
+  const b = buildPersonaText(Object.assign({}, DEFAULT_PERSONA));
+  eq(a, b);
+  ok(a.includes("小肥鱼"));
+  ok(a.includes("【身份内核】"));
+  ok(!/\d{4}-\d{2}-\d{2}/.test(a), "人设里不能有时间戳，否则前缀缓存永远不命中");
+});
+
+t("dshprofile: patch 是 loader 数组且人设落在 personaPrefix", function () {
+  const patch = JSON.parse(renderProfilePatch("【测试】人设"));
+  eq(Array.isArray(patch), true);
+  eq(patch.length, 1);
+  eq(patch[0].id, "system-prompt");
+  eq(patch[0].config.personaPrefix, "【测试】人设");
+  eq(patch[0].config.includeHarnessIdentity, false);
+});
+
+t("dshprofile: writeProfilePatch 落盘可回读", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "prof-" + Date.now());
+  const file = writeProfilePatch(dir, "qq-brain", "【落盘】人设");
+  ok(fs.existsSync(file));
+  eq(JSON.parse(fs.readFileSync(file, "utf8"))[0].config.personaPrefix, "【落盘】人设");
+});
+
+t("secrets: maskKey 不泄露明文", function () {
+  eq(maskKey(""), null);
+  eq(maskKey("short"), "***");
+  // 纯假值夹具 —— 这里绝不放真实密钥（曾经放过，已在 git 历史里清掉）
+  const fixture = "sk-FIXTURE-abcd-1234-0000-WXYZ";
+  const m = maskKey(fixture);
+  eq(m, "sk-FIX...WXYZ");
+  ok(!m.includes("abcd-1234"), "中段必须被遮住");
+});
+
+t("secrets: parseRefsApiKey 只认 refs 块里的目标键", function () {
+  const yaml = ["version: 1", "refs:", "  DEEPSEEK_API_KEY: sk-abc123456789", "  OTHER: zzz", "records:", "  DEEPSEEK_API_KEY: should-not-win"].join(String.fromCharCode(10));
+  eq(parseRefsApiKey(yaml), "sk-abc123456789");
+  eq(parseRefsApiKey("records:" + String.fromCharCode(10) + "  DEEPSEEK_API_KEY: nope"), null);
+  eq(parseRefsApiKey('refs:' + String.fromCharCode(10) + '  DEEPSEEK_API_KEY: "sk-quoted"'), "sk-quoted");
+});
+
+t("secrets: pickApiKey 文件优先于环境变量", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "sec-" + Date.now());
+  const f = path.join(dir, "secrets.json");
+  saveSecrets({ deepseekApiKey: "sk-from-file" }, f);
+  eq(pickApiKey({ DEEPSEEK_API_KEY: "sk-from-env" }, f), "sk-from-file");
+  eq(pickApiKey({ DEEPSEEK_API_KEY: "sk-from-env" }, path.join(dir, "missing.json")), "sk-from-env");
+  eq(pickApiKey({}, path.join(dir, "missing.json")), null);
+  eq(loadSecrets(f).deepseekApiKey, "sk-from-file");
+});
+
+t("paths: 数据根稳定指向 <工作区>/app/dsh-data", function () {
+  ok(APP_ROOT.endsWith("app"), "APP_ROOT 应是 app 目录，实得 " + APP_ROOT);
+  eq(DATA_ROOT, path.join(APP_ROOT, "dsh-data"));
+  ok(BRAIN_TMP_DIR.startsWith(DATA_ROOT), "brain 临时目录必须在数据根内（原实现在 cwd 下）");
+  ok(DSH_HOME.endsWith("dsh-home") || !!process.env.DSHQQ_DSH_HOME, "DSH_HOME 应落在程序目录内");
+});
+
+// ===== P1：接入层（N6 分条 / N23 合并与预算 / N10 刹车 / OneBot）=====
+
+t("split: 短回复不分条", function () {
+  eq(splitReply("在的", 20), ["在的"]);
+});
+
+t("split: 按句号切多条且每条不超上限", function () {
+  const text = "第一句话就是这样。第二句话稍微长一点点了。第三句话也不短啊。";
+  const segs = splitReply(text, 12, { maxSegments: 3 });
+  ok(segs.length >= 2, "应切成多条，实得 " + segs.length);
+  for (const s of segs) ok(s.length <= 12, "每段不超上限，实得 " + s.length + " :: " + s);
+  eq(segs.join(""), text);
+});
+
+t("split: 单句超长时在句末截断", function () {
+  const long = "这是一个特别特别特别长的句子没有句号一直写下去写下去写下去";
+  const segs = splitReply(long, 10);
+  ok(segs[0].length <= 10);
+});
+
+t("split: 超过 maxSegments 时余下并入最后一条", function () {
+  const text = "一。二。三。四。五。六。";
+  const segs = splitReply(text, 2, { maxSegments: 2 });
+  eq(segs.length, 2);
+  ok(segs[1].length <= 2, "并入后仍受上限约束");
+});
+
+t("split: 句末标点切分本身正确", function () {
+  eq(splitSentences("甲。乙！丙？"), ["甲。", "乙！", "丙？"]);
+  eq(cutAtSentence("甲乙丙丁戊", 3), "甲乙丙");
+});
+
+t("coalesce: 窗口内同人连发合并成一批", function () {
+  const c = createCoalescer({ windowMs: 1000, maxBatch: 5 });
+  c.push({ gid: "A", uid: "u1", text: "在吗", now: 0, speaker: "甲" });
+  c.push({ gid: "A", uid: "u1", text: "帮我看看", now: 200, speaker: "甲" });
+  eq(c.flushDue(500).length, 0, "还没静默够，不成批");
+  const out = c.flushDue(1300);
+  eq(out.length, 1);
+  eq(out[0].count, 2);
+  ok(out[0].text.includes("甲：在吗"));
+  ok(out[0].text.includes("甲：帮我看看"));
+});
+
+t("coalesce: 不同人各自成批", function () {
+  const c = createCoalescer({ windowMs: 100, maxBatch: 5 });
+  c.push({ gid: "A", uid: "u1", text: "1", now: 0 });
+  c.push({ gid: "A", uid: "u2", text: "2", now: 0 });
+  eq(c.flushDue(200).length, 2);
+});
+
+t("coalesce: maxBatch 只留最近 N 条", function () {
+  const c = createCoalescer({ windowMs: 100, maxBatch: 2 });
+  c.push({ gid: "A", uid: "u1", text: "一", now: 0 });
+  c.push({ gid: "A", uid: "u1", text: "二", now: 10 });
+  c.push({ gid: "A", uid: "u1", text: "三", now: 20 });
+  const b = c.flushDue(200)[0];
+  eq(b.count, 2);
+  ok(b.text.includes("二") && b.text.includes("三") && !b.text.includes("一"));
+});
+
+t("coalesce: pickAnchor 取最近一条过得去的", function () {
+  const a = pickAnchor([{ action: "ignore" }, { action: "brain", tier: "mid" }, { action: "ignore" }]);
+  eq(a.index, 1);
+  eq(pickAnchor([{ action: "ignore" }]), null);
+});
+
+t("budget: 未超软线时允许主动", function () {
+  const b = createBudget({ limits: { dailyTokens: 1000 }, now: function () { return 0; } });
+  eq(b.mode(), "normal");
+  eq(b.allowProactive(), true);
+  b.record(900, 0);
+  eq(b.mode(), "noProactive");
+  eq(b.allowProactive(), false);
+  eq(b.allowReply(false), true, "关主动 ≠ 不回复");
+  b.record(200, 0);
+  eq(b.mode(), "mentionOnly");
+  eq(b.allowReply(false), false);
+  eq(b.allowReply(true), true, "被点名的仍要回");
+});
+
+t("budget: N23 —— 每群每小时条数上限默认取消", function () {
+  const b = createBudget({ limits: {}, now: function () { return 0; } });
+  eq(b.limits.groupHourlyLimit, 0);
+  for (let i = 0; i < 50; i++) ok(b.groupAllow("A", 0), "默认不应有每小时上限");
+});
+
+t("budget: 跨日归零", function () {
+  let t = new Date(2026, 0, 1, 23, 0, 0).getTime();
+  const b = createBudget({ limits: { dailyTokens: 100 }, now: function () { return t; } });
+  b.record(100, t);
+  eq(b.mode(), "mentionOnly");
+  t = new Date(2026, 0, 2, 0, 30, 0).getTime();
+  eq(b.mode(), "normal");
+});
+
+t("brakes: STOP 文件触发全局停", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "stop-" + Date.now());
+  fs.mkdirSync(dir, { recursive: true });
+  const br = createBrakes({ workspaceRoot: dir, now: function () { return 0; } });
+  eq(br.state("A", 0).stopped, false);
+  fs.writeFileSync(path.join(dir, "STOP"), "x");
+  const s = br.state("A", 0);
+  eq(s.stopped, true);
+  eq(s.reason, "STOP 文件");
+});
+
+t("brakes: 群内指令停到点自动恢复", function () {
+  let t = 1000;
+  const br = createBrakes({ workspaceRoot: path.join(os.tmpdir(), "dshqq-none-" + Date.now()), now: function () { return t; } });
+  br.stopGroup("A", 1, t);
+  eq(br.state("A", t).stopped, true);
+  eq(br.state("B", t).stopped, false, "只停那一个群");
+  t = 1000 + 61000;
+  eq(br.state("A", t).stopped, false, "到期自动恢复");
+});
+
+t("brakes: /停 只认整条指令", function () {
+  eq(parseAdminCommand("/停").cmd, "stop");
+  eq(parseAdminCommand("/停").minutes, 60);
+  eq(parseAdminCommand("/停 5").minutes, 5);
+  eq(parseAdminCommand("/开").cmd, "resume");
+  eq(parseAdminCommand("/状态").cmd, "status");
+  eq(parseAdminCommand("我们/停一下吧"), null);
+  eq(parseAdminCommand("在吗"), null);
+});
+
+t("brakes: isAdmin 认群主/管理/白名单", function () {
+  eq(isAdmin({ uid: "1", role: "owner" }, {}), true);
+  eq(isAdmin({ uid: "1", role: "admin" }, {}), true);
+  eq(isAdmin({ uid: "1", role: "member" }, {}), false);
+  eq(isAdmin({ uid: "9", role: "member" }, { whitelist: ["9"] }), true);
+  eq(isAdmin({ uid: "9", role: "member" }, { owners: ["7"] }), false);
+});
+
+t("onebot: 归一化群消息，识别 @我 与 @全体", function () {
+  const raw = {
+    post_type: "message", message_type: "group", group_id: 123456789, user_id: 1001, self_id: 999,
+    message_id: 7, sender: { nickname: "甲", role: "member" },
+    message: [{ type: "at", data: { qq: "999" } }, { type: "text", data: { text: " 在吗" } }, { type: "at", data: { qq: "all" } }]
+  };
+  const e = normalizeEvent(raw, { selfId: "999", sentIds: new Set(), now: 5 });
+  eq(e.gid, "123456789");
+  eq(e.uid, "1001");
+  eq(e.text, "在吗");
+  eq(e.atBot, true);
+  eq(e.atAll, true);
+  eq(e.speaker, "甲");
+  eq(e.now, 5);
+});
+
+t("onebot: 忽略私聊、自己的消息与空消息", function () {
+  eq(normalizeEvent({ post_type: "message", message_type: "private", user_id: "1", message: [{ type: "text", data: { text: "hi" } }] }, {}), null);
+  eq(normalizeEvent({ post_type: "message", message_type: "group", group_id: 1, user_id: 999, self_id: 999, message: [{ type: "text", data: { text: "hi" } }] }, { selfId: "999" }), null);
+  eq(normalizeEvent({ post_type: "message", message_type: "group", group_id: 1, user_id: 2, message: [] }, { selfId: "9" }), null);
+  eq(normalizeEvent({ post_type: "meta_event", meta_event_type: "heartbeat" }, {}), null);
+});
+
+t("onebot: 回复我 靠 sentIds 判定", function () {
+  const raw = { post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, sender: { nickname: "乙" },
+    message: [{ type: "reply", data: { id: "555" } }, { type: "text", data: { text: "对的" } }] };
+  eq(normalizeEvent(raw, { selfId: "9", sentIds: new Set(["555"]) }).replyToBot, true);
+  eq(normalizeEvent(raw, { selfId: "9", sentIds: new Set() }).replyToOther, true);
+});
+
+t("onebot: withToken 追加 access_token", function () {
+  eq(withToken("ws://127.0.0.1:3001", "abc"), "ws://127.0.0.1:3001?access_token=abc");
+  eq(withToken("ws://127.0.0.1:3001?x=1", "abc"), "ws://127.0.0.1:3001?x=1&access_token=abc");
+  eq(withToken("ws://127.0.0.1:3001?access_token=z", "abc"), "ws://127.0.0.1:3001?access_token=z");
+});
+
+t("onebot: 假 transport 端到端收发 + 去重", function () {
+  const sent = []; const got = [];
+  const sock = { send: function (s) { sent.push(JSON.parse(s)); }, close: function () {} };
+  const ob = createOneBot({
+    url: "ws://x", transport: function () { return sock; }, onEvent: function (e) { got.push(e); }, now: function () { return 0; }
+  });
+  ob.connect();
+  sock.onopen();
+  eq(ob.state(), "open");
+  const payload = JSON.stringify({ post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 11, sender: { nickname: "甲" }, message: [{ type: "text", data: { text: "在吗" } }] });
+  sock.onmessage({ data: payload });
+  sock.onmessage({ data: payload });
+  eq(got.length, 1, "同一条 message_id 只处理一次");
+  ob.sendGroupMsg("1", "在的");
+  eq(sent[0].action, "send_group_msg");
+  eq(sent[0].params.group_id, 1);
+  eq(sent[0].params.message, "在的");
+});
+
+t("config: 字段表默认值可展开，secret 回前端被遮蔽", function () {
+  const table = loadFieldTable();
+  const cfg = defaultsFromTable(table);
+  eq(getPath(cfg, "napcat.wsUrl"), "ws://127.0.0.1:3001");
+  eq(getPath(cfg, "gates.utilitySpeakAt"), 0.2);
+  eq(getPath(cfg, "gates.utilityDetailedAt"), 0.65, "N19：以前端实取的三档线为准");
+  const red = redactConfig(setPath(JSON.parse(JSON.stringify(cfg)), "napcat.token", "sekrit"), table);
+  eq(getPath(red, "napcat.token"), "<已配置>");
+  ok(JSON.stringify(red).indexOf("sekrit") < 0, "明文不能出现在回给前端的配置里");
+});
+
+t("config: runtimeConfig 落实 N6/N8/N23 决策", function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), {});
+  const rc = runtimeConfig(cfg);
+  eq(rc.contextWindow, 10, "N8：进 prompt 的历史 10 条");
+  eq(rc.stageMode, "auto", "N9 修订：默认走分群阶段机");
+  eq(rc.observeUntilMessages, 80, "N9 修订：新群攒满 80 条即转半自动");
+  eq(rc.semiAutoDays, 3, "N9 修订：半自动默认 3 天后转全自动");
+  eq(rc.maxSegments, 3, "N6：最多分 3 条");
+  eq(rc.budget.groupHourlyLimit, 0, "N23：取消每群每小时上限");
+  eq(rc.budget.dailyTokens, 5000000);
+  eq(rc.depthChars[2], 200);
+});
+
+function fakeBot(overrides) {
+  return {
+    handleEvent: async function (evt) {
+      return Object.assign({ gid: evt.gid, uid: evt.uid, action: "brain", verdict: "yes", pSay: 0.9, U: 0.5, tier: "mid", maxChars: 60, search: 1, keywords: ["x"], bucket: "question", arm: "terse", reason: ["测试"], injected: false }, overrides || {});
+    }
+  };
+}
+function fakeStore() { const rows = []; return { rows: rows, addObservation: function (r) { rows.push(r); } }; }
+
+t("runtime: 观察模式不回、但把判定落 observation", async function () {
+  const store = fakeStore(); const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: true, coalesceWindowMs: 100, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: store, bot: fakeBot(), send: function (g, t) { sent.push(t); }, now: function () { return 0; }
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  const r = await rt.tick(1000);
+  eq(sent.length, 0, "观察模式一个字都不发");
+  eq(r.results[0].action, "observe_only");
+  ok(store.rows.some(function (x) { return x.kind === "decision"; }), "判定要落盘");
+  ok(store.rows.some(function (x) { return x.kind === "observe_only"; }));
+});
+
+t("runtime: 合并同人连发后只回一次，并按句号分条", async function () {
+  const store = fakeStore(); const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 100, coalesceMaxBatch: 5, maxSegments: 3 },
+    store: store, bot: fakeBot({ maxChars: 10 }),
+    send: function (g, t) { sent.push(t); },
+    askBrain: async function () { return { ok: true, text: "第一句是这样的。第二句再补一点。" , usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 90, cacheWriteTokens: 0 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "帮我看看这个", now: 50 });
+  const r = await rt.tick(500);
+  eq(sent.length, 2, "分两条发送，实得 " + JSON.stringify(sent));
+  eq(rt.stats().replies, 1, "合并后只算一次回复");
+  eq(r.results[0].merged, 2);
+  ok(store.rows.some(function (x) { return x.kind === "sent"; }));
+});
+
+t("runtime: 管理员 /停 之后进入暂停，后续消息不再处理", async function () {
+  const sent = [];
+  const rt = createRuntime({
+    config: { admin: { admins: ["1001"] } }, runtime: { observe: false, coalesceWindowMs: 100 },
+    store: fakeStore(), bot: fakeBot(), send: function (g, t) { sent.push(t); }, now: function () { return 0; }
+  });
+  const a = await rt.onEvent({ gid: "A", uid: "1001", role: "admin", speaker: "管理", text: "/停 5", now: 0 });
+  eq(a.action, "admin_stop");
+  eq(sent.length, 1, "应回一句确认");
+  const b = await rt.onEvent({ gid: "A", uid: "u9", speaker: "路人", text: "在吗", now: 10 });
+  eq(b.action, "stopped");
+  const c = await rt.onEvent({ gid: "B", uid: "u9", speaker: "路人", text: "在吗", now: 10 });
+  eq(c.action, "pending", "只停了那一个群");
+});
+
+t("runtime: 预算硬线只回被点名的", async function () {
+  const sent = [];
+  const budget = createBudget({ limits: { dailyTokens: 10 }, now: function () { return 0; } });
+  budget.record(10, 0);
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 100 },
+    store: fakeStore(), bot: fakeBot(), budget: budget, send: function (g, t) { sent.push(t); }, now: function () { return 0; },
+    askBrain: async function () { return { ok: true, text: "嗯", usage: { totalTokens: 1 } }; }, sleep: async function () {}
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "随便说说", now: 0 });
+  const r1 = await rt.tick(500);
+  eq(r1.results[0].action, "budget_block");
+  await rt.onEvent({ gid: "A", uid: "u2", speaker: "乙", text: "@我 在吗", atBot: true, now: 600 });
+  const r2 = await rt.tick(1200);
+  eq(r2.results[0].action, "sent");
+});
+
+// ===== P2：外审通道 / 搜索 / 灰区自适应 =====
+
+t("audit: 三态解析，否定优先", function () {
+  eq(parseAuditVerdict("是"), "yes");
+  eq(parseAuditVerdict("是。"), "yes");
+  eq(parseAuditVerdict("否"), "no");
+  eq(parseAuditVerdict("不是"), "no");
+  eq(parseAuditVerdict("不确定"), "unsure");
+  eq(parseAuditVerdict(""), "unsure");
+  eq(parseAuditVerdict("不知道"), "unsure");
+  eq(AUDIT_PROFILE_ID, "qq-audit");
+});
+
+t("audit: 超时/失败一律「不确定」（N11）", async function () {
+  const a = createAuditor({ timeoutMs: 8000, rubric: "r", runner: async function () { return { ok: false, error: "超时 8000ms" }; } });
+  const r = await a("在吗", {});
+  eq(r.verdict, "unsure");
+  eq(r.channel, "brain");
+  eq(AUDIT_TIMEOUT_MS, 8000);
+});
+
+t("audit: 真实通道返回被解析；装通道后 audit() 走真实通道", async function () {
+  const calls = [];
+  const a = createAuditor({ rubric: "r", runner: async function (req) { calls.push(req); return { ok: true, text: "否" }; } });
+  eq((await a("他说这个副本要打三遍", {})).verdict, "no");
+  eq(calls.length, 1);
+  eq(calls[0].profile, "qq-audit");
+  ok(calls[0].personaText === "r", "rubric 应作为该 profile 的人设传入");
+  const names = [];
+  const a2 = createAuditor({ rubric: "r", runner: async function (req) { names.push(req.promptText); return { ok: true, text: "是" }; } });
+  await a2("这个报错怎么解", { botNames: ["小肥鱼"], nicknames: ["肥鱼"] });
+  ok(names[0].includes("小肥鱼"), "外审提示词必须带上小助手的名字，否则点名会被误判");
+  setAuditChannel(a);
+  eq((await runAudit("在吗", {})).verdict, "no");
+  setAuditChannel(null);
+  eq((await runAudit("他说这个副本要打三遍", { botNames: ["小肥鱼"] })).verdict, "no", "没有通道时应退回规则桩");
+});
+
+t("audit: 规则桩的三态仍可用", function () {
+  eq(auditStub("小肥鱼 在吗", { botNames: ["小肥鱼"] }).verdict, "yes");
+  eq(auditStub("他说这个副本要打三遍", { botNames: ["小肥鱼"] }).verdict, "no");
+  eq(auditStub("嗯", {}).verdict, "unsure");
+});
+
+t("search: normalizeResults 吃多种返回形状", function () {
+  eq(normalizeResults([{ title: "a", snippet: "b" }], 3).length, 1);
+  eq(normalizeResults({ sources: [{ title: "a", url: "u" }] }, 3)[0].url, "u");
+  eq(normalizeResults({ results: ["纯文本"] }, 3)[0].snippet, "纯文本");
+  eq(normalizeResults(null, 3).length, 0);
+  eq(normalizeResults([{ title: "a" }, { title: "b" }, { title: "c" }], 2).length, 2);
+});
+
+t("search: 摘要截断到上限", function () {
+  const long = [{ title: "标题", snippet: "字".repeat(600) }];
+  const s = buildSummary(long, 500);
+  eq(s.length, 500);
+  ok(s.endsWith("…"));
+  eq(buildSummary([{ title: "A", snippet: "aaa" }], 100), "A：aaa");
+});
+
+t("search: 没有关键词不搜", async function () {
+  const s = createSearch({ mode: "c", freeSearch: {}, httpSearch: async function () { throw new Error("不该被调用"); } });
+  const r = await s.run({ gid: "A", keywords: [] });
+  eq(r.ok, false);
+  eq(s.stats().calls, 0);
+});
+
+t("search: 缓存命中且与关键词顺序无关，TTL 到期失效", async function () {
+  let t = 1000, n = 0;
+  const s = createSearch({
+    mode: "c", now: function () { return t; }, ttlMs: 300000,
+    freeSearch: null,
+    httpSearch: async function () { n += 1; return { ok: true, items: [{ title: "t", snippet: "s" }], engine: "test" }; }
+  });
+  const r1 = await s.run({ gid: "A", keywords: ["甲", "乙"] });
+  eq(r1.cached, false);
+  const r2 = await s.run({ gid: "A", keywords: ["乙", "甲"] });
+  eq(r2.cached, true);
+  eq(n, 1, "只应真搜一次");
+  t += 300001;
+  await s.run({ gid: "A", keywords: ["甲", "乙"] });
+  eq(n, 2, "过期后应重搜");
+  eq(s.stats().hits, 1);
+});
+
+t("search: C 失败自动退到 B", async function () {
+  const s = createSearch({
+    mode: "c", now: function () { return 0; },
+    freeSearch: null,
+    httpSearch: async function () { return { ok: false, error: "直连失败" }; },
+    brainSearch: async function () { return { ok: true, summary: "B 通道给的摘要", usage: { totalTokens: 1200 } }; }
+  });
+  const r = await s.run({ gid: "A", keywords: ["关键词"] });
+  eq(r.ok, true);
+  eq(r.backend, "b");
+  eq(r.summary, "B 通道给的摘要");
+  eq(r.usage.totalTokens, 1200);
+});
+
+t("search: B 摘要超长被截断到 500", async function () {
+  const s = createSearch({
+    mode: "b", now: function () { return 0; }, freeSearch: null,
+    brainSearch: async function () { return { ok: true, summary: "字".repeat(900) }; }
+  });
+  const r = await s.run({ gid: "A", keywords: ["x"] });
+  eq(r.summary.length, 500);
+});
+
+t("search: injectSummary 保留任务文本并标注不可信", function () {
+  const base = "【本轮任务】档位：总结";
+  const out = injectSummary(base, "资料摘要");
+  ok(out.startsWith(base), "任务文本本体不能被改写");
+  ok(out.includes("资料摘要"));
+  ok(out.includes("不可信"));
+  eq(injectSummary(base, ""), base);
+});
+
+t("search: Bing 页面解析与去标签", function () {
+  const html = '<li class="b_algo"><h2><a href="https://x">标题<b>加粗</b></a></h2><p>片段 &amp; 更多</p></li>';
+  const items = parseBingHtml(html, 3);
+  eq(items.length, 1);
+  eq(items[0].title, "标题 加粗");
+  eq(items[0].snippet, "片段 & 更多");
+  eq(stripTags("<a>甲</a>&nbsp;乙"), "甲 乙");
+  eq(cacheKeyOf("A", ["b", "a"], "c"), "c|A|a,b");
+});
+
+t("gatescore: N14 灰区边界定型为 0.30~0.85", function () {
+  eq(DEFAULT_BOUNDS.loMin, 0.30);
+  eq(DEFAULT_BOUNDS.hiMax, 0.85);
+  eq(DEFAULT_BOUNDS.step, 0.02);
+});
+
+t("gatescore: adaptBounds 单向调整且不越界", function () {
+  const lo = adaptBounds({ lo: 0.40, hi: 0.75 }, { missedRate: 0.5, auditFlipRate: 0 });
+  eq(lo.lo, 0.38, "漏接多 → 下界往下走一步");
+  const many = adaptBounds({ lo: 0.31, hi: 0.75 }, { missedRate: 0.9, auditFlipRate: 0 });
+  ok(many.lo >= 0.30, "不能越过 loMin");
+  const hi = adaptBounds({ lo: 0.40, hi: 0.75 }, { missedRate: 0, auditFlipRate: 0.9 });
+  eq(hi.hi, 0.73, "翻转多 → 上界往下走一步");
+  const hi2 = adaptBounds({ lo: 0.40, hi: 0.84 }, { missedRate: 0, auditFlipRate: 0.9 });
+  ok(hi2.hi <= 0.85, "不能越过 hiMax");
+});
+
+t("config: runtimeConfig 暴露 N12 的搜索通道开关", function () {
+  const table = loadFieldTable();
+  eq(runtimeConfig(defaultsFromTable(table)).searchMode, "c");
+  const b = deepMerge(defaultsFromTable(table), { runtime: { search: { mode: "B" } } });
+  eq(runtimeConfig(b).searchMode, "b");
+});
+
+t("runtime: 需要搜索时先搜再注入，搜索失败不阻塞回复", async function () {
+  const sent = []; const prompts = []; const observed = [];
+  const searchCalls = [];
+  const fakeSearch = {
+    run: async function (req) { searchCalls.push(req); return { ok: true, summary: "搜到的资料摘要", backend: "c", cached: false, ms: 12, usage: null }; }
+  };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 100, searchMode: "c" },
+    store: { addObservation: function (r) { observed.push(r); } },
+    bot: fakeBot({ tier: "high", maxChars: 200, search: 1, keywords: ["报错"] }),
+    search: fakeSearch,
+    send: function (g, t) { sent.push(t); },
+    askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "答案", usage: { totalTokens: 10 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "这个报错怎么解", now: 0 });
+  const r = await rt.tick(500);
+  eq(searchCalls.length, 1, "应搜一次");
+  eq(r.results[0].surface === undefined ? r.results[0].search.backend : null, "c");
+  ok(prompts[0].includes("搜到的资料摘要"), "摘要应注入到本轮任务");
+  eq(rt.stats().searches, 1);
+  ok(observed.some(function (x) { return x.kind === "sent" && x.search && x.search.ok; }));
+});
+
+t("runtime: 搜索失败也要照样回复", async function () {
+  const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 100 },
+    store: { addObservation: function () {} },
+    bot: fakeBot({ tier: "high", maxChars: 200, search: 1, keywords: ["x"] }),
+    search: { run: async function () { return { ok: false, error: "搜不动" }; } },
+    send: function (g, t) { sent.push(t); },
+    askBrain: async function () { return { ok: true, text: "照常回答", usage: { totalTokens: 5 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "问题", now: 0 });
+  const r = await rt.tick(500);
+  eq(r.results[0].action, "sent");
+  eq(sent[0], "照常回答");
+  eq(r.results[0].search.ok, false);
+});
+
+t("dshprofile: 三档 overlay 只改推理档、不碰人设", function () {
+  const low = JSON.parse(renderTierOverlay("low"))[0];
+  eq(low.id, "agent-default-model");
+  eq(low.config.reasoningEffort, "off");
+  eq(JSON.parse(renderTierOverlay("mid"))[0].config.reasoningEffort, "low");
+  eq(JSON.parse(renderTierOverlay("high"))[0].config.reasoningEffort, "high");
+  eq(TIER_EFFORT.high, "high");
+  ok(renderTierOverlay("high").indexOf("persona") < 0, "overlay 里不能出现人设，否则各档缓存会分裂");
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "tier-" + Date.now());
+  const files = writeAllTierOverlays(dir, "qq-brain");
+  ok(fs.existsSync(files.high));
+  eq(JSON.parse(fs.readFileSync(files.mid, "utf8"))[0].config.reasoningEffort, "low");
+});
+
+t("brain: --patch 必须排在 app 名之前", function () {
+  const args = buildArgs({ launch: { cliJs: "C:/x/cli.js" }, profile: "qq-brain", appName: "headless", promptText: "在吗", patchFiles: ["C:/t/high.patch.yml"] });
+  ok(args.indexOf("--patch") > args.indexOf("--profile"), "patch 在 profile 之后");
+  ok(args.indexOf("--patch") < args.indexOf("headless"), "patch 必须在 app 名之前");
+  eq(args[args.indexOf("--patch") + 1], "C:/t/high.patch.yml");
+  eq(args[args.length - 1], "在吗");
+});
+
+// ===== N8 / N9 修订 =====
+
+function baseRt(extraRuntime, extraDeps) {
+  const seen = { sent: [], prompts: [], obs: [] };
+  const rt = createRuntime(Object.assign({
+    config: {}, runtime: Object.assign({ coalesceWindowMs: 100, contextWindow: 10 }, extraRuntime || {}),
+    store: { addObservation: function (r) { seen.obs.push(r); } },
+    bot: fakeBot(),
+    send: function (g, t) { seen.sent.push(t); },
+    askBrain: async function (o) { seen.prompts.push(o.promptText); return { ok: true, text: "答案", usage: { totalTokens: 1 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  }, extraDeps || {}));
+  return { rt: rt, seen: seen };
+}
+
+t("N8：上下文窗口块排在 prompt 最后", async function () {
+  const { rt, seen } = baseRt({ observe: false, contextWindow: 10 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "第一句", now: 0 });
+  await rt.tick(500);
+  const p = seen.prompts[0];
+  ok(p.indexOf("【本轮任务】") >= 0, "应有本轮任务");
+  const iTask = p.lastIndexOf("【本轮任务】");
+  const iCtx = p.lastIndexOf("【群里的上下文");
+  ok(iCtx > iTask, "上下文块必须在任务之后");
+  ok(p.trim().endsWith("甲：第一句"), "prompt 应以最新的群消息收尾，实得：" + JSON.stringify(p.slice(-40)));
+});
+
+t("N8：成员表初始为空，首次收到消息才加人", async function () {
+  const { rt } = baseRt({ observe: true });
+  eq(Object.keys(rt.members("A")).length, 0, "进群时成员表必须为空（不再全量拉成员）");
+  await rt.onEvent({ gid: "A", uid: "2001", speaker: "甲", text: "在吗", now: 0 });
+  await rt.tick(500);
+  const m = rt.members("A");
+  eq(Object.keys(m).length, 1);
+  eq(m["2001"].speaker, "甲");
+  eq(m["2001"].count, 1);
+});
+
+t("N8：历史窗口只保留最近 N 条", async function () {
+  const { rt } = baseRt({ observe: true, contextWindow: 2 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "一", now: 0 });
+  await rt.tick(500);
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "二", now: 600 });
+  await rt.tick(1200);
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "三", now: 1300 });
+  await rt.tick(2000);
+  const h = rt.history("A");
+  eq(h.length, 2);
+  eq(h[0].text, "二");
+  eq(h[1].text, "三");
+});
+
+t("N9：新群先观察，攒满 80 条才转半自动", async function () {
+  const { rt, seen } = baseRt({ stageMode: "auto", observeUntilMessages: 2, semiAutoDays: 3 });
+  eq(rt.stage("A").stage, "observe");
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话一", now: 0 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话二", now: 50 });
+  const r1 = await rt.tick(500);
+  eq(r1.results[0].action, "observe_only", "初期只观察，不发送");
+  eq(seen.sent.length, 0);
+  eq(rt.stage("A").observed, 2);
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话三", now: 600 });
+  const r2 = await rt.tick(1200);
+  eq(r2.results[0].action, "semi_skip", "半自动期：没被点名就不插话，实得 " + r2.results[0].action);
+  eq(rt.stage("A").stage, "semi");
+});
+
+t("N9：半自动期满转全自动，能主动开口", async function () {
+  const { rt, seen } = baseRt({ stageMode: "auto", observeUntilMessages: 1, semiAutoDays: 0 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话一", now: 0 });
+  await rt.tick(500);
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话二", now: 600 });
+  const r = await rt.tick(1200);
+  eq(rt.stage("A").stage, "full");
+  eq(r.results[0].action, "sent");
+  eq(seen.sent.length, 1);
+});
+
+t("N9：被点名时半自动照常回", async function () {
+  const { rt, seen } = baseRt({ stageMode: "auto", observeUntilMessages: 1, semiAutoDays: 5 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "话一", now: 0 });
+  await rt.tick(500);
+  await rt.onEvent({ gid: "A", uid: "u2", speaker: "乙", text: "小肥鱼 在吗", atBot: true, now: 600 });
+  const r = await rt.tick(1200);
+  eq(rt.stage("A").stage, "semi");
+  eq(r.results[0].action, "sent");
+  eq(seen.sent.length, 1);
+});
+
+// ===== P3：学习闭环与标定 =====
+
+t("feedback: 同一个人接着说 → continued_with_bot", function () {
+  const tr = createTracker({ windowMs: 90000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0, botNames: ["小肥鱼"] });
+  const out = tr.resolve({ gid: "A", uid: "u1", text: "再讲讲", now: 100 });
+  eq(out.length, 1);
+  eq(out[0].outcome, "continued_with_bot");
+  eq(out[0].nickCall, false);
+  eq(tr.pendingCount(), 0);
+});
+
+t("feedback: 接着聊并叫外号 → nickCall（engagement +4）", function () {
+  const tr = createTracker({ windowMs: 90000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0, botNames: ["小肥鱼", "肥鱼"] });
+  const out = tr.resolve({ gid: "A", uid: "u1", text: "小肥鱼你继续说", now: 50 });
+  eq(out[0].outcome, "continued_with_bot");
+  eq(out[0].nickCall, true);
+  eq(engagementOf(out[0]), 4);
+});
+
+t("feedback: 换人说话 → went_to_others", function () {
+  const tr = createTracker({ windowMs: 90000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0 });
+  const out = tr.resolve({ gid: "A", uid: "u2", text: "对了那个副本", now: 10 });
+  eq(out[0].outcome, "went_to_others");
+  eq(engagementOf(out[0]), -1);
+});
+
+t("feedback: 嫌烦 → annoyed", function () {
+  const tr = createTracker({ windowMs: 90000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0 });
+  const out = tr.resolve({ gid: "A", uid: "u1", text: "别说了行不行", now: 10 });
+  eq(out[0].outcome, "annoyed");
+  eq(engagementOf(out[0]), -2);
+});
+
+t("feedback: 窗口内没人接 → no_one_replied（弱负）", function () {
+  const tr = createTracker({ windowMs: 1000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0 });
+  eq(tr.sweep(500).length, 0, "还没到期");
+  const out = tr.sweep(1000);
+  eq(out.length, 1);
+  eq(out[0].outcome, "no_one_replied");
+  eq(engagementOf(out[0]), 0);
+});
+
+t("feedback: 过了窗口才有人说话也算没人接", function () {
+  const tr = createTracker({ windowMs: 1000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0 });
+  const out = tr.resolve({ gid: "A", uid: "u1", text: "嗯", now: 5000 });
+  eq(out[0].outcome, "no_one_replied");
+});
+
+t("feedback: 群之间互不干扰", function () {
+  const tr = createTracker({ windowMs: 90000 });
+  tr.noteReply({ gid: "A", uid: "u1", at: 0 });
+  tr.noteReply({ gid: "B", uid: "u1", at: 0 });
+  eq(tr.resolve({ gid: "A", uid: "u1", text: "接着说", now: 10 }).length, 1);
+  eq(tr.pendingCount(), 1, "B 群的还挂着");
+});
+
+t("score: reward = engagement − λ·成本", function () {
+  const ev = { outcome: "continued_with_bot", nickCall: false, inTokens: 100, outTokens: 50 };
+  eq(reward(ev, { lambda: 1 }, 1000), 2 - (100 + 100) / 1000);
+  const cost = reward({ outcome: "no_one_replied", inTokens: 900, outTokens: 300 }, { lambda: 1 }, 900);
+  ok(cost < 0, "成本高、又没人接，reward 应为负");
+});
+
+t("label: 同一 id 取最后一条；pending 与 labeled 分流", function () {
+  const rows = [
+    { id: "A:1", human: null, localVerdict: "grey" },
+    { id: "A:1", human: "该回" },
+    { id: "A:2", human: null, localVerdict: "no" }
+  ];
+  const folded = foldLabels(rows);
+  eq(folded.length, 2);
+  eq(pendingOf(rows).length, 1);
+  eq(labeledOf(rows).length, 1);
+});
+
+t("label: agreementStats 统计漏接率与灰区噪声", function () {
+  const rows = [
+    { id: "1", human: "该回", localVerdict: "no" },
+    { id: "2", human: "该回", localVerdict: "yes" },
+    { id: "3", human: "不该回", localVerdict: "grey" },
+    { id: "4", human: "不该回", localVerdict: "no" }
+  ];
+  const s = agreementStats(rows);
+  eq(s.n, 4);
+  eq(s.missedRate, 0.5);
+  eq(s.flipRate, 0.5);
+  eq(s.agreement, 0.5);
+});
+
+t("label: 不满 30 条不回流，满了就回流并给出新边界", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "label-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  const q = createLabelQueue({ store: store, minSamples: 3 });
+  eq(q.capable, true);
+  q.recordCandidate({ gid: "A", messageId: "1", text: "在吗", localVerdict: "no", localAction: "ignore" });
+  eq(q.status().pending, 1);
+  eq(q.reflowIfReady({ lo: 0.4, hi: 0.75 }, 0).ready, false, "样本不够不回流");
+  q.label("A:1", "该回");
+  q.recordCandidate({ gid: "A", messageId: "2", localVerdict: "no" }); q.label("A:2", "该回");
+  q.recordCandidate({ gid: "A", messageId: "3", localVerdict: "no" }); q.label("A:3", "该回");
+  const r = q.reflowIfReady({ lo: 0.4, hi: 0.75 }, 1);
+  eq(r.ready, true);
+  eq(r.n, 3);
+  eq(r.stats.missedRate, 1, "三条全被判否、人工都说该回");
+  ok(r.bounds.lo < 0.4, "漏接多 → 下界应下调，实得 " + r.bounds.lo);
+});
+
+t("label: store 不支持标注时给空实现，不抛", function () {
+  const q = createLabelQueue({ store: { addObservation: function () {} } });
+  eq(q.capable, false);
+  eq(q.recordCandidate({}), null);
+  eq(q.status().pending, 0);
+  eq(q.reflowIfReady({}, 0).ready, false);
+});
+
+t("runtime: 回复后登记待定反馈，同一人接着说记为 continued", async function () {
+  let clock = 0;
+  const observed = [];
+  const settled = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function (r) { observed.push(r); } },
+    bot: Object.assign(fakeBot(), { observe: function (rec) { settled.push(rec); return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    evtDefaults: { botNames: ["小肥鱼"] },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "好的。", usage: { inputTokens: 10, outputTokens: 2 } }; },
+    now: function () { return clock; }, sleep: async function () {}, sendGapMs: 0
+  });
+  clock = 0;
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "小肥鱼 讲讲游戏", atBot: true, now: 0 });
+  clock = 100; await rt.tick(100);
+  eq(rt.pendingFeedback(), 1, "发完应挂一条待定反馈");
+  clock = 200;
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "再讲讲", now: 200 });
+  eq(rt.pendingFeedback(), 0);
+  eq(settled.length, 1);
+  eq(settled[0].outcome, "continued_with_bot");
+  eq(settled[0].uid, "u1");
+  eq(rt.stats().feedbackResolved, 1);
+});
+
+t("runtime: 换人说话记为 went_to_others", async function () {
+  let clock = 0;
+  const settled = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function () {} },
+    bot: Object.assign(fakeBot(), { observe: function (rec) { settled.push(rec); return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    evtDefaults: { botNames: ["小肥鱼"] },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "嗯。", usage: { inputTokens: 10, outputTokens: 2 } }; },
+    now: function () { return clock; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "小肥鱼 在吗", atBot: true, now: 0 });
+  clock = 100; await rt.tick(100);
+  clock = 200;
+  await rt.onEvent({ gid: "A", uid: "u2", speaker: "乙", text: "对了那个副本怎么打", now: 200 });
+  eq(settled[0].outcome, "went_to_others");
+});
+
+t("runtime: 观察期把判定记成待标注候选（N21）", async function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "obs-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  const rt = createRuntime({
+    config: {}, runtime: { observe: true, coalesceWindowMs: 50 },
+    store: store, bot: fakeBot(),
+    send: function () {}, askBrain: async function () { return { ok: true, text: "x" }; },
+    now: function () { return 0; }, sleep: async function () {}
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "这个报错怎么解", now: 0 });
+  await rt.tick(100);
+  const rows = store.readJsonl(store.paths.labels);
+  eq(rows.length, 1);
+  eq(rows[0].human, null);
+  ok(/^A:.+/.test(rows[0].id), "待标注行要有稳定 id，实得 " + rows[0].id);
+  eq(rows[0].id, "A:" + shortHash("这个报错怎么解"));
+  ok(rows[0].localVerdict);
+  eq(rt.stats().labelCandidates, 1);
+});
+
+t("runtime: 合并判定不再重复 learn（修 IDF 学两次）", async function () {
+  const calls = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function () {} },
+    bot: { handleEvent: async function (evt, opts) { calls.push(!!(opts && opts.learn === false)); return { action: "brain", verdict: "yes", pSay: 0.9, U: 0.5, tier: "mid", maxChars: 60, search: 0, keywords: [], bucket: "question", arm: "terse", reason: [], injected: false }; }, observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; } },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "好。", usage: { inputTokens: 1, outputTokens: 1 } }; },
+    now: function () { return 0; }, sleep: async function () {}
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "一", now: 0 });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "二", now: 10 });
+  await rt.tick(200);
+  eq(calls.length, 3, "两条逐条判定 + 一次合并判定");
+  eq(calls[0], false);
+  eq(calls[1], false);
+  eq(calls[2], true, "合并判定必须 learn:false");
+});
+
+t("runtime: 群档案块进 prompt，且仍在上下文之前", async function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "prof-prompt-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  store.saveProfile("A", { interests: ["报错", "游戏"], rounds: 1, habits: "句短" });
+  const prompts = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: store,
+    bot: Object.assign(fakeBot(), { profilePrompt: function (gid) { return buildProfilePrompt(store.loadProfile(gid) || {}); }, observe: function () { return { refit: false }; } }),
+    send: function () {}, askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "好。", usage: { inputTokens: 1, outputTokens: 1 } }; },
+    now: function () { return 0; }, sleep: async function () {}
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  await rt.tick(100);
+  const p = prompts[0];
+  ok(p.includes("【本群画像】"), "应带群档案");
+  ok(p.includes("报错"), "应带群兴趣");
+  ok(p.indexOf("【本群画像】") < p.indexOf("【群里的上下文"), "群档案要在上下文之前");
+});
+
+// ===== P4：图库 / 主动搭话 / 指令框架 =====
+
+t("meme: 图库加载（sqlite index.db）并匹配情绪描述", function () {
+  const lib = createMemeLibrary({});
+  if (!lib.ready) { ok(true, "本机没有 dsh-meme 图库，跳过"); return; }
+  ok(lib.rows.length >= 20, "应载入 20+ 张，实得 " + lib.rows.length);
+  ok(lib.tags().length >= 10, "情绪标签应有 10+ 个，实得 " + lib.tags().length);
+  const cases = [["无语", "sigh"], ["得意", "happy"], ["生气", "angry"], ["摸鱼", "work"], ["求饶", "sad"], ["干饭", "daily"]];
+  for (const c of cases) {
+    const hit = lib.find(c[0]);
+    ok(hit, c[0] + " 应能匹配到图");
+    eq(hit.tag, c[1], c[0] + " 应落到 " + c[1] + " 标签，实得 " + (hit && hit.tag));
+  }
+  eq(lib.find("完全不相干的火星词"), null);
+});
+
+t("meme: 分数越具体越高", function () {
+  const a = { tag: "happy", file_name: "deyi.jpg", caption: "得意闭眼", keywords: "得意 好耶" };
+  const b = { tag: "see", file_name: "zhenjing.jpg", caption: "惊吓", keywords: "震惊 哇" };
+  ok(scoreRow(a, "得意") > scoreRow(a, "得"), "整词命中要高于单字");
+  ok(scoreRow(a, "得意") > scoreRow(b, "得意"), "不相关的图不能赢");
+  eq(scoreRow(a, ""), 0);
+});
+
+t("meme: 没有 index.db 时按目录名兜底扫", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "pack-" + Date.now());
+  fs.mkdirSync(path.join(dir, "memes", "happy"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "memes", "happy", "ok.jpg"), "x");
+  const rows = scanPack(dir);
+  eq(rows.length, 1);
+  eq(rows[0].tag, "happy");
+  eq(rows[0].file_name, "ok.jpg");
+});
+
+t("meme: 配图节制规则", function () {
+  eq(shouldAttachMeme("high", "无语", {}).attach, false, "详细回答不配图");
+  eq(shouldAttachMeme("mid", null, {}).attach, false, "没情绪标记不配图");
+  eq(shouldAttachMeme("mid", "无语", { freq: "关" }).attach, false);
+  eq(shouldAttachMeme("mid", "无语", { freq: "少", sinceLastMeme: 1 }).attach, false, "「少」档要拉开间隔");
+  eq(shouldAttachMeme("mid", "无语", { freq: "少", sinceLastMeme: 5 }).attach, true);
+  eq(shouldAttachMeme("mid", "无语", { freq: "中", sinceLastMeme: 0 }).attach, true);
+  eq(shouldAttachMeme("mid", "无语", { adminCommand: true }).attach, false);
+  eq(MEME_DEFAULTS.replyGapReplies, 3);
+});
+
+t("onebot: 发图走 image 段", function () {
+  const sent = [];
+  const sock = { send: function (s) { sent.push(JSON.parse(s)); }, close: function () {} };
+  const ob = createOneBot({ url: "ws://x", transport: function () { return sock; }, now: function () { return 0; } });
+  ob.connect(); sock.onopen();
+  ob.sendGroupImage("123456789", "C:\\a\\b\\wuyu.jpg");
+  eq(sent[0].action, "send_group_msg");
+  eq(Array.isArray(sent[0].params.message), true);
+  eq(sent[0].params.message[0].type, "image");
+  eq(sent[0].params.message[0].data.file, "C:/a/b/wuyu.jpg", "路径统一成正斜杠");
+});
+
+t("commands: 权限分级与白名单", function () {
+  eq(permLevelOf({ uid: "1", role: "owner" }, {}), "owner");
+  eq(permLevelOf({ uid: "1", role: "admin" }, {}), "admin");
+  eq(permLevelOf({ uid: "1", role: "member" }, { whitelist: ["1"] }), "whitelist");
+  eq(permLevelOf({ uid: "1", role: "member" }, {}), "any");
+  eq(allow({ uid: "1", role: "member" }, {}, "admin"), false);
+  eq(allow({ uid: "1", role: "admin" }, {}, "admin"), true);
+});
+
+t("commands: 只认整条指令 + 别名 + 未注册", function () {
+  const c = createDefaultCommands({ stopMinutes: 60 });
+  eq(c.parse("/停 5").name, "停");
+  eq(c.parse("/stop").name, "stop");
+  eq(c.parse("我们/停一下吧"), null);
+  eq(c.dispatch({ uid: "1", role: "admin", gid: "A", text: "我们/停一下吧" }, { config: {} }).handled, false);
+  const u = c.dispatch({ uid: "1", role: "owner", gid: "A", text: "/不存在的命令" }, { config: {} });
+  eq(u.handled, false);
+  eq(c.list().length, 4, "内置 4 条：停/开/状态/帮助");
+});
+
+t("commands: 危险命令要二次确认", function () {
+  const c = createCommands({});
+  let ran = 0;
+  c.register({ name: "清空", perm: "owner", dangerous: true, handler: function () { ran += 1; return { reply: "清了" }; } });
+  const evt = { uid: "9", role: "owner", gid: "A", text: "/清空", now: 0 };
+  const r1 = c.dispatch(evt, { config: {} });
+  eq(r1.needsConfirm, true);
+  eq(ran, 0, "没确认不能执行");
+  const r2 = c.dispatch({ uid: "9", role: "owner", gid: "A", text: "/清空 确认" }, { config: {} });
+  eq(r2.ok, true);
+  eq(ran, 1);
+});
+
+t("commands: 越权一律拒绝并回一句", function () {
+  const c = createDefaultCommands({ stopMinutes: 60 });
+  const r = c.dispatch({ uid: "7", role: "member", gid: "A", text: "/停" }, { config: {} });
+  eq(r.handled, true);
+  eq(r.ok, false);
+  eq(r.action, "denied");
+  ok(r.reply);
+});
+
+t("runtime: 情绪标记 → 真的发图（假 sendImage）", async function () {
+  const images = [];
+  const lib = { ready: true, find: function () { return { tag: "sigh", file: "wuyu.jpg", path: "C:/m/wuyu.jpg", score: 64 }; }, rows: [], tags: function () { return []; } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50, memeFreq: "中", memeGapReplies: 0 },
+    store: { addObservation: function () {} },
+    bot: Object.assign(fakeBot({ tier: "mid" }), { observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    memes: lib, sendImage: function (gid, f) { images.push([gid, f]); },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "行吧这波我确实没看懂 [表情: 无语]", usage: { totalTokens: 10 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  const r = await rt.tick(200);
+  eq(images.length, 1, "应发 1 张图");
+  eq(images[0][1], "C:/m/wuyu.jpg");
+  eq(r.results[0].meme.tag, "sigh");
+  eq(r.results[0].segments[0].indexOf("[表情:"), -1, "正文里的标记要被摘掉");
+  eq(rt.stats().memesSent, 1);
+});
+
+t("runtime: 详细档不配图", async function () {
+  const images = [];
+  const lib = { ready: true, find: function () { return { tag: "sigh", file: "w.jpg", path: "C:/m/w.jpg", score: 9 }; }, rows: [], tags: function () { return []; } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50, memeFreq: "中" },
+    store: { addObservation: function () {} },
+    bot: Object.assign(fakeBot({ tier: "high", maxChars: 200 }), { observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    memes: lib, sendImage: function () { images.push(1); },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "详细讲：[表情: 无语]", usage: { totalTokens: 10 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "详细讲讲", now: 0 });
+  await rt.tick(200);
+  eq(images.length, 0);
+  eq(rt.stats().memesSuppressed, 1);
+});
+
+t("runtime: 没被点名但撞上兴趣 → 全自动阶段插一句", async function () {
+  const sent = [];
+  const prompts = [];
+  const proBot = {
+    handleEvent: async function () { return { action: "ignore", verdict: "no", pSay: 0.1, U: 0.05, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: [], injected: false }; },
+    considerProactive: function () { return { speak: true, maxChars: 20, reason: "兴趣命中：单机游戏", keywords: ["单机游戏"] }; },
+    observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; }
+  };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50, proactive: { enabled: true } },
+    store: { addObservation: function () {} },
+    bot: proBot,
+    send: function (g, t) { sent.push(t); },
+    askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "我也在玩这个。", usage: { totalTokens: 8 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "最近在玩单机游戏", now: 0 });
+  const r = await rt.tick(200);
+  eq(sent.length, 1, "应插一句话");
+  eq(sent[0], "我也在玩这个。");
+  eq(r.results[0].proactive.segments.length, 1);
+  ok(prompts[0].indexOf("没人在叫你") >= 0, "主动搭话的提示词要说明场景");
+  eq(rt.stats().proactiveSpoken, 1);
+});
+
+t("runtime: 不满足条件时不插话（不抢话/预算关闭）", async function () {
+  const sent = [];
+  const quietBot = {
+    handleEvent: async function () { return { action: "ignore", verdict: "no", pSay: 0.1, U: 0.05, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: [], injected: false }; },
+    considerProactive: function () { return { speak: false, reason: "未命中兴趣" }; },
+    observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; }
+  };
+  const rt1 = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50, proactive: { enabled: true } },
+    store: { addObservation: function () {} }, bot: quietBot,
+    send: function (g, t) { sent.push(t); }, askBrain: async function () { return { ok: true, text: "x" }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt1.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "随便说说", now: 0 });
+  await rt1.tick(200);
+  eq(sent.length, 0);
+  eq(rt1.stats().proactiveTried, 0);
+  const rt2 = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50, proactive: { enabled: true } },
+    store: { addObservation: function () {} },
+    bot: Object.assign({}, quietBot, { considerProactive: function () { return { speak: true, maxChars: 20, reason: "兴趣命中" }; } }),
+    budget: (function () { const b = createBudget({ limits: { dailyTokens: 10 }, now: function () { return 0; } }); b.record(10, 0); return b; })(),
+    send: function (g, t) { sent.push(t); }, askBrain: async function () { return { ok: true, text: "x" }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt2.onEvent({ gid: "A", uid: "u2", speaker: "乙", text: "随便说说", now: 0 });
+  await rt2.tick(200);
+  eq(sent.length, 0, "预算硬线之上不该主动插话");
+  eq(rt2.stats().proactiveBlocked, 1);
+});
+
+// ===== P5：配置端（N25）=====
+
+t("webui: summarizeObservations 汇总判决/分档/小时/缓存", function () {
+  const rows = [
+    { kind: "decision", verdict: "yes", tier: "mid", action: "brain", at: new Date(2026, 0, 1, 9, 0, 0).toISOString() },
+    { kind: "decision", verdict: "no", tier: "low", action: "ignore", at: new Date(2026, 0, 1, 9, 5, 0).toISOString() },
+    { kind: "sent", tier: "mid", usage: { inputTokens: 200, outputTokens: 20, cacheReadTokens: 1800, cacheWriteTokens: 0 }, meme: { tag: "sigh" } },
+    { kind: "proactive_sent" }
+  ];
+  const c = summarizeObservations(rows);
+  eq(c.verdicts.yes, 1);
+  eq(c.verdicts.no, 1);
+  eq(c.tiers.mid, 1);
+  eq(c.hours[9], 2);
+  eq(c.replies, 1);
+  eq(c.memes, 1);
+  eq(c.proactives, 1);
+  eq(c.cacheHitRate, 0.9, "1800 / (200+1800+0)");
+  eq(c.tokens, 240, "输入 200 + 2×输出 20");
+  eq(summarizeObservations([]).rows, 0);
+});
+
+t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), { napcat: { token: "SECRET-TOKEN" } });
+  const ui = createWebUi({ config: cfg, table: table });
+  const info = await ui.listen(0);
+  try {
+    eq(info.port > 0 && info.port !== DEFAULT_PORT, true, "端口 0 应挑一个临时端口");
+    const j1 = await (await fetch(info.url + "/api/config")).json();
+    eq(j1.ok, true);
+    eq(j1.table.分组.length, 6, "人设/判定/主动与节流/运行时/接入/额外功能");
+    eq(j1.values.napcat.token, "<已配置>", "secret 不能明文回前端");
+    ok(JSON.stringify(j1.values).indexOf("SECRET-TOKEN") < 0);
+    eq(j1.runtime.webuiPort, 8799);
+
+    const posted = await (await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patch: { persona: { botName: "新名字" } } }) })).json();
+    eq(posted.ok, true);
+    eq(posted.values.persona.botName, "新名字");
+    eq(ui.getConfig().persona.botName, "新名字", "服务端内存里的配置也要跟着变");
+    eq(ui.getConfig().persona.age, "二十来岁", "没提交的字段不能被抹掉（深合并）");
+
+    const home = await fetch(info.url + "/");
+    eq(home.status, 200);
+    ok((home.headers.get("content-type") || "").indexOf("text/html") >= 0);
+    const js = await fetch(info.url + "/app.js");
+    eq(js.status, 200);
+    const css = await fetch(info.url + "/app.css");
+    eq(css.status, 200);
+
+    const hack = await fetch(info.url + "/../app/dsh-data/config/app.json");
+    ok(hack.status >= 400, "目录穿越必须被挡住，实得 " + hack.status);
+    const bad = await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: "{不是 json" });
+    eq(bad.status, 400);
+  } finally {
+    await ui.close();
+  }
+});
+
+// ===== N18：识图与语音 =====
+
+t("vision: 纯图片消息不再被归一化丢掉", function () {
+  const raw = { post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 5, sender: { nickname: "甲" }, message: [{ type: "image", data: { file: "C:/a.jpg", url: "http://x/a.jpg" } }] };
+  const e = normalizeEvent(raw, { selfId: "9", now: 0 });
+  ok(e, "纯图片消息必须保留");
+  eq(e.text, "");
+  eq(e.hasImage, true);
+  eq(e.images.length, 1);
+  eq(e.atBot, false);
+});
+
+t("vision: 片段识别与 mime", function () {
+  eq(isImageSegment({ type: "image" }), true);
+  eq(isImageSegment({ type: "text" }), false);
+  eq(imageSegmentsOf({ segments: [{ type: "text" }, { type: "image", data: { file: "a.png" } }] }).length, 1);
+  eq(mimeOf("x.PNG"), "image/png");
+  eq(mimeOf("x.jpg"), "image/jpeg");
+});
+
+t("vision: http 请求体与回包解析", function () {
+  const body = buildHttpBody("mimo-v2.6-flash-free", "看图", "AAAA", "image/png", 128);
+  eq(body.model, "mimo-v2.6-flash-free");
+  eq(body.messages[0].content[1].image_url.url, "data:image/png;base64,AAAA");
+  eq(body.messages[0].content[0].text, "看图");
+  eq(parseHttpAnswer({ choices: [{ message: { content: " 一只猫 " } }] }), "一只猫");
+  eq(parseHttpAnswer({ choices: [{ message: { content: [{ text: "甲" }, { text: "乙" }] } }] }), "甲乙");
+  eq(parseHttpAnswer({}), "");
+});
+
+t("vision: 本地图片解析与体积上限", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "vis-" + Date.now());
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "a.jpg");
+  fs.writeFileSync(f, Buffer.alloc(2048, 1));
+  const r = resolveLocalImage({ file: f }, {});
+  eq(r.ok, true);
+  eq(r.bytes, 2048);
+  eq(r.mime, "image/jpeg");
+  eq(resolveLocalImage({ file: f }, { maxBytes: 100 }).ok, false);
+  eq(resolveLocalImage({ url: "https://x/a.jpg" }).needDownload, true);
+  eq(resolveLocalImage({}).ok, false);
+});
+
+t("vision: 没启用就直接跳过", async function () {
+  const v = createVision({ config: { mode: "off" } });
+  const r = await v.describe({ ok: true, path: "x", bytes: 1, mime: "image/jpeg" });
+  eq(r.ok, false);
+  eq(v.enabled(), false);
+  eq(v.stats().skipped, 1);
+});
+
+t("vision: http 后端拿到描述并按上限截断", async function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "vis2-" + Date.now());
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "a.png");
+  fs.writeFileSync(f, Buffer.alloc(64, 2));
+  let seenUrl = "", seenAuth = "";
+  const v = createVision({
+    config: { mode: "http", endpoint: "https://api.test/v1/chat/completions", apiKey: "K", model: "m", maxChars: 10 },
+    fetch: async function (url, opt) { seenUrl = url; seenAuth = opt.headers.authorization; return { ok: true, status: 200, json: async function () { return { choices: [{ message: { content: "这是一段很长的图片描述文字" } }] }; } }; }
+  });
+  const r = await v.describe({ ok: true, path: f, bytes: 64, mime: "image/png" });
+  eq(r.ok, true);
+  eq(r.text.length, 10);
+  ok(r.text.endsWith("…"));
+  eq(seenUrl, "https://api.test/v1/chat/completions");
+  eq(seenAuth, "Bearer K");
+  eq(v.stats().ok, 1);
+});
+
+t("vision: 失败不抛异常，返回 ok:false", async function () {
+  const v = createVision({ config: { mode: "http", endpoint: "https://api.test/x" }, fetch: async function () { return { ok: false, status: 500 }; } });
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "vis3-" + Date.now());
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "a.jpg");
+  fs.writeFileSync(f, "x");
+  const r = await v.describe({ ok: true, path: f, bytes: 1, mime: "image/jpeg" });
+  eq(r.ok, false);
+  ok(String(r.error).indexOf("500") >= 0);
+  eq(v.stats().fail, 1);
+});
+
+t("vision: 描述拼进上下文并标注不可信", function () {
+  const out = injectVision("甲：看看这个", ["图里是一张报错截图"]);
+  ok(out.indexOf("甲：看看这个") === 0, "原上下文不能被改");
+  ok(out.indexOf("报错截图") >= 0);
+  ok(out.indexOf("不可信") >= 0);
+  eq(injectVision("甲：说话", []), "甲：说话");
+  eq(VISION_DEFAULTS.mode, "off", "默认不启用识图");
+  eq(VISION_PROFILE_ID, "qq-vision");
+});
+
+t("tts: [语音: …] 标记解析", function () {
+  eq(parseVoiceTag("行吧 [语音: 这波我不太懂]").voice, "这波我不太懂");
+  eq(parseVoiceTag("行吧 [语音: 这波我不太懂]").text, "行吧");
+  eq(parseVoiceTag("没有标记").voice, null);
+  eq(parseVoiceTag("没有收尾 [语音: 半截").voice, null);
+});
+
+t("tts: 未启用 / 超长 / 没文字 都拒发", function () {
+  const off = createTts({ config: { enabled: false } });
+  eq(off.synthesize("你好").ok, false);
+  eq(off.enabled(), false);
+  const on = createTts({ config: { enabled: true, maxChars: 5 }, outDir: os.tmpdir(), run: function () { return { status: 0, stdout: "", stderr: "" }; } });
+  eq(on.synthesize("一二三四五六七").ok, false);
+  eq(on.synthesize("").ok, false);
+  eq(on.synthesize("短").ok, false, "假 run 没生成文件 → 判失败");
+});
+
+t("tts: SAPI 脚本里带音色与语速", function () {
+  const s = buildSapiScript("你好", "C:/out.wav", { voice: "Microsoft Huihui", rate: 2 });
+  ok(s.indexOf("System.Speech") >= 0);
+  ok(s.indexOf("Microsoft Huihui") >= 0);
+  ok(s.indexOf("$s.Rate = 2") >= 0);
+  ok(s.indexOf("C:/out.wav") >= 0);
+  ok(buildSapiScript("带'引号", "x", {}).indexOf("''") >= 0, "单引号要转义");
+});
+
+t("tts: 真机 SAPI 能生成 wav（Windows）", function () {
+  if (process.platform !== "win32") { ok(true, "非 Windows 跳过"); return; }
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "tts-" + Date.now());
+  const t = createTts({ config: { enabled: true, voice: "Microsoft Huihui", maxChars: 60 }, outDir: dir });
+  const r = t.synthesize("这是回归测试");
+  eq(r.ok, true, "TTS 失败：" + r.error);
+  ok(r.bytes > 10000, "wav 应该有点大小，实得 " + r.bytes);
+  eq(fs.readFileSync(r.file).subarray(0, 4).toString(), "RIFF");
+});
+
+t("runtime: 图片消息会先识图再判定，描述进 prompt", async function () {
+  const prompts = [];
+  const vision = { enabled: function () { return true; }, describe: async function () { return { ok: true, text: "一张报错截图" }; } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function () {} },
+    bot: Object.assign(fakeBot({ tier: "mid" }), { observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    vision: vision, imageDir: os.tmpdir(),
+    send: function () {}, askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "看到了", usage: { totalTokens: 5 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "", images: [{ file: "C:/a.jpg" }], hasImage: true, now: 0 });
+  const r = await rt.tick(200);
+  eq(rt.stats().visionCalls, 1);
+  eq(rt.stats().visionOk, 1);
+  ok(prompts[0].indexOf("报错截图") >= 0, "图片描述必须进 prompt");
+  eq(r.results[0].vision.length, 1);
+});
+
+t("runtime: [语音: …] 会合成并发 record 段", async function () {
+  const records = [];
+  const tts = { enabled: function () { return true; }, synthesize: function () { return { ok: true, file: "C:/v.wav", bytes: 12345, chars: 4 }; } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function () {} },
+    bot: Object.assign(fakeBot({ tier: "mid" }), { observe: function () { return { refit: false }; }, profilePrompt: function () { return ""; } }),
+    tts: tts, sendRecord: function (g, f) { records.push([g, f]); },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "行吧 [语音: 这波我不太懂]", usage: { totalTokens: 5 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  const r = await rt.tick(200);
+  eq(records.length, 1);
+  eq(records[0][1], "C:/v.wav");
+  eq(rt.stats().voiceSent, 1);
+  eq(r.results[0].segments[0].indexOf("[语音:"), -1, "正文里的语音标记要摘掉");
+  eq(r.results[0].voice.bytes, 12345);
+});
+
+t("runtime: /说 指令走 TTS", async function () {
+  const records = [];
+  const tts = { enabled: function () { return true; }, synthesize: function (t) { return { ok: true, file: "C:/say.wav", bytes: 999, chars: t.length }; } };
+  const rt = createRuntime({
+    config: { admin: { owners: ["1001"] } }, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: { addObservation: function () {} }, bot: fakeBot(), tts: tts,
+    sendRecord: function (g, f) { records.push([g, f]); },
+    send: function () {}, askBrain: async function () { return { ok: true, text: "x" }; },
+    now: function () { return 0; }, sleep: async function () {}
+  });
+  const r = await rt.onEvent({ gid: "A", uid: "1001", role: "owner", speaker: "群主", text: "/说 大家好", now: 0 });
+  eq(r.action, "tts");
+  eq(records.length, 1);
+  const deny = await rt.onEvent({ gid: "A", uid: "999", role: "member", speaker: "路人", text: "/说 我也要", now: 0 });
+  eq(deny.ok, false);
+});
+
+t("webui: 状态页按群取数 + OneBot/群列表 + 控制动作", async function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), {});
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "ui2-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  store.addObservation({ kind: "decision", gid: "A", uid: "1", text: "小肥鱼 在吗", verdict: "yes", action: "brain", pSay: 0.9, tier: "mid" });
+  store.addObservation({ kind: "sent", gid: "A", uid: "1", usage: { inputTokens: 200, outputTokens: 20, cacheReadTokens: 1800, cacheWriteTokens: 0 } });
+  store.addObservation({ kind: "sent", gid: "B", uid: "2", usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 900, cacheWriteTokens: 0 } });
+  const calls = [];
+  const fakeRuntime = {
+    status: function () { return { mode: "auto", stats: {}, brakes: { stopFile: null, configPaused: false, groups: {} }, budget: { used: 240, limit: 5000000, ratio: 0.0001, mode: "normal" } }; },
+    groups: function () { return [{ gid: "A", messages: 1, replies: 1, tokens: 240, brainCalls: 1, lastAt: 1 }]; },
+    recentMessages: function (gid) { return [{ at: 1, speaker: "甲", text: "小肥鱼 在吗", verdict: "yes", action: "brain", pSay: 0.9, tier: "mid" }]; },
+    allRecent: function () { return []; },
+    groupStats: function (gid) { return { gid: gid, messages: 1, replies: 1, tokens: 240 }; },
+    stage: function () { return { stage: "semi", observed: 90, until: 80 }; },
+    setGroupEnabled: function (gid, on) { calls.push(["group", gid, on]); return { gid: gid, enabled: on }; },
+    setGlobalPaused: function (v) { calls.push(["paused", v]); return v; },
+    budget: { limits: { dailyTokens: 5000000 }, status: function () { return { used: 240, limit: 5000000, ratio: 0.0001, mode: "normal" }; } }
+  };
+  const ui = createWebUi({
+    config: cfg, table: table, store: store, runtime: fakeRuntime, configFile: path.join(dir, "app.json"),
+    probeOnebot: async function () { return { state: "open", selfId: "999", nickname: "小号", online: true, version: "NapCat x" }; },
+    listGroups: async function () { return [{ group_id: "A", group_name: "甲群", member_count: 3 }]; }
+  });
+  const info = await ui.listen(0);
+  try {
+    const st = await (await fetch(info.url + "/api/status?gid=A")).json();
+    eq(st.scope, "A");
+    eq(st.cost.units, 240, "只看 A 群的用量");
+    eq(st.cost.cacheHitRate, 0.9);
+    eq(st.cost.replies, 1);
+    eq(st.stage.stage, "semi");
+    eq(st.messages.length, 1);
+    const all = await (await fetch(info.url + "/api/status")).json();
+    eq(all.cost.units, 360, "不指定群就是全部");
+    eq(all.cost.perGroup.length, 2);
+
+    const ob = await (await fetch(info.url + "/api/onebot")).json();
+    eq(ob.state, "open");
+    eq(ob.nickname, "小号");
+    eq(ob.version, "NapCat x");
+
+    const gp = await (await fetch(info.url + "/api/groups")).json();
+    const ids = gp.groups.map(function (g) { return g.group_id; }).sort();
+    eq(ids.indexOf("A") >= 0, true);
+    eq(gp.groups.filter(function (g) { return g.group_name === "甲群"; }).length, 1);
+
+    const a1 = await (await fetch(info.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "groupDisable", gid: "A" }) })).json();
+    eq(a1.ok, true);
+    eq(calls[calls.length - 1][2], false, "停用应传 false");
+    await fetch(info.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "globalStop" }) });
+    eq(calls[calls.length - 1][0], "paused");
+    eq(calls[calls.length - 1][1], true);
+    eq(ui.getConfig().paused, true, "全局停用要落到配置里");
+
+    const a2 = await (await fetch(info.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "setBudget", value: 8000000 }) })).json();
+    eq(a2.dailyTokens, 8000000);
+    eq(fakeRuntime.budget.limits.dailyTokens, 8000000, "运行中的预算也要跟着变");
+    eq(ui.getConfig().runtime.budget.dailyTokens, 8000000, "并写进配置");
+    eq(ui.getConfig().runtime.napcatWebui, "http://127.0.0.1:6099", "NapCat 配置页入口有默认值");
+
+    const bad = await fetch(info.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "不存在" }) });
+    eq(bad.status, 400);
+  } finally { await ui.close(); }
+});
+
+t("webui: 群档案可读可写可清空（管理员手改）", async function () {
+  const table = loadFieldTable();
+  const cfg = defaultsFromTable(table);
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "pf-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  store.saveProfile("A", { interests: ["报错"], dislikes: ["催更"], habits: "句短", rounds: 3 });
+  const ui = createWebUi({ config: cfg, table: table, store: store });
+  const info = await ui.listen(0);
+  try {
+    const g = await (await fetch(info.url + "/api/profile?gid=A")).json();
+    eq(g.ok, true);
+    eq(g.profile.interests[0], "报错");
+    ok(g.prompt.indexOf("【本群画像】") >= 0, "要给出实际拼进 prompt 的样子");
+    ok(g.prompt.indexOf("报错") >= 0);
+
+    const p = await (await fetch(info.url + "/api/profile", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gid: "A", interests: ["报错", "第五层"], notes: "管理员加的", personaText: "这个群叫我老鱼" })
+    })).json();
+    eq(p.ok, true);
+    eq(p.profile.interests.length, 2);
+    eq(p.profile.updatedBy, "admin");
+    eq(p.profile.rounds, 3, "手改不能把重炼轮数抹掉");
+    eq(store.loadProfile("A").personaText, "这个群叫我老鱼");
+    eq(store.loadProfile("A").habits, "句短", "没提交的字段要保持原样");
+
+    const del = await (await fetch(info.url + "/api/profile?gid=A", { method: "DELETE" })).json();
+    eq(del.ok, true);
+    eq(store.loadProfile("A"), null);
+    const miss = await fetch(info.url + "/api/profile");
+    eq(miss.status, 400, "不给 gid 要报错");
+  } finally { await ui.close(); }
+});
+
+t("runtime: 本群专属人设作为消息体进 prompt", async function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "gp-" + Date.now());
+  const store = createStore(path.join(dir, "data"));
+  store.saveProfile("A", { interests: ["报错"], rounds: 2, personaText: "这个群叫我老鱼，别叫小肥鱼" });
+  const prompts = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, coalesceWindowMs: 50 },
+    store: store,
+    bot: Object.assign(fakeBot({ tier: "mid" }), {
+      profilePrompt: function (gid) { return buildProfilePrompt(store.loadProfile(gid) || {}); },
+      observe: function () { return { refit: false }; }
+    }),
+    send: function () {}, askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "好。", usage: { totalTokens: 5 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "在吗", now: 0 });
+  await rt.tick(300);
+  const p = prompts[0] || "";
+  ok(p.indexOf("【本群专属人设") >= 0, "应有本群专属人设块");
+  ok(p.indexOf("叫我老鱼") >= 0, "内容要进去");
+  ok(p.indexOf("【本群画像】") >= 0, "群档案也还在");
+  ok(p.indexOf("【本群专属人设") < p.indexOf("【群里的上下文"), "人设块要在上下文之前");
+});
+
+t("brain: 手写的全局人设整段覆盖字段拼装", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "gs-" + Date.now());
+  const dshHome = path.join(dir, "dsh-home");
+  fs.mkdirSync(path.join(dshHome, "profiles", "qq-brain"), { recursive: true });
+  fs.writeFileSync(path.join(dshHome, "profiles", "qq-brain", "package.json"), "{}");
+  const r = ensureBrainProfile({
+    dshHome: dshHome, profile: "qq-brain",
+    overrideLaunch: { exe: "x", cliJs: "y" },
+    persona: { botName: "字段名" },
+    personaText: "我是手写的整段人设，不来自字段。"
+  });
+  eq(r.ok, true);
+  const patch = JSON.parse(fs.readFileSync(r.patch, "utf8"));
+  eq(patch[0].config.personaPrefix, "我是手写的整段人设，不来自字段。");
+  ok(patch[0].config.personaPrefix.indexOf("字段名") < 0, "手写时不能被字段拼装覆盖");
+  const r2 = ensureBrainProfile({
+    dshHome: dshHome, profile: "qq-brain",
+    overrideLaunch: { exe: "x", cliJs: "y" },
+    persona: { botName: "小肥鱼", traits: ["嘴贫但有分寸"] }
+  });
+  const patch2 = JSON.parse(fs.readFileSync(r2.patch, "utf8"));
+  ok(patch2[0].config.personaPrefix.indexOf("小肥鱼") >= 0, "不写全局人设时回到字段拼装");
+});
+
+// ===== 设置页：git 更新 / 依赖体检 / 额外功能开关改人设 =====
+
+// 假 git：按命令返回不同结果，完全不碰真仓库
+function fakeGit(opts) {
+  const o = opts || {};
+  let pulled = false;
+  return function (args) {
+    const a = args.join(" ");
+    if (a.indexOf("rev-parse --is-inside-work-tree") >= 0) return { status: o.repo === false ? 128 : 0, stdout: o.repo === false ? "" : "true" };
+    if (a.indexOf("rev-parse --abbrev-ref") >= 0) return { status: 0, stdout: "main\n" };
+    if (a.indexOf("rev-parse --short HEAD") >= 0) return { status: 0, stdout: ((pulled && o.headAfter) ? o.headAfter : (o.head || "abc1234")) + "\n" };
+    if (a.indexOf("log -1 --pretty=%s") >= 0) return { status: 0, stdout: "某次提交\n" };
+    if (a.indexOf("log -1 --pretty=%ci") >= 0) return { status: 0, stdout: "2026-10-14\n" };
+    if (a.indexOf("status --porcelain") >= 0) return { status: 0, stdout: o.dirty ? " M app/main.js\n" : "" };
+    if (a.indexOf("fetch --prune") >= 0) return o.offline ? { status: 1, stderr: "could not resolve host" } : { status: 0, stdout: "" };
+    if (a.indexOf("rev-list --left-right --count") >= 0) return { status: 0, stdout: (o.ahead || 0) + "\t" + (o.behind || 0) + "\n" };
+    if (a.indexOf("log --oneline --no-decorate HEAD..") >= 0) return { status: 0, stdout: (o.incoming || []).join("\n") };
+    if (a.indexOf("rev-parse --short origin/main") >= 0) return { status: 0, stdout: "def5678\n" };
+    if (a.indexOf("pull --ff-only") >= 0) { if (o.pullFail) return { status: 1, stderr: "conflict" }; pulled = true; return { status: 0, stdout: "Updating abc1234..def5678\n" }; }
+    if (a.indexOf("--version") >= 0) return { status: 0, stdout: "git version 2.54.0\n" };
+    return { status: 1, stdout: "", stderr: "unknown: " + a };
+  };
+}
+
+t("update: 不是 git 仓库时明确报出来", function () {
+  const root = "C:/nope";
+  const info = gitInfo(root, { run: fakeGit({ repo: false }) });
+  eq(info.isRepo, false);
+  const c = checkUpdate(root, { run: fakeGit({ repo: false }) });
+  eq(c.ok, false);
+  ok(String(c.error).indexOf("分发版") >= 0, "要提示分发版手动更新");
+});
+
+t("update: 落后 N 个提交能看出来，且带到哪些提交", function () {
+  const run = fakeGit({ behind: 3, incoming: ["aaa 新功能", "bbb 修 bug", "ccc 文档"] });
+  const c = checkUpdate("C:/repo", { run: run });
+  eq(c.ok, true);
+  eq(c.behind, 3);
+  eq(c.upToDate, false);
+  eq(c.incoming.length, 3);
+  eq(c.remoteHead, "def5678");
+  eq(c.canFastForward, true);
+});
+
+t("update: 本地有未提交改动就不许快进", function () {
+  const c = checkUpdate("C:/repo", { run: fakeGit({ behind: 1, dirty: true }) });
+  eq(c.info.dirty, true);
+  eq(c.canFastForward, false);
+  const a = applyUpdate("C:/repo", { run: fakeGit({ behind: 1, dirty: true }) });
+  eq(a.ok, false);
+  ok(String(a.error).indexOf("未提交") >= 0);
+});
+
+t("update: 离线时报错不炸", function () {
+  const c = checkUpdate("C:/repo", { run: fakeGit({ offline: true }) });
+  eq(c.ok, false);
+  ok(String(c.error).indexOf("连不上") >= 0);
+});
+
+t("update: 一键更新成功后提示重启", function () {
+  const a = applyUpdate("C:/repo", { run: fakeGit({ behind: 2, headAfter: "def5678" }) });
+  eq(a.ok, true);
+  eq(a.before, "abc1234");
+  eq(a.after, "def5678");
+  eq(a.changed, true);
+  eq(a.needRestart, true);
+  const same = applyUpdate("C:/repo", { run: fakeGit({ behind: 0 }) });
+  eq(same.changed, false, "本来就没变就不提示重启");
+  eq(same.needRestart, false);
+});
+
+t("deps: 依赖体检列出必需项并标出缺失", function () {
+  const run = function (args) {
+    if (args[0] === "git") return { status: 0, stdout: "git version 2.54.0\n" };
+    if (args[0] === "where") return { status: 1, stdout: "" };
+    if (args[0] === "powershell") return { status: 0, stdout: "4\n" };
+    return { status: 1 };
+  };
+  const p = createDepsProbe({ run: run, dshCli: null, onebotState: function () { return "closed"; }, hasApiKey: function () { return true; }, requireFn: function () { return {}; }, qqPaths: ["C:/nope/QQ.exe"] });
+  const d = p.probe();
+  eq(d.ok, true);
+  eq(d.items.length, 9);
+  const by = {}; d.items.forEach(function (x) { by[x.id] = x; });
+  eq(by.node.ok, true, "当前 Node 版本应满足");
+  eq(by.dsh.ok, false, "没给 dsh 路径就是缺");
+  eq(by.apikey.ok, true);
+  eq(by.napcat.ok, false);
+  eq(by.sapi.ok, true);
+  eq(by.sapi.version, "4 个音色");
+  eq(by.ffmpeg.ok, false);
+  eq(by.git.ok, true);
+  eq(d.missingRequired.indexOf("dsh") >= 0, true);
+  eq(d.missingRequired.indexOf("apikey"), -1);
+  // 20 秒缓存：第二次探测不应再跑命令
+  let calls = 0;
+  const p2 = createDepsProbe({ run: function (a) { calls += 1; return { status: 1 }; }, dshCli: "x", onebotState: function () { return "open"; }, hasApiKey: function () { return true; } });
+  p2.probe(); const n1 = calls; p2.probe();
+  eq(calls, n1, "缓存期内不再重复探测");
+});
+
+t("deps: 一键安装只走白名单（url 打开 / winget 执行）", function () {
+  const urlDep = { id: "napcat", fix: { kind: "url", value: "https://example.com/napcat" } };
+  const r1 = runDepFix(urlDep, {});
+  eq(r1.ok, true);
+  eq(r1.open, "https://example.com/napcat");
+
+  const manual = { id: "sapi", fix: { kind: "manual", value: "去设置里装语音包" } };
+  const r2 = runDepFix(manual, {});
+  eq(r2.ok, false);
+  eq(r2.manual, true);
+
+  const calls = [];
+  const winget = { id: "ffmpeg", fix: { kind: "winget", value: "Gyan.FFmpeg" } };
+  const r3 = runDepFix(winget, { run: function (args) { calls.push(args); return { status: 0, stdout: "Successfully installed" }; } });
+  eq(r3.ok, true);
+  eq(calls[0][0], "winget");
+  eq(calls[0].indexOf("Gyan.FFmpeg") >= 0, true);
+  eq(calls[0].indexOf("--accept-package-agreements") >= 0, true);
+  eq(runDepFix({ id: "x", fix: { kind: "rm -rf" } }, {}).ok, false, "未知方式必须拒绝");
+});
+
+t("webui: 设置页两个接口能通", async function () {
+  const table = loadFieldTable();
+  const cfg = defaultsFromTable(table);
+  const ui = createWebUi({
+    config: cfg, table: table,
+    checkUpdate: async function () { return { ok: true, isRepo: true, behind: 2, upToDate: false, info: { head: "abc1234", branch: "main", subject: "x", dirty: false }, incoming: ["a", "b"] }; },
+    applyUpdate: async function () { return { ok: true, changed: true, before: "abc", after: "def", needRestart: true }; },
+    depsProbe: async function () { return { ok: true, items: [{ id: "node", name: "Node.js", required: true, ok: true }], missingRequired: [] }; },
+    depFix: async function (id) { return { ok: true, open: "https://x/" + id }; }
+  });
+  const info = await ui.listen(0);
+  try {
+    const u = await (await fetch(info.url + "/api/update")).json();
+    eq(u.ok, true); eq(u.behind, 2);
+    const a = await (await fetch(info.url + "/api/update", { method: "POST" })).json();
+    eq(a.after, "def");
+    const d = await (await fetch(info.url + "/api/deps")).json();
+    eq(d.items.length, 1);
+    const f = await (await fetch(info.url + "/api/deps/install", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "napcat" }) })).json();
+    eq(f.open, "https://x/napcat");
+    const bad = await fetch(info.url + "/api/deps/install", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    eq(bad.status, 400);
+  } finally { await ui.close(); }
+});
+
+t("dshprofile: 额外功能开关会改写人设", function () {
+  const off = personaFromConfig({ persona: { memeFreq: "关", botName: "小肥鱼" }, runtime: { voice: { enabled: false }, vision: { enabled: false } } });
+  const t1 = buildPersonaText(off);
+  eq(t1.indexOf("【表情包】"), -1, "关掉表情包后人设里不该再提配图");
+  eq(t1.indexOf("【语音】"), -1);
+  eq(t1.indexOf("【看图】"), -1);
+  ok(t1.indexOf("只能发文字") >= 0, "全关时要明确告诉它只能发文字");
+
+  const on = personaFromConfig({ persona: { memeFreq: "中" }, runtime: { voice: { enabled: true, maxChars: 50 }, vision: { enabled: true, mode: "http" } } });
+  const t2 = buildPersonaText(on);
+  ok(t2.indexOf("【表情包】") >= 0);
+  ok(t2.indexOf("【语音】") >= 0);
+  ok(t2.indexOf("不超过 50 个字") >= 0);
+  ok(t2.indexOf("【看图】") >= 0);
+  ok(t2.indexOf("只能发文字") < 0);
+
+  const vOnly = personaFromConfig({ persona: { memeFreq: "关" }, runtime: { vision: { enabled: true, mode: "dsh" } } });
+  ok(buildPersonaText(vOnly).indexOf("【看图】") >= 0);
+  eq(buildPersonaText(personaFromConfig({ persona: { memeFreq: "关" }, runtime: { vision: { enabled: true, mode: "off" } } })).indexOf("【看图】"), -1, "mode=off 时即使 enabled 也不算开");
+});
+
+t("onebot: token 不对会被服务端拒绝，并记下原因（不再是哑巴 closed）", async function () {
+  const srv = createMockOneBotServer({ token: "righttoken", selfId: 999 });
+  const port = await srv.listen(0);
+  try {
+    const bad = createOneBot({ url: "ws://127.0.0.1:" + port, token: "wrong", reconnectMs: 999999 });
+    let rejected = null;
+    bad.connect();
+    await new Promise(function (r) { setTimeout(r, 600); });
+    eq(bad.state(), "rejected", "应当是 rejected 而不是 open/closed");
+    rejected = bad.lastMessage();
+    ok(rejected && rejected.retcode === 1403, "要抓到 retcode 1403，实得 " + JSON.stringify(rejected));
+    ok(String(rejected.message).length > 0, "要带上服务端说的话");
+    eq(bad.url(), "ws://127.0.0.1:" + port, "要能说出自己连的是哪个地址");
+    bad.close();
+
+    const good = createOneBot({ url: "ws://127.0.0.1:" + port, token: "righttoken", reconnectMs: 999999 });
+    good.connect();
+    await new Promise(function (r) { setTimeout(r, 600); });
+    eq(good.state(), "open");
+    eq(good.tokenSet(), true);
+    eq(good.lastMessage(), null, "连上之后不该再有被拒记录");
+    good.close();
+  } finally { await srv.close(); }
+});
+
+t("webui: 重连动作能通（改完接入设置不用重启）", async function () {
+  const table = loadFieldTable();
+  const cfg = defaultsFromTable(table);
+  let called = 0;
+  const ui = createWebUi({
+    config: cfg, table: table,
+    reconnect: async function () { called += 1; return { url: "ws://127.0.0.1:3001", tokenSet: true, state: "connecting" }; }
+  });
+  const info = await ui.listen(0);
+  try {
+    const r = await (await fetch(info.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reconnect" }) })).json();
+    eq(r.ok, true);
+    eq(r.url, "ws://127.0.0.1:3001");
+    eq(called, 1);
+    const ui2 = createWebUi({ config: cfg, table: table });
+    const info2 = await ui2.listen(0);
+    const r2 = await fetch(info2.url + "/api/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reconnect" }) });
+    eq(r2.status, 500, "没接重连服务时要明确报错");
+    await ui2.close();
+  } finally { await ui.close(); }
+});
+
+t("plugins: 社区插件开关会同步改写全局人设", function () {
+  const on = personaFromConfig({ persona: { memeFreq: "中", botName: "小肥鱼" }, runtime: {}, plugins: { meme: true, archify: true, voice: false, vision: false } });
+  const t1 = buildPersonaText(on);
+  ok(t1.indexOf("【表情包】") >= 0, "开着 dsh-meme 就该写配图规则");
+  ok(t1.indexOf("【画图】") >= 0, "开着 archify 就该写画图规则");
+  ok(t1.indexOf("[图表:") >= 0, "要告诉它图表标记怎么写");
+
+  const off = personaFromConfig({ persona: { memeFreq: "中", botName: "小肥鱼" }, runtime: {}, plugins: { meme: false, archify: false, voice: false, vision: false } });
+  eq(off.memeEnabled, false, "插件关了，memeFreq 是「中」也不算开");
+  const t2 = buildPersonaText(off);
+  eq(t2.indexOf("【表情包】"), -1, "关掉 dsh-meme 后人设不该再提配图");
+  eq(t2.indexOf("【画图】"), -1, "关掉 archify 后人设不该再提画图");
+});
+
+t("channel: 大脑走 OFM 时三档 overlay 去掉 reasoningEffort，二判走 patch 带模型", function () {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "ofm-" + Date.now());
+  const dshHome = path.join(dir, "dsh-home");
+  fs.mkdirSync(path.join(dshHome, "profiles", "qq-brain"), { recursive: true });
+  fs.writeFileSync(path.join(dshHome, "profiles", "qq-brain", "package.json"), "{}");
+  const launch = { exe: "x", cliJs: "y" };
+
+  const r = ensureBrainProfile({ dshHome: dshHome, profile: "qq-brain", overrideLaunch: launch, persona: { botName: "小肥鱼" }, model: { provider: "our-free-model", model: "ling-3.1-flash-free" } });
+  eq(r.ok, true);
+  const tierLow = JSON.parse(fs.readFileSync(r.tiers.low, "utf8"));
+  eq(tierLow[0].config.provider, "our-free-model");
+  eq(tierLow[0].config.model, "ling-3.1-flash-free");
+  eq("reasoningEffort" in tierLow[0].config, false, "免费池模型不认 effort，必须不带");
+  const patch = JSON.parse(fs.readFileSync(r.patch, "utf8"));
+  eq(patch.length, 2, "persona + model 两条");
+  eq(patch[0].id, "system-prompt");
+  eq(patch[1].id, "agent-default-model");
+  eq(patch[1].config.provider, "our-free-model");
+
+  const r2 = ensureBrainProfile({ dshHome: dshHome, profile: "qq-brain", overrideLaunch: launch, persona: { botName: "小肥鱼" } });
+  const tier2 = JSON.parse(fs.readFileSync(r2.tiers.low, "utf8"));
+  eq(tier2[0].config.provider, "deepseek-official", "不选 OFM 就回官方默认");
+  eq(tier2[0].config.reasoningEffort, "off", "官方模型该带 effort 还是要带");
+  eq(JSON.parse(fs.readFileSync(r2.patch, "utf8")).length, 1, "不选 OFM 时 patch 只有 persona 一条");
+});
+
+// === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
+await Promise.all(pendingTests);
+console.log("=== 骨架回归测试 ===");
+console.log("通过 " + pass + " 项，失败 " + fails.length + " 项");
+for (const f of fails) console.log("  FAIL " + f);
+process.exitCode = fails.length === 0 ? 0 : 1;

@@ -1,0 +1,16 @@
+DSH-QQ 群小助手 · 首次运行三步
+
+1. 双击 launcher\DSHQQTray.exe
+   （它会启动程序，并自动打开配置端页面 http://127.0.0.1:8799）
+
+2. 在「接入」页填 NapCat 的 WS 地址与令牌
+   在「人设」页填小助手的名字 / 年龄段 / 三条性格 / 兴趣 / 雷点
+
+3. 准备一把你自己的 DeepSeek API key，写进
+   app\dsh-data\config\secrets.json  ->  { "deepseekApiKey": "sk-..." }
+
+默认行为：新群先观察 80 条 -> 半自动 3 天 -> 全自动（配置端可改）
+刹车：群里发 /停  /开  /状态（群主/管理/白名单可用）
+      或在安装目录放一个 STOP 文件 -> 全局停
+
+详细说明看 INSTALL.md，数据与隐私边界看 隐私说明.md

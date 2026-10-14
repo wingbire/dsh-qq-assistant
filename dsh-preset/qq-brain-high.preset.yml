@@ -1,0 +1,32 @@
+# qq-brain-high —— QQ 小助手「大脑」通道的 DSH agent preset（high 档）
+#
+# 设计要点（依据 DSH 内核 dsh-system-prompt 的 SECTION_ORDERS）：
+#   人设放 personaPrefix（order 0），排在 harness:identity(-1000) 之后、所有工具说明之前，
+#   保证这段前缀字节级稳定 → 前缀缓存命中；动态内容走独立 runtime context，不混进稳定前缀。
+#
+# 安装（由用户执行，见 README）：
+#   dsh qq-brain --from-default-profile <模板> --patch <本文件>
+
+id: qq-brain-high
+name: QQ 大脑（high）
+
+systemPrompt:
+  includeHarnessIdentity: true      # 固定一句话，不影响前缀稳定性
+  includeRuntimeContext: false      # 关掉动态块，进一步保证前缀稳定（动态内容由调用方作为消息体传）
+  personaPrefixFile: ../../prompts/全局人设.template.md   # 装配器把渲染后的人设文本注入这里
+  personaSuffix: ""
+
+agent:
+  provider: deepseek-official
+  model: deepseek-flash
+  reasoningEffort: high
+  maxTokens: 1024
+
+# 工具面：大脑只要"生成回复"这一件事，尽量窄 → 稳定、便宜、无多轮
+tools:
+  enabled: []                       # 不启用任何工具
+  toolOrder: ["<unlisted-tools>"]   # 工具顺序固定，避免中段变动打散缓存
+
+invocation:
+  app: headless
+  args: []

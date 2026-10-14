@@ -1,0 +1,550 @@
+{
+  "版本": 1,
+  "说明": "配置端字段表：前端按此渲染，加配置项只改本表 + src/kernel.js 的清单命令",
+  "分组": [
+    {
+      "名": "人设",
+      "键前缀": "persona",
+      "字段": [
+        {
+          "键": "persona.globalText",
+          "标签": "全局人设（直接写整段）",
+          "类型": "text",
+          "默认": "",
+          "说明": "留空 = 用下面这些字段自动拼装；填了就整段覆盖。这一段进系统提示词（personaPrefix），能吃满前缀缓存"
+        },
+        {
+          "键": "persona.botName",
+          "标签": "小助手名",
+          "类型": "string",
+          "默认": "小肥鱼",
+          "回写": true
+        },
+        {
+          "键": "persona.age",
+          "标签": "身份/年龄段",
+          "类型": "string",
+          "默认": "二十来岁"
+        },
+        {
+          "键": "persona.traits",
+          "标签": "性格关键词",
+          "类型": "string[]",
+          "默认": [
+            "嘴贫但有分寸",
+            "对熟的人话多",
+            "被问到就认真"
+          ],
+          "最大": 3
+        },
+        {
+          "键": "persona.interests",
+          "标签": "感兴趣的话题",
+          "类型": "string[]",
+          "默认": []
+        },
+        {
+          "键": "persona.dislikes",
+          "标签": "不想碰的话题",
+          "类型": "string[]",
+          "默认": []
+        },
+        {
+          "键": "persona.tone",
+          "标签": "全局语气",
+          "类型": "enum",
+          "取值": [
+            "精炼",
+            "详细"
+          ],
+          "默认": "精炼"
+        },
+        {
+          "键": "persona.overflow",
+          "标签": "超字数处理",
+          "类型": "enum",
+          "取值": [
+            "压缩成一条",
+            "拆两条"
+          ],
+          "默认": "压缩成一条"
+        },
+        {
+          "键": "persona.memeFreq",
+          "标签": "表情包频率",
+          "类型": "enum",
+          "取值": [
+            "关",
+            "少",
+            "中"
+          ],
+          "默认": "少"
+        },
+        {
+          "键": "persona.ageStage",
+          "标签": "当前形态（按年龄切换）",
+          "类型": "enum",
+          "取值": [
+            "幼年",
+            "成年"
+          ],
+          "默认": "成年",
+          "说明": "决定人设里的形体描述，也决定 [立绘] 发哪一张"
+        },
+        {
+          "键": "persona.illustrationYoung",
+          "标签": "幼年立绘路径",
+          "类型": "string",
+          "默认": "角色形象图/幼年.jpg"
+        },
+        {
+          "键": "persona.illustrationAdult",
+          "标签": "成年立绘路径",
+          "类型": "string",
+          "默认": "角色形象图/成年.jpg"
+        }
+      ]
+    },
+    {
+      "名": "判定",
+      "键前缀": "gates",
+      "字段": [
+        {
+          "键": "gates.depthChars",
+          "标签": "三档字数上限",
+          "类型": "int[3]",
+          "默认": [
+            20,
+            60,
+            200
+          ]
+        },
+        {
+          "键": "gates.utilitySpeakAt",
+          "标签": "开口阈值",
+          "类型": "number",
+          "默认": 0.2,
+          "范围": [
+            0.05,
+            0.55
+          ]
+        },
+        {
+          "键": "gates.utilityTerseAt",
+          "标签": "常规线",
+          "类型": "number",
+          "默认": 0.35,
+          "范围": [
+            0.1,
+            0.75
+          ]
+        },
+        {
+          "键": "gates.utilityDetailedAt",
+          "标签": "多讲线",
+          "类型": "number",
+          "默认": 0.65,
+          "范围": [
+            0.2,
+            0.95
+          ]
+        },
+        {
+          "键": "gates.utilityLambda",
+          "标签": "成本权重 λ",
+          "类型": "number",
+          "默认": 0.5,
+          "范围": [
+            0,
+            2
+          ]
+        },
+        {
+          "键": "gates.greyLo",
+          "标签": "灰区下界",
+          "类型": "number",
+          "默认": 0.4,
+          "自适应": true
+        },
+        {
+          "键": "gates.greyHi",
+          "标签": "灰区上界",
+          "类型": "number",
+          "默认": 0.75,
+          "自适应": true
+        },
+        {
+          "键": "gates.weights",
+          "标签": "六因子权重 w1..w4",
+          "类型": "number[4]",
+          "默认": [
+            0.4,
+            0.2,
+            0.25,
+            0.15
+          ]
+        }
+      ]
+    },
+    {
+      "名": "主动与节流",
+      "键前缀": "autojoin",
+      "字段": [
+        {
+          "键": "autojoin.rate",
+          "标签": "主动参与意愿",
+          "类型": "number",
+          "默认": 0.25,
+          "范围": [
+            0.15,
+            0.6
+          ]
+        },
+        {
+          "键": "autojoin.minGapSec",
+          "标签": "最小间隔(秒)",
+          "类型": "int",
+          "默认": 120,
+          "范围": [
+            5,
+            600
+          ]
+        }
+      ]
+    },
+    {
+      "名": "运行时",
+      "键前缀": "runtime",
+      "字段": [
+        {
+          "键": "runtime.stageMode",
+          "标签": "开口阶段",
+          "类型": "enum",
+          "取值": [
+            "auto",
+            "observe",
+            "live"
+          ],
+          "默认": "auto",
+          "说明": "auto=新群先观察→半自动→全自动（N9）"
+        },
+        {
+          "键": "runtime.observeUntilMessages",
+          "标签": "新群观察条数",
+          "类型": "int",
+          "默认": 80,
+          "范围": [
+            20,
+            500
+          ],
+          "说明": "N9：攒满这么多条就转半自动"
+        },
+        {
+          "键": "runtime.semiAutoDays",
+          "标签": "半自动天数",
+          "类型": "int",
+          "默认": 3,
+          "范围": [
+            0,
+            30
+          ],
+          "说明": "N9：半自动跑满这么多天转全自动"
+        },
+        {
+          "键": "runtime.contextWindow",
+          "标签": "上下文窗口(条)",
+          "类型": "int",
+          "默认": 10,
+          "范围": [
+            0,
+            30
+          ],
+          "说明": "N8：进 prompt 且排在最后的群消息条数"
+        },
+        {
+          "键": "runtime.coalesceWindowMs",
+          "标签": "连发合并窗口(毫秒)",
+          "类型": "int",
+          "默认": 6000,
+          "范围": [
+            1000,
+            20000
+          ],
+          "说明": "N23：同一人连发多久算一轮"
+        },
+        {
+          "键": "runtime.maxSegments",
+          "标签": "最多分几条",
+          "类型": "int",
+          "默认": 3,
+          "范围": [
+            1,
+            6
+          ],
+          "说明": "N6：超长回复最多拆成几条"
+        },
+        {
+          "键": "runtime.search.mode",
+          "标签": "搜索通道",
+          "类型": "enum",
+          "取值": [
+            "c",
+            "b"
+          ],
+          "默认": "c",
+          "说明": "N12：c=本机直搜（零模型调用），b=DSH 独立调用"
+        },
+        {
+          "键": "runtime.budget.dailyTokens",
+          "标签": "日预算(token)",
+          "类型": "int",
+          "默认": 5000000,
+          "说明": "N23：超 80% 关主动，超 100% 只回被点名的"
+        },
+        {
+          "键": "runtime.budget.groupHourlyLimit",
+          "标签": "每群每小时上限(0=不限)",
+          "类型": "int",
+          "默认": 0,
+          "说明": "N23：已取消，保持 0"
+        },
+        {
+          "键": "runtime.vision.enabled",
+          "标签": "启用识图",
+          "类型": "bool",
+          "默认": false,
+          "说明": "N18：收到图片时独立调一次多模态模型，把描述拼进上下文"
+        },
+        {
+          "键": "runtime.vision.mode",
+          "标签": "识图通道",
+          "类型": "enum",
+          "取值": [
+            "off",
+            "http",
+            "dsh"
+          ],
+          "默认": "off",
+          "说明": "http=任何 OpenAI 兼容多模态接口；dsh=在 profile 里跑 DSH（需装 Our Free Model）"
+        },
+        {
+          "键": "runtime.vision.endpoint",
+          "标签": "多模态接口地址",
+          "类型": "string",
+          "默认": "",
+          "说明": "http 模式用，例如 https://api.example.com/v1/chat/completions"
+        },
+        {
+          "键": "runtime.vision.apiKey",
+          "标签": "多模态接口 Key",
+          "类型": "secret",
+          "默认": ""
+        },
+        {
+          "键": "runtime.vision.model",
+          "标签": "识图模型",
+          "类型": "string",
+          "默认": "mimo-v2.6-flash-free",
+          "说明": "dsh 模式默认用 Our Free Model 的 MiMo V2.6 Flash"
+        },
+        {
+          "键": "runtime.voice.enabled",
+          "标签": "启用语音",
+          "类型": "bool",
+          "默认": false,
+          "说明": "N18：大脑写出 [语音: 文本] 标记时，用 TTS 念出来发给群"
+        },
+        {
+          "键": "runtime.voice.voice",
+          "标签": "TTS 音色",
+          "类型": "string",
+          "默认": "Microsoft Huihui",
+          "说明": "走 Windows 自带 SAPI，可选 Huihui / Kangkang / Yaoyao"
+        },
+        {
+          "键": "runtime.voice.maxChars",
+          "标签": "语音最长字数",
+          "类型": "int",
+          "默认": 60,
+          "范围": [
+            10,
+            200
+          ]
+        },
+        {
+          "键": "runtime.napcatWebui",
+          "标签": "NapCat 配置页地址",
+          "类型": "string",
+          "默认": "http://127.0.0.1:6099",
+          "说明": "配置端右上角的「NapCat 配置」按钮打开这个地址"
+        },
+        {
+          "键": "runtime.webui.enabled",
+          "标签": "启用配置端页面",
+          "类型": "bool",
+          "默认": true,
+          "说明": "本地网页，只听 127.0.0.1，无登录（N25）"
+        },
+        {
+          "键": "runtime.webui.port",
+          "标签": "配置端端口",
+          "类型": "int",
+          "默认": 8799,
+          "范围": [
+            1024,
+            65535
+          ]
+        },
+        {
+          "键": "admin.whitelist",
+          "标签": "管理员白名单",
+          "类型": "string[]",
+          "默认": [],
+          "说明": "N10：白名单里的 QQ 号可以发 /停 /开 /状态"
+        }
+      ]
+    },
+    {
+      "名": "接入",
+      "键前缀": "napcat",
+      "字段": [
+        {
+          "键": "napcat.launchPath",
+          "标签": "NapCat 启动程序路径",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空 = 启动器自己在常见位置找 NapCatWinBootMain.exe"
+        },
+        {
+          "键": "napcat.autoLaunch",
+          "标签": "启动小助手时顺带拉起 NapCat",
+          "类型": "bool",
+          "默认": true,
+          "说明": "启动器会等 OneBot 端口通了再拉起小助手，省得它一上来就连不上"
+        },
+        {
+          "键": "napcat.autoClose",
+          "标签": "退出小助手时顺带关闭 NapCat",
+          "类型": "bool",
+          "默认": true,
+          "说明": "只关 NapCat 目录里的进程；你自己装的 QQ 不会被牵连"
+        },
+        {
+          "键": "napcat.hideWindow",
+          "标签": "把 NapCat 窗口藏在后台",
+          "类型": "bool",
+          "默认": true,
+          "说明": "启动时不给它开控制台，并持续把它的窗口收起来"
+        },
+        {
+          "键": "napcat.wsUrl",
+          "标签": "OneBot WS 地址",
+          "类型": "string",
+          "默认": "ws://127.0.0.1:3001"
+        },
+        {
+          "键": "napcat.token",
+          "标签": "访问令牌",
+          "类型": "secret",
+          "默认": ""
+        },
+        {
+          "键": "brain.dshCliPath",
+          "标签": "大脑(DSH CLI)路径",
+          "类型": "string",
+          "默认": ""
+        },
+        {
+          "键": "llm.search.apiKey",
+          "标签": "搜索 API Key",
+          "类型": "secret",
+          "默认": ""
+        }
+      ]
+    },
+    {
+      "名": "额外功能",
+      "键前缀": "plugins",
+      "字段": [
+        {
+          "键": "plugins.ourFreeModel",
+          "标签": "二判（外审）走 Our Free Model",
+          "类型": "bool",
+          "默认": false,
+          "说明": "开着就用它的免费模型跑外审；关掉走 DSH 默认模型（外审是独立通道，不占你付费额度）"
+        },
+        {
+          "键": "plugins.ourFreeModelId",
+          "标签": "二判模型 id",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空用 ling-3.1-flash-free；也可填 mimo-v2.6-flash-free / cat-jam-free 等"
+        },
+        {
+          "键": "plugins.ourFreeModelBrain",
+          "标签": "大脑走 Our Free Model",
+          "类型": "bool",
+          "默认": false,
+          "说明": "开了之后回复用免费模型池，不再花你的 DeepSeek 额度；三档 effort 会被去掉（免费池多数不认这个字段）"
+        },
+        {
+          "键": "plugins.ourFreeModelBrainId",
+          "标签": "大脑模型 id",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空用 ling-3.1-flash-free"
+        },
+        {
+          "键": "plugins.freeSearch",
+          "标签": "搜索走 dsh-free-search",
+          "类型": "bool",
+          "默认": true,
+          "说明": "开着就用它那 24 个引擎；关掉用本程序内置的直搜（Bing/DDG）"
+        },
+        {
+          "键": "plugins.freeSearchEngine",
+          "标签": "搜索引擎",
+          "类型": "enum",
+          "取值": [
+            "bing",
+            "ddg",
+            "searxng",
+            "baidu",
+            "kimi",
+            "exa",
+            "tavily"
+          ],
+          "默认": "bing"
+        },
+        {
+          "键": "plugins.archify",
+          "标签": "允许画图表发出来",
+          "类型": "bool",
+          "默认": true,
+          "说明": "开了之后，大脑可以用 archify 技能画流程图/架构图，程序把成品图发进群"
+        },
+        {
+          "键": "plugins.archifyCleanup",
+          "标签": "图表发完删掉本地文件",
+          "类型": "bool",
+          "默认": true,
+          "说明": "群聊里不长期留图；关掉会把成品留在 .archify 目录里"
+        },
+        {
+          "键": "plugins.meme",
+          "标签": "使用 dsh-meme 图库",
+          "类型": "bool",
+          "默认": true,
+          "说明": "关掉就不配图（人设里也不会再提 [表情: …]）"
+        },
+        {
+          "键": "meme.packDir",
+          "标签": "图库目录",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空自动找 dsh-meme 的图库；也可以自己攒一套放这儿"
+        }
+      ]
+    }
+  ]
+}

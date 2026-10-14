@@ -1,0 +1,26 @@
+# === 运行期数据（程序自建、可清空）===
+# 见 存储契约.md §一：全部运行期数据落在 <程序目录>/app/dsh-data/
+app/dsh-data/
+# 早期 brain 默认输出路径留下的空壳
+dsh-data/
+
+# === 大脑通道的工作区 DSH_HOME（N1 决策：profile 落在工作区内，零写入 ~/.dsh）===
+# 只忽略运行期；人设真源在 prompts/，由程序渲染进 app/dsh-home/profiles/*/cordis.patch.yml
+app/dsh-home/
+
+# === 依赖 / 日志 ===
+node_modules/
+*.log
+
+# === 系统杂物 ===
+Thumbs.db
+desktop.ini
+.DS_Store
+# === 分发版产物不进库：只留打包脚本，zip 由使用者自己打 ===
+dist/DSHQQ-Assistant-*/
+dist/*.zip
+# === 社区插件一键安装产生的内容：不进版本库，点配置端的按钮即可重建 ===
+vendor/
+app/dsh-home/skills/
+app/dsh-home/profiles/*/node_modules/
+app/dsh-home/profiles/*/pnpm-lock.yaml
