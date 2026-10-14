@@ -29,6 +29,8 @@ app/main.js
   ├─ src/audit.js         外审复核通道（独立 profile，是 / 短 / 否）
   ├─ src/search.js        搜索通道（可切社区插件）
   ├─ src/brain.js         大脑调用与 profile 生成
+  ├─ src/localreply.js    低档本地短答：分场景分池 + 同群不重复（零成本那一层）
+  ├─ src/uimessages.js    配置端消息表：每群 30 条上限，满了丢最旧，落盘
   ├─ src/webui.js+webui/  配置端（9 页，原生 HTML/CSS/JS）
   └─ src/store.js         落盘（原文不落）
 ```
@@ -177,13 +179,13 @@ U        = benefit − costTerm
 
 开一个开关只让"尾巴"变化，前面的前缀照样命中缓存 —— 这就是把"会变的东西"全放最后的唯一原因。
 
-### 三档深浅（`depthChars` 默认 `[20, 60, 203]`）
+### 三档深浅（`depthChars` 默认 `[20, 60, 200]`）
 
 | 档位 | 调大脑 | 模型发力 | 搜索 | 字数上限 | 上下文 |
 |---|---|---|---|---|---|
 | low | 否（本地短句池） | — | 0 | 20 | 0 |
 | mid | 是 | `reasoningEffort=low` | ≤1 次（有关键词才搜） | 60 | 10 条 |
-| high | 是 | `reasoningEffort=high` | 1 次 | 203 | 10 条 |
+| high | 是 | `reasoningEffort=high` | 1 次 | 200 | 10 条 |
 
 详细档**一律不配图**。三档字数由 `gates.depthChars` 一处配置，分档流水与大脑提示词共用同一份。
 
