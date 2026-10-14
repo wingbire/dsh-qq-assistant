@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath } from "./config.js";
 import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
 import { buildProfilePrompt } from "./profile.js";
+import { moneyOfRows, costOf, isPeakTime, PRICE_MODEL, PRICE_NOTE } from "./cost.js";
 
 // N25 决策：有设计感的配置端 —— 本地 HTTP 服务，只听 127.0.0.1，无登录。
 // 前端是零依赖的原生 HTML/CSS/JS（不分发 node_modules 也能跑）。
@@ -52,15 +53,17 @@ export function summarizeCost(rows, opts) {
   const perTier = {};
   let units = 0, outTokens = 0, inTokens = 0, cacheRead = 0, cacheInput = 0;
   let replies = 0, messages = 0, brainCalls = 0, searches = 0, cacheHits = 0, memes = 0, voice = 0, proactives = 0;
+  const scopeRows = [];
   for (const r of (rows || [])) {
     if (!r) continue;
     const t = r.at ? Date.parse(r.at) : NaN;
     // 设了下界就只认带时间戳、且在界内的记录；没设下界（since=0）则宽容处理
     if (since && (isNaN(t) || t < since)) continue;
+    scopeRows.push(r);
     const g = String(r.gid || "-");
     if (gid && g !== gid) continue;
     let b = per.get(g);
-    if (!b) { b = { gid: g, units: 0, replies: 0, messages: 0 }; per.set(g, b); }
+    if (!b) { b = { gid: g, units: 0, replies: 0, messages: 0, money: 0 }; per.set(g, b); }
     if (r.kind === "decision" || r.kind === "observe_only" || r.kind === "merged_ignore") {
       messages += 1; b.messages += 1;
       if (r.tier) perTier[r.tier] = (perTier[r.tier] || 0) + 1;
@@ -76,11 +79,17 @@ export function summarizeCost(rows, opts) {
       const cr = Number(u.cacheReadTokens) || 0, cw = Number(u.cacheWriteTokens) || 0;
       const u2 = i2 + 2 * o2;
       units += u2; b.units += u2;
+      const ts2 = r.at ? Date.parse(r.at) : NaN;
+      b.money += costOf(u, (isFinite(ts2) && isPeakTime(ts2)) ? "peak" : "offPeak");
       inTokens += i2; outTokens += o2; cacheRead += cr; cacheInput += i2 + cr + cw;
       if (u2 > 0) brainCalls += 1;
     }
     if (r.kind === "proactive_sent") proactives += 1;
   }
+  // 钱：今天的总花费 / 每条均价 / 缓存省下的 / 本地判掉的那批"本来要花多少"（估算）
+  const money = moneyOfRows(scopeRows);
+  const notReplied = Math.max(0, messages - replies);
+  const saved = notReplied * money.perReplyAvg;
   return {
     gid: gid, since: since,
     units: units, inTokens: inTokens, outTokens: outTokens,
@@ -88,6 +97,16 @@ export function summarizeCost(rows, opts) {
     searches: searches, searchCacheHits: cacheHits, memes: memes, voice: voice, proactives: proactives,
     cacheHitRate: cacheInput > 0 ? Math.round((cacheRead / cacheInput) * 1000) / 1000 : null,
     avgUnitsPerReply: replies > 0 ? Math.round(units / replies) : 0,
+    money: {
+      today: money.today,                 // 元（按官方价目、按时段计价）
+      perReplyAvg: money.perReplyAvg,     // 元 / 条
+      cacheSaved: money.cacheSaved,       // 缓存命中相比全未命中省下的
+      saved: saved,                       // 本地判否那批的"本来要花"（估算）
+      savedReplies: notReplied,
+      costedReplies: money.replies,
+      model: PRICE_MODEL,
+      note: PRICE_NOTE
+    },
     perGroup: Array.from(per.values()).sort(function (a, b) { return b.units - a.units; }),
     perTier: perTier
   };

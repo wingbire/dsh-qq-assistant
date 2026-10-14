@@ -5,6 +5,7 @@ import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
 import { createUiMessages, trimRecords, UIMSG_DEFAULT } from "../app/src/uimessages.js";
+import { PRICE, tokensOf, costOf as costOfUsage, cacheSavedOf, isPeakTime, moneyOfRows, PRICE_MODEL } from "../app/src/cost.js";
 import { engagementOf, reward, costOf } from "../app/src/score.js";
 import { createProactive } from "../app/src/proactive.js";
 import { createStore } from "../app/src/store.js";
@@ -2230,6 +2231,43 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("cost: 计价（空闲/高峰、缓存命中、省下的钱）", function () {
+  const u = { inputTokens: 508, outputTokens: 200, cacheReadTokens: 6400, cacheWriteTokens: 0, totalTokens: 7108 };
+  const tk = tokensOf(u);
+  eq(tk.prompt, 6908, "prompt = 未命中 + 命中 + 写入");
+  eq(tk.total, 7108);
+  const off = costOfUsage(u, "offPeak");
+  eq(Math.round(off * 1e6), 1436, "508×1 + 6400×0.02 + 200×4 = 1436（每百万）");
+  const peak = costOfUsage(u, "peak");
+  eq(Math.round(peak * 100) / 100, Math.round(off * 2 * 100) / 100, "高峰正好是空闲两倍");
+  ok(cacheSavedOf(u, "offPeak") > 0, "命中相比全未命中省了钱");
+  eq(isPeakTime(new Date(2026, 9, 14, 10, 0).getTime()), true, "工作日 10 点 = 高峰");
+  eq(isPeakTime(new Date(2026, 9, 14, 13, 0).getTime()), false, "工作日 13 点 = 空闲");
+  eq(isPeakTime(new Date(2026, 9, 17, 10, 0).getTime()), false, "周六 = 空闲");
+  const money = moneyOfRows([{ at: new Date(2026, 9, 14, 13, 0).toISOString(), usage: u }]);
+  eq(Math.round(money.today * 1e6), 1436);
+  eq(money.replies, 1);
+});
+
+t("webui: 状态接口的成本字段（钱 / 每条均价 / 缓存省下 / 本地省下）", function () {
+  const at = new Date(2026, 9, 14, 13, 0).toISOString();
+  const rows = [
+    { kind: "sent", gid: "100000001", at: at, usage: { inputTokens: 508, outputTokens: 200, cacheReadTokens: 6400 } },
+    { kind: "decision", gid: "100000001", at: at, tier: "low" },
+    { kind: "decision", gid: "100000001", at: at, tier: "low", extra: true },
+    { kind: "decision", gid: "100000001", at: at, tier: "low" }
+  ];
+  const c = summarizeCost(rows, { since: 0 });
+  ok(c.money && c.money.today > 0, "有今日花费");
+  eq(Math.round(c.money.today * 1e6), 1436);
+  eq(Math.round(c.money.perReplyAvg * 1e6), 1436, "只有 1 条走模型 → 均价=总价");
+  eq(c.money.costedReplies, 1);
+  eq(c.money.savedReplies, 2, "2 条判否没调模型");
+  eq(Math.round(c.money.saved * 1e6), 2872, "省下 = 2 条 × 每条均价（估算）");
+  ok(c.money.cacheSaved > 0);
+  eq(c.perGroup[0].money > 0, true, "分群也带钱");
+});
 
 t("persona: 表达层都是可变块（关掉就不写进人设）", function () {
   const table = loadFieldTable();

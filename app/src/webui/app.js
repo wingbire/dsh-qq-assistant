@@ -113,6 +113,25 @@
   }
   function markDirty() { S.dirty = true; $("#save-btn").disabled = false; $("#save-btn").textContent = "保存 *"; }
   function hhmmss(t) { var d = new Date(t); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) + ":" + ("0" + d.getSeconds()).slice(-2); }
+  // 卡片折叠：状态记在本机（localStorage），刷新不跳回去。dfltOpen 是第一次打开时的默认值。
+  function foldOpen(id, dfltOpen) {
+    try { var v = localStorage.getItem("dshqq-fold-" + id); return v == null ? !!dfltOpen : v === "1"; } catch (e) { return !!dfltOpen; }
+  }
+  function cardHtml(id, title, sub, body, dfltOpen) {
+    var open = foldOpen(id, dfltOpen);
+    return '<details class="card dsh-fold" id="' + id + '"' + (open ? " open" : "") + '>' +
+      '<summary class="head" style="cursor:pointer">' + title +
+      (sub ? '<span class="muted" style="font-size:12px">' + sub + '</span>' : '') + '</summary>' +
+      '<div class="body">' + body + '</div></details>';
+  }
+  // 钱：不足 1 分给 4 位小数（"1.8 厘"这种量级），超过 1 分给 2 位
+  function fmtMoney(v) {
+    if (v == null || !isFinite(v)) return "—";
+    var n = Number(v);
+    if (n === 0) return "¥0";
+    if (n < 0.01) return "¥" + n.toFixed(4);
+    return "¥" + n.toFixed(2);
+  }
   function fmtTokens(n) {
     n = Number(n) || 0;
     if (n >= 1e8) return (n / 1e8).toFixed(2) + " 亿";
@@ -258,24 +277,26 @@
       '</div></div>';
 
     // 成本卡片（预算卡片带调节杆）
-    var cost = '<div class="grid">' +
-      '<div class="stat"><div class="k">今日用量（token 单位）</div><div class="v">' + fmtTokens(c.units) + '</div>' +
-        '<div class="s">预算 ' + fmtTokens(limit) + '　已用 ' + Math.round((b.ratio || 0) * 100) + '%　' + esc(b.mode || "normal") + '</div></div>' +
+    // 成本卡片：主数值给"钱"（token 是程序内部单位，用户关心的是花了多少）
+    var mn = c.money || {};
+    var costGrid = '<div class="grid">' +
+      '<div class="stat"><div class="k">今日花费</div><div class="v">' + fmtMoney(mn.today) + '</div>' +
+        '<div class="s">用量 ' + fmtTokens(c.units) + '　预算 ' + fmtTokens(limit) + '　已用 ' + Math.round((b.ratio || 0) * 100) + '%</div></div>' +
+      '<div class="stat"><div class="k">平均每条回复</div><div class="v">' + fmtMoney(mn.perReplyAvg) + '</div>' +
+        '<div class="s">' + (mn.costedReplies || 0) + ' 条走模型　输入 ' + fmtTokens(c.inTokens) + "　输出 " + fmtTokens(c.outTokens) + '</div></div>' +
       '<div class="stat"><div class="k">缓存命中率</div><div class="v">' + (c.cacheHitRate == null ? "—" : Math.round(c.cacheHitRate * 100) + "%") + '</div>' +
-        '<div class="s">人设常驻 personaPrefix 吃到的前缀命中</div></div>' +
-      '<div class="stat"><div class="k">今日回复</div><div class="v">' + (c.replies || 0) + '</div>' +
-        '<div class="s">收 ' + (c.messages || 0) + " 条　搜 " + (c.searches || 0) + " 次　配图 " + (c.memes || 0) + " 张</div></div>" +
-      '<div class="stat"><div class="k">平均每条回复</div><div class="v">' + fmtTokens(c.avgUnitsPerReply) + '</div>' +
-        '<div class="s">输入 ' + fmtTokens(c.inTokens) + "　输出 " + fmtTokens(c.outTokens) + '</div></div>' +
-      '</div>';
+        '<div class="s">命中省下 ≈' + fmtMoney(mn.cacheSaved) + '（人设只改尾巴）</div></div>' +
+      '<div class="stat"><div class="k">本地判断省下</div><div class="v">≈' + fmtMoney(mn.saved) + '</div>' +
+        '<div class="s">' + (mn.savedReplies || 0) + ' 条没调模型（收 ' + (c.messages || 0) + ' 条）</div></div>' +
+      '</div>' +
+      '<div class="hint" style="margin-top:6px">按官方价目 ' + esc(mn.model || "") + ' 折算：' + esc(mn.note || "") + '。单价表在 <code>app/src/cost.js</code>。</div>';
 
-    var budgetCard = '<div class="card"><div class="head">日预算调节' +
-      '<span class="muted" style="font-size:12px">管理员随手调，立即生效</span></div><div class="body">' +
-      '<div class="ctl-row"><input type="range" id="budget-range" min="0" max="' + budgetMax + '" step="100000" value="' + limit + '" style="width:320px">' +
+    // 日预算调节 + 各群花费都并进上面那张成本卡（同类信息不散在多张卡里）
+    var budgetBody = '<div class="ctl-row" style="margin-top:10px"><span class="muted" style="font-size:12px;min-width:66px">日预算调节</span>' +
+      '<input type="range" id="budget-range" min="0" max="' + budgetMax + '" step="100000" value="' + limit + '" style="width:320px">' +
       '<span class="val" id="budget-val" style="min-width:96px">' + fmtTokens(limit) + '</span>' +
       '<button class="btn-sm good" id="btn-budget">应用</button>' +
-      '<span class="hint" style="margin:0">超 80% 关主动，超 100% 只回被点名的</span></div>' +
-      '</div></div>';
+      '<span class="hint" style="margin:0">超 80% 关主动，超 100% 只回被点名的</span></div>';
 
     // 消息 + 判定过程
     var rows = (st.messages || []).map(function (m) {
@@ -295,32 +316,36 @@
     var msgInfo = st.messagesInfo || {};
     var perGroup = msgInfo.perGroup || 30;
     var msgCount = (st.messages || []).length;
-    var msgCard = '<details class="card" id="msg-card"' + (S.uiMsgOpen ? " open" : "") + '>' +
-      '<summary class="head" style="cursor:pointer">收到的消息与判定过程' +
-      '<span class="muted" style="font-size:12px">' + (S.uiMsgOpen ? "点标题折叠" : "点标题展开") +
-      '　最近 ' + msgCount + ' 条 · 每群留 ' + perGroup + ' 条，满了丢最旧</span></summary>' +
-      '<div class="body">' +
+    var msgCard = cardHtml("msg-card", "收到的消息与判定过程",
+      "最近 " + msgCount + " 条 · 每群留 " + perGroup + " 条，满了丢最旧",
       '<table><thead><tr><th>时间</th><th>谁</th><th>消息</th><th>判定</th><th>动作</th><th>p_say</th><th>档位</th><th>依据</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="8" class="muted">还没有收到消息</td></tr>') + '</tbody></table>' +
-      '<div class="hint">判定表落盘在 <code>app/dsh-data/data/data/ui-messages.json</code>，每群最多保留 ' + perGroup + ' 条（可在「调整」页改），超出按时间丢最旧的。</div>' +
-      '</div></details>';
+      '<div class="hint">判定表落盘在 <code>app/dsh-data/data/data/ui-messages.json</code>，每群最多保留 ' + perGroup + ' 条（可在「调整」页改），超出按时间丢最旧的。</div>',
+      false);   // 默认折叠；开合状态由 dshqq-fold-msg-card 记住
 
-    var groupCard = S.gid ? ('<div class="card"><div class="head">本群累计（本次运行）</div><div class="body">' +
-      '<div class="grid">' +
+    var groupCard = S.gid ? cardHtml("group-card", "本群累计（本次运行）", esc(S.gid), '<div class="grid">' +
       '<div class="stat"><div class="k">收到消息</div><div class="v">' + (gs.messages || 0) + '</div><div class="s">含合并</div></div>' +
       '<div class="stat"><div class="k">发出回复</div><div class="v">' + (gs.replies || 0) + '</div><div class="s">进大脑 ' + (gs.brainCalls || 0) + ' 次</div></div>' +
       '<div class="stat"><div class="k">本群用量</div><div class="v">' + fmtTokens(gs.tokens) + '</div><div class="s">搜索 ' + (gs.searches || 0) + '　配图 ' + (gs.memes || 0) + '</div></div>' +
       '<div class="stat"><div class="k">最近活动</div><div class="v" style="font-size:18px">' + (gs.lastAt ? hhmmss(gs.lastAt) : "—") + '</div><div class="s">本群最后一条</div></div>' +
-      '</div></div></div>') : "";
+      '</div>', true) : "";
 
     // 分组用量
     var per = (c.perGroup || []).filter(function (x) { return x.units > 0; });
-    var perCard = per.length ? ('<div class="card"><div class="head">今日各群用量</div><div class="body"><table><thead><tr><th>群</th><th>用量</th><th>回复</th><th>消息</th></tr></thead><tbody>' +
+    var perBody = per.length ? ('<details class="dsh-fold" id="per-card">' +
+      '<summary class="head" style="cursor:pointer;font-size:13px">今日各群花费与用量' +
+      '<span class="muted" style="font-size:12px">' + per.length + ' 个群 · 点标题展开</span></summary>' +
+      '<table><thead><tr><th>群</th><th>花费</th><th>用量</th><th>回复</th><th>消息</th></tr></thead><tbody>' +
       per.map(function (x) {
-        return '<tr><td>' + esc(x.gid) + '</td><td>' + fmtTokens(x.units) + '</td><td>' + x.replies + '</td><td>' + x.messages + '</td></tr>';
-      }).join("") + '</tbody></table></div></div>') : "";
+        return '<tr><td>' + esc(x.gid) + '</td><td>' + fmtMoney(x.money) + '</td><td>' + fmtTokens(x.units) + '</td><td>' + x.replies + '</td><td>' + x.messages + '</td></tr>';
+      }).join("") + '</tbody></table></details>') : "";
 
-    return bar + cost + budgetCard + groupCard + msgCard + perCard;
+    // 成本卡：今日花费 / 每条均价 / 缓存 / 本地省下 + 预算调节 + 各群花费（同类合并，整卡可折叠）
+    var costCard = cardHtml("cost-card", "成本（今日）",
+      "花费 " + fmtMoney(mn.today) + " · 每条 " + fmtMoney(mn.perReplyAvg) + " · 缓存 " + (c.cacheHitRate == null ? "—" : Math.round(c.cacheHitRate * 100) + "%"),
+      costGrid + budgetBody + perBody, true);
+
+    return bar + costCard + groupCard + msgCard;
   }
 
   /* ---------- 标注 / 图库 ---------- */
@@ -738,10 +763,10 @@
   function bind() {
     // 折叠状态：<details> 的 toggle 不冒泡，所以用捕获阶段收；顺便记到本机，刷新后保持
     document.addEventListener("toggle", function (e) {
-      if (e.target && e.target.id === "msg-card") {
-        S.uiMsgOpen = !!e.target.open;
-        try { localStorage.setItem("dshqq-msg-open", e.target.open ? "1" : "0"); } catch (err) {}
-      }
+      var el = e.target;
+      if (!el || !el.id || !el.classList || !el.classList.contains("dsh-fold")) return;
+      try { localStorage.setItem("dshqq-fold-" + el.id, el.open ? "1" : "0"); } catch (err) {}
+      if (el.id === "msg-card") S.uiMsgOpen = !!el.open;
     }, true);
     document.addEventListener("click", function (e) {
       var nav = e.target.closest("[data-page]");

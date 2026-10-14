@@ -103,6 +103,9 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,127,240,.
 .card>summary:before{content:"▸";color:var(--accent);transition:.2s}
 .card[open]>summary:before{transform:rotate(90deg)}
 .card .body{padding:4px 18px 20px;display:flex;flex-direction:column;gap:14px}
+/* 折叠卡的标题要紧跟在 ▸ 后面（.head 的 space-between 会把标题挤到中间），副标题推右边 */
+.card>summary.head{justify-content:flex-start}
+.card>summary.head>.muted{margin-left:auto}
 
 .field{display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:center;padding:11px 0;border-top:1px dashed var(--line)}
 .field:first-child{border-top:0}
