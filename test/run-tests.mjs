@@ -13,9 +13,10 @@ import { splitReply, splitSentences, cutAtSentence } from "../app/src/split.js";
 import { createCoalescer, mergeBucket, pickAnchor } from "../app/src/coalesce.js";
 import { createBudget, dayKeyOf } from "../app/src/budget.js";
 import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
-import { createOneBot, normalizeEvent, withToken } from "../app/src/onebot.js";
+import { createOneBot, normalizeEvent, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
-import { defaultsFromTable, redactConfig, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
+import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
+import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
 import { parseAuditVerdict, auditStub, createAuditor, setAuditChannel, audit as runAudit, AUDIT_PROFILE_ID, AUDIT_TIMEOUT_MS } from "../app/src/audit.js";
 import { createSearch, buildSummary, normalizeResults, injectSummary, cacheKeyOf, parseBingHtml, stripTags, httpSearch, SEARCH_PROFILE_ID } from "../app/src/search.js";
 import { DEFAULT_BOUNDS } from "../app/src/gatescore.js";
@@ -2080,6 +2081,193 @@ t("webui: 跳过观察期的接口能通", async function () {
     });
     eq(bad.status, 400, "不给 gid 要报错");
   } finally { await ui.close(); }
+});
+
+// ===== N28：NapCat 自动对接与令牌安全 =====
+
+t("config: secret 的遮蔽值与空值都算「没改」", function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), { napcat: { token: "T1" } });
+  eq(mergeConfigSafe(cfg, { napcat: { token: REDACTED } }, table).napcat.token, "T1", "遮蔽值不能覆盖真令牌");
+  eq(mergeConfigSafe(cfg, { napcat: { token: "" } }, table).napcat.token, "T1", "密码框留空 = 不改");
+  eq(mergeConfigSafe(cfg, { napcat: { token: "T2" } }, table).napcat.token, "T2", "真填了新令牌要能写进去");
+  eq(mergeConfigSafe(cfg, { persona: { botName: "甲" } }, table).napcat.token, "T1", "改别的字段不影响它");
+  eq(mergeConfigSafe(cfg, { persona: { botName: "甲" } }, table).persona.botName, "甲");
+  eq(redactConfig(cfg, table).napcat.token, REDACTED, "回给前端的永远只是遮蔽值");
+});
+
+t("webui: 保存一次不会把「<已配置>」写进令牌", async function () {
+  const table = loadFieldTable();
+  const cfg = deepMerge(defaultsFromTable(table), { napcat: { token: "SECRET-TOKEN" } });
+  const ui = createWebUi({ config: cfg, table: table });
+  const info = await ui.listen(0);
+  try {
+    const got = await (await fetch(info.url + "/api/config")).json();
+    eq(got.values.napcat.token, REDACTED);
+    // 前端保存时是把整份 values 回存的；现在值就是遮蔽值 —— 真令牌必须原样留着
+    const saved = await (await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patch: got.values }) })).json();
+    eq(saved.ok, true);
+    eq(ui.getConfig().napcat.token, "SECRET-TOKEN", "遮蔽值被写进配置 = 重启后 NapCat 必连不上");
+    await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patch: { napcat: { token: "" } } }) });
+    eq(ui.getConfig().napcat.token, "SECRET-TOKEN", "空串也不能抹掉");
+    await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patch: { napcat: { token: "NEW-TOKEN" } } }) });
+    eq(ui.getConfig().napcat.token, "NEW-TOKEN", "真改令牌要生效");
+  } finally { await ui.close(); }
+});
+
+t("napcat: 从 NapCat 自己的 onebot11 配置里读出地址与令牌", function () {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-napcat-"));
+  const cfgDir = path.join(tmp, "NapCat", "9.9.9-Shell", "versions", "9.9.9", "resources", "app", "napcat", "config");
+  fs.mkdirSync(cfgDir, { recursive: true });
+  const onebotFile = path.join(cfgDir, "onebot11_10001.json");
+  fs.writeFileSync(onebotFile, JSON.stringify({ network: { websocketServers: [
+    { enable: true, name: "主号", host: "127.0.0.1", port: 3001, token: "TOKEN-abc-123" },
+    { enable: false, name: "备用", host: "127.0.0.1", port: 3002, token: "TOKEN-xyz-789" }
+  ] } }));
+  fs.writeFileSync(path.join(cfgDir, "webui.json"), JSON.stringify({ host: "::", port: 6099, token: "WEBUI-TOKEN-1" }));
+  const info = discoverNapCat({ roots: [path.join(tmp, "NapCat")] });
+  eq(info.found, true, "应该找得到（含 <宿主>/versions/<ver>/resources/app/napcat/config 这种实际布局）");
+  eq(info.file, onebotFile);
+  eq(info.url, "ws://127.0.0.1:3001");
+  eq(info.token, "TOKEN-abc-123");
+  eq(info.tokenMasked, "TOK…23");
+  eq(info.webuiToken, "WEBUI-TOKEN-1", "顺手把 NapCat 控制台的登录令牌读出来");
+  eq(info.servers.length, 2);
+
+  // 停用的服务端不能顶上来
+  fs.writeFileSync(onebotFile, JSON.stringify({ network: { websocketServers: [{ enable: false, name: "备用", host: "127.0.0.1", port: 3002, token: "T" }] } }));
+  const off = discoverNapCat({ roots: [path.join(tmp, "NapCat")] });
+  eq(off.found, true);
+  eq(off.server, null, "全停用 = 没有可用的服务端");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+t("napcat: 多个服务端优先挑同地址的那个", function () {
+  const servers = [
+    { name: "a", host: "127.0.0.1", port: 3001, token: "A", enable: true },
+    { name: "b", host: "127.0.0.1", port: 3002, token: "B", enable: true },
+    { name: "c", host: "127.0.0.1", port: 3003, token: "C", enable: false }
+  ];
+  eq(wsUrlOf(servers[1]), "ws://127.0.0.1:3002");
+  eq(pickServer(servers, "ws://127.0.0.1:3002").token, "B", "同地址优先，别的端口不抢");
+  eq(pickServer(servers, "ws://127.0.0.1:9999").token, "A", "对不上就取第一个启用的");
+  eq(pickServer([servers[2]], ""), null, "停用的不算");
+  eq(wsUrlOf({ host: "0.0.0.0", port: 3001 }), "ws://127.0.0.1:3001", "0.0.0.0 对客户端来说就是本机");
+  eq(parseOnebot("{").ok, false, "坏 JSON 要有说法");
+  eq(parseOnebot(JSON.stringify({ network: { websocketServers: [] } })).servers.length, 0);
+  eq(maskToken(""), "");
+  eq(maskToken("ab"), "a…");
+});
+
+t("napcat: 本机没填令牌自动补，两边不一样时以 NapCat 为准", function () {
+  const info = { found: true, file: "x", url: "ws://127.0.0.1:3001", token: "TK", tokenMasked: "TK…", server: { name: "n" }, servers: [], extraServers: [], webuiTokenMasked: "" };
+  const empty = napcatSyncPlan({ url: "ws://127.0.0.1:3001", token: "" }, info);
+  eq(empty.adopt.token, "TK");
+  eq(empty.matched, false);
+  eq(empty.action, "adopt");
+  eq(empty.note.indexOf("自动填入") >= 0, true);
+
+  const diff = napcatSyncPlan({ url: "ws://127.0.0.1:3001", token: "OLD" }, info);
+  eq(diff.matched, false, "两边都有但要是不一样 = 没对齐");
+  eq(diff.adopt.token, "TK", "同一个地址、令牌不一样：NapCat 那份才是它认的");
+  eq(diff.action, "align");
+
+  const same = napcatSyncPlan({ url: "ws://127.0.0.1:3001", token: "TK" }, info);
+  eq(same.matched, true);
+  eq(same.adopt, {});
+
+  const other = napcatSyncPlan({ url: "ws://127.0.0.1:4000", token: "OLD" }, info);
+  eq(other.adopt, {}, "地址都不一样时不许乱改");
+  eq(other.warn.length > 0, true);
+
+  const urlOnly = napcatSyncPlan({ url: DEFAULT_WS_URL, token: "TK" }, { found: true, url: "ws://127.0.0.1:3009", token: "TK", tokenMasked: "", server: {}, servers: [], extraServers: [] });
+  eq(urlOnly.adopt.url, "ws://127.0.0.1:3009", "地址还是默认占位时按 NapCat 填");
+
+  const off = napcatSyncPlan({ url: "x", token: "" }, { found: true, url: "", token: "", tokenMasked: "", server: null, servers: [], extraServers: [] });
+  eq(off.action, "napcat-off");
+  eq(off.warn.length > 0, true);
+  const nf = napcatSyncPlan({ url: "x", token: "" }, { found: false, servers: [], extraServers: [] });
+  eq(nf.action, "manual");
+
+  const cfg = { napcat: { wsUrl: DEFAULT_WS_URL, token: "" } };
+  const changed = napcatApplyAdopt(cfg, { url: "ws://127.0.0.1:3009", token: "TK9" });
+  eq(cfg.napcat.wsUrl, "ws://127.0.0.1:3009");
+  eq(cfg.napcat.token, "TK9");
+  eq(changed.length, 2);
+});
+
+t("napcat: 控制台令牌只给形状，不给明文", function () {
+  eq(maskToken("TEST-ONLY-TOKEN-1234"), "TES…34");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-webui-"));
+  const f = path.join(tmp, "webui.json");
+  fs.writeFileSync(f, JSON.stringify({ token: "WEBUI-SECRET-9" }));
+  eq(readWebuiToken(f), "WEBUI-SECRET-9");
+  eq(readWebuiToken(path.join(tmp, "没有这个文件.json")), null);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+t("onebot: 连不上时能说出是端口没开还是握手被拒", async function () {
+  const net = await import("node:net");
+  const srv = net.createServer(function (s) { s.destroy(); });
+  await new Promise(function (r) { srv.listen(0, "127.0.0.1", r); });
+  const port = srv.address().port;
+  try {
+    const open = await probePort("ws://127.0.0.1:" + port + "?access_token=x", 1500);
+    eq(open.ok, true, "端口在听就该认出来（这样「握手没过」和「端口没开」才分得开）");
+    const closed = await probePort("ws://127.0.0.1:9/?access_token=x", 1500);
+    eq(closed.ok, false);
+    eq(closed.port, 9);
+    ok(!!closed.error, "要给一句人话的原因");
+    const bad = await probePort("这不是地址", 300);
+    eq(bad.ok, false);
+  } finally { await new Promise(function (r) { srv.close(r); }); }
+});
+
+t("webui: /api/napcat 与「自动填入」接口能通", async function () {
+  const table = loadFieldTable();
+  const ui = createWebUi({
+    config: defaultsFromTable(table), table: table,
+    napcatInfo: function () { return { ok: true, found: true, url: "ws://127.0.0.1:3001", tokenMasked: "TOK…23", matched: false }; },
+    napcatAdopt: async function (mode) { return { ok: true, mode: mode, changed: ["token=TOK…23"] }; }
+  });
+  const info = await ui.listen(0);
+  try {
+    const a = await (await fetch(info.url + "/api/napcat")).json();
+    eq(a.ok, true);
+    eq(a.found, true);
+    eq(a.tokenMasked, "TOK…23");
+    const b = await (await fetch(info.url + "/api/napcat/adopt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "clear" }) })).json();
+    eq(b.ok, true);
+    eq(b.mode, "clear");
+  } finally { await ui.close(); }
+});
+
+t("webui: 控制台登录令牌只在点「显示」时才回明文", async function () {
+  const table = loadFieldTable();
+  const ui = createWebUi({
+    config: defaultsFromTable(table), table: table,
+    napcatInfo: async function () { return { ok: true, found: true, webuiTokenMasked: "TES…34", webuiUp: true, onebotUp: false, hint: "NapCat 在跑但服务端没开" }; },
+    napcatReveal: function () { return { ok: true, token: "TEST-ONLY-TOKEN-1234", file: "webui.json" }; }
+  });
+  const info = await ui.listen(0);
+  try {
+    const a = await (await fetch(info.url + "/api/napcat")).json();
+    eq(a.webuiTokenMasked, "TES…34");
+    eq(a.onebotUp, false, "端口状态要透出去：OneBot 不通 / 控制台通 是能一眼看懂的诊断");
+    eq(a.webuiUp, true);
+    eq(JSON.stringify(a).indexOf("TEST-ONLY-TOKEN-1234") < 0, true, "默认只给形状，明文不许跟着状态一起回去");
+    const r = await (await fetch(info.url + "/api/napcat/reveal", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    eq(r.ok, true);
+    eq(r.token, "TEST-ONLY-TOKEN-1234", "显式点「显示令牌」才给明文（登录 NapCat 控制台要手输一次）");
+  } finally { await ui.close(); }
+});
+
+t("onebot: 连接失败说得出原因，不再是一句 [object ErrorEvent]", function () {
+  eq(errorText({ message: "connect ECONNREFUSED 127.0.0.1:3001" }), "connect ECONNREFUSED 127.0.0.1:3001");
+  eq(errorText({ error: { message: "connect ECONNREFUSED 127.0.0.1:3001", code: "ECONNREFUSED" }, message: "" }), "connect ECONNREFUSED 127.0.0.1:3001", "ErrorEvent 的真话在 .error 里，重复的 code 不再贴一遍");
+  eq(errorText({ message: "被拒绝了", code: "ERR" }), "被拒绝了（ERR）");
+  eq(errorText({}), "连接失败（拿不到原因）");
+  eq(errorText(null), "未知错误");
 });
 
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===

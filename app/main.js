@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadConfig, runtimeConfig, redactConfig, loadFieldTable, saveConfig, defaultsFromTable, getPath } from "./src/config.js";
 import { createStore } from "./src/store.js";
 import { createBot } from "./src/index.js";
-import { createOneBot } from "./src/onebot.js";
+import { createOneBot, probePort } from "./src/onebot.js";
 import { createRuntime } from "./src/runtime.js";
 import { runBrain, ensureBrainProfile, resolveDshCli } from "./src/brain.js";
 import { personaFromConfig } from "./src/dshprofile.js";
@@ -18,6 +18,7 @@ import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from 
 import { pickApiKey } from "./src/secrets.js";
 import { checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "./src/update.js";
 import { createPluginProbe, installPlugin } from "./src/plugins.js";
+import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, readWebuiToken } from "./src/napcat.js";
 import { createRequire } from "node:module";
 
 const _require = createRequire(import.meta.url);
@@ -35,13 +36,101 @@ log("DSH-QQ 群小助手 启动");
 const table = loadFieldTable();
 let cfg = loadConfig({ table: table });
 if (!fs.existsSync(CONFIG_FILE)) { saveConfig(cfg, CONFIG_FILE); log("已生成默认配置：" + CONFIG_FILE); }
+// 配置端里"当前生效"的那份配置对象（保存后会是新对象）—— 探测类代码要读它，别读启动时那份
+let activeCfg = cfg;
+
+// NapCat 自动对接（N28）：从 NapCat 自己的 onebot11 配置里读出它认的地址与令牌，
+// 自动补上/对齐 —— 两边令牌写岔正是"重启之后连不上"最常见的原因。
+// 动手的边界：只有"读得到 NapCat 配置"时才动；地址相同时令牌以 NapCat 为准（它才是服务端），
+// 地址不一样时只提醒、不乱改；读不到配置就退回手填。
+let napcatCache = { at: 0, value: null };
+function scanNapCat(force) {
+  if (!force && napcatCache.value && Date.now() - napcatCache.at < 5000) return napcatCache.value;
+  const v = discoverNapCat({
+    launchPath: getPath(activeCfg, "napcat.launchPath"),
+    configPath: getPath(activeCfg, "napcat.configPath"),
+    workspaceRoot: WORKSPACE_ROOT
+  });
+  napcatCache = { at: Date.now(), value: v };
+  return v;
+}
+// NapCat 的网页控制台（6099）与 OneBot 服务端（3001）到底通不通 —— 这两个一分开看，
+// "连不上"就有结论了：控制台通、3001 不通 = NapCat 在跑但服务端没起来（多半是 QQ 没登录）。
+function napcatHint(plan, onebotUp, webuiUp, cur) {
+  if (onebotUp && plan.matched !== false) return "";
+  if (onebotUp) return "端口通了、但两边令牌不一样 —— 点「从 NapCat 自动填入」对齐。";
+  if (webuiUp) {
+    return "NapCat 在跑（网页控制台通），但 OneBot 的 WebSocket 服务端没开："
+      + "最常见是 QQ 还没登录 —— 用托盘菜单「显示 NapCat 窗口」把登录窗/扫码露出来；"
+      + "也可能是当前登录的那个号自己那份 onebot11_<号>.json 里没启用 WebSocket 服务端（在 NapCat 控制台 → 网络配置里开）。";
+  }
+  return "NapCat 没在跑（" + (cur.url || "OneBot 端口") + " 和网页控制台 " + (getPath(activeCfg, "runtime.napcatWebui") || "http://127.0.0.1:6099") + " 都不通）"
+    + " —— 用托盘菜单的「启动」或「只启动 NapCat」把它拉起来。";
+}
+async function napcatView(force) {
+  const info = scanNapCat(!!force);
+  const cur = onebotOpts(liveCfg || cfg);
+  const plan = napcatSyncPlan({ url: cur.url, token: cur.token }, info);
+  const webuiUrl = getPath(activeCfg, "runtime.napcatWebui") || "http://127.0.0.1:6099";
+  const probes = await Promise.all([probePort(cur.url, 900), probePort(webuiUrl, 900)]);
+  return Object.assign({ ok: true }, plan, {
+    file: info.file, webuiTokenMasked: info.webuiTokenMasked, webuiFile: info.webuiFile, servers: info.servers,
+    roots: info.roots, scanned: info.scanned, error: info.error || null,
+    webuiUrl: webuiUrl, webuiUp: !!probes[1].ok, onebotUp: !!probes[0].ok, onebotPort: probes[0].port || null,
+    hint: napcatHint(plan, !!probes[0].ok, !!probes[1].ok, cur)
+  });
+}
+
+// 用户点「显示控制台登录令牌」时才把明文给前端（NapCat 控制台登录要手输一次，不给就只能翻文件）
+function napcatReveal() {
+  const info = scanNapCat(true);
+  if (!info.webuiFile) return { ok: false, error: "没找到 NapCat 的 webui.json —— 它的网页控制台登录令牌就存在那个文件里", file: null };
+  const token = readWebuiToken(info.webuiFile);
+  if (!token) return { ok: false, error: "webui.json 里没有 token 字段", file: info.webuiFile };
+  return { ok: true, token: token, file: info.webuiFile };
+}
+function syncNapCatOnBoot() {
+  const info = scanNapCat(true);
+  const cur = onebotOpts(cfg);
+  const plan = napcatSyncPlan({ url: cur.url, token: cur.token }, info);
+  const changed = napcatApplyAdopt(cfg, plan.adopt);
+  if (changed.length) saveConfig(cfg, CONFIG_FILE);
+  // 刚刚按 NapCat 对齐过（或本来就一致）都算"和 NapCat 一条心"
+  const aligned = plan.matched === true || plan.adopt.token != null;
+  return { plan: plan, changed: changed, info: info, aligned: aligned };
+}
+// 用户点「从 NapCat 自动填入」/「清空本机令牌」时用的显式对齐动作（写配置 + 立刻重连）
+async function adoptNapCat(mode) {
+  const info = scanNapCat(true);
+  const cur = onebotOpts(liveCfg);
+  if (String(mode) === "clear") {
+    const changed = napcatApplyAdopt(liveCfg, { token: "" });
+    saveConfig(liveCfg, CONFIG_FILE);
+    const re = reconnectOnebot(liveCfg);
+    log("NapCat 对接：清空本机令牌（" + (changed.join(" ") || "没有变化") + "）");
+    return { ok: true, mode: "clear", changed: changed, reconnect: re, info: await napcatView(true) };
+  }
+  if (!info.found) return { ok: false, error: "没找到 NapCat 的 onebot11 配置文件 —— 先把「NapCat 启动程序路径」或「NapCat 配置文件路径」填对", info: await napcatView(false) };
+  if (!info.server) return { ok: false, error: "NapCat 配置里没有启用的 WebSocket 服务端 —— 先去它网页控制台开一个", info: await napcatView(false) };
+  const adopt = {};
+  if (info.url && info.url !== cur.url) adopt.url = info.url;
+  adopt.token = info.token || "";
+  const changed = napcatApplyAdopt(liveCfg, adopt);
+  saveConfig(liveCfg, CONFIG_FILE);
+  const re = reconnectOnebot(liveCfg);
+  log("NapCat 对接：按 NapCat 配置填入 " + (changed.join(" ") || "（没有变化）"));
+  return { ok: true, mode: "napcat", changed: changed, reconnect: re, info: await napcatView(true) };
+}
+const napcatBoot = syncNapCatOnBoot();
+log("NapCat 对接：" + (napcatBoot.plan.note || napcatBoot.plan.warn[0] || "没有可对齐的信息") + (napcatBoot.changed.length ? "（已写入配置：" + napcatBoot.changed.join(" ") + "）" : ""));
+for (const w of napcatBoot.plan.warn) log("NapCat 提醒：" + w);
 const rc = runtimeConfig(cfg);
 const persona = personaFromConfig(cfg);
 
 log("模式：" + (rc.stageMode === "auto" ? "auto（新群观察 " + rc.observeUntilMessages + " 条 → 半自动 " + rc.semiAutoDays + " 天 → 全自动）" : rc.stageMode === "observe" ? "强制观察" : "直接实际发送"));
 log("数据根：" + DATA_ROOT);
 log("人设：" + persona.botName + " / " + persona.age);
-log("接入：" + rc.onebot.wsUrl + "（N7 占位，等真实参数）");
+log("接入：" + rc.onebot.wsUrl + (rc.onebot.token ? "（已带令牌）" : "（无令牌）") + (napcatBoot.aligned ? " · 与 NapCat 一致" : ""));
 log("预算：日 " + rc.budget.dailyTokens + " token，超 " + (rc.budget.softRatio * 100) + "% 关主动");
 log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / 8s 超时 → 不确定");
 
@@ -65,7 +154,10 @@ function buildOneBot(c) {
     onEvent: function (evt) { runtime.onEvent(evt); },
     onStatus: function (s) {
       if (s.state === "rejected") { log("onebot: 被服务端拒绝 —— " + s.message + "（retcode " + s.retcode + "）"); return; }
-      if (s.state !== "reconnecting" || (s.retry || 0) % 5 === 0) log("onebot: " + s.state + (s.error ? " " + s.error : ""));
+      if (s.state !== "reconnecting" || (s.retry || 0) % 5 === 0) {
+        const tail = (s.state === "closed" || s.state === "error") ? " @ " + o.url : "";
+        log("onebot: " + s.state + (s.error ? " " + s.error : "") + (s.reason ? " ｜ " + s.reason : "") + (s.code != null && s.code !== 1000 ? "（" + s.code + "）" : "") + tail);
+      }
     },
     onRejected: function (info) { log("onebot: 服务端说 " + info.message + "（把 token 抄对，或干脆在 NapCat 里留空）"); }
   });
@@ -201,9 +293,11 @@ function channelModel(kind, c) {
 
 // 人设改了要立刻重渲染 profile 里的 personaPrefix（下一轮大脑调用生效），否则改了要等重启
 async function onConfigSaved(next) {
+  napcatCache = { at: 0, value: null };      // 配置变了，NapCat 对齐情况要重新读
   // 接入类改动（WS 地址 / token）不需要重启：直接重建 OneBot 客户端
   const before = onebotOpts(liveCfg), after = onebotOpts(next);
   liveCfg = next;
+  activeCfg = next;
   let linkNote = null;
   if (before.url !== after.url || before.token !== after.token) {
     linkNote = reconnectOnebot(next);
@@ -260,6 +354,7 @@ const webui = createWebUi({
   config: cfg, table: table, store: store, memes: memes, runtime: runtime, labels: runtime.labels,
   plugins: async function () { return pluginProbe.probe(); }, installPlugin: doPluginInstall,
   configFile: CONFIG_FILE, probeOnebot: probeOnebot, listGroups: listGroups, onConfigSaved: onConfigSaved,
+  napcatInfo: napcatView, napcatAdopt: adoptNapCat, napcatReveal: napcatReveal,
   checkUpdate: doCheckUpdate, applyUpdate: doApplyUpdate, depsProbe: async function () { return depsProbe.probe(); }, depFix: doDepFix,
   reconnect: function () { return reconnectOnebot(liveCfg); }
 });

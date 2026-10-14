@@ -24,19 +24,26 @@ static class Program
     static NotifyIcon tray;
     static Process child;
     static string root, entry, nodeExe, dataDir, logDir, logFile, configFile, napcatDir, napcatExe;
-    static ToolStripMenuItem miStart, miStop, miWeb, miAuto, miStatus, miNapcat, miNapcatStart, miNapcatStop;
+    static ToolStripMenuItem miStart, miStop, miWeb, miAuto, miStatus, miNapcat, miNapcatStart, miNapcatStop, miNapcatShow, miPorts;
     static Timer timer;
     static readonly object logLock = new object();
     static Icon appIcon;
     static System.Threading.Mutex singleInstance;   // 必须静态持有！局部变量会被 GC 收掉，句柄一关命名互斥体就消失，单实例就失效了
     static bool autoLaunch = true, autoClose = true, hideWindow = true;
     static int onebotPort = 3001;
+    static int webuiPort = 6099;      // NapCat 网页控制台的端口（app.json 的 runtime.napcatWebui 可改）
     static int hideWatchdogTicks = 0;
     static int napcatVisibleWindows = 0;
+    // 手动"显示 NapCat 窗口"之后，这段时间内巡检不再把它藏回去（登录/扫码要能看见）
+    static DateTime showWindowsUntil = DateTime.MinValue;
 
     [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr hWnd);
     const int SW_HIDE = 0;
+    const int SW_SHOW = 5;
+    const int SW_RESTORE = 9;
 
     // 藏窗口不能只看 Process.MainWindowHandle —— 实测 NapCat 那几个进程的主窗口句柄全是 0，
     // 真正露在外面的是 ConPTY 的 PseudoConsoleWindow。所以得按 PID 枚举所有顶层窗口。
@@ -87,6 +94,8 @@ static class Program
         menu.Items.Add(miStatus);
         miNapcat = new ToolStripMenuItem("NapCat: 检测中…") { Enabled = false };
         menu.Items.Add(miNapcat);
+        miPorts = new ToolStripMenuItem("端口: 检测中…") { Enabled = false };
+        menu.Items.Add(miPorts);
         menu.Items.Add(new ToolStripSeparator());
         miStart = new ToolStripMenuItem("启动", null, delegate { StartAll(); });
         miStop = new ToolStripMenuItem("停止", null, delegate { StopAll(); });
@@ -96,10 +105,14 @@ static class Program
         menu.Items.Add(new ToolStripSeparator());
         miNapcatStart = new ToolStripMenuItem("只启动 NapCat", null, delegate { StartNapCat(); NapCatWaitForPort(20000); Refresh(); });
         miNapcatStop = new ToolStripMenuItem("只关闭 NapCat", null, delegate { StopNapCat(); Refresh(); });
-        var miNapcatHide = new ToolStripMenuItem("立刻隐藏 NapCat 窗口", null, delegate { HideNapCatWindows(); Refresh(); });
+        var miNapcatHide = new ToolStripMenuItem("立刻隐藏 NapCat 窗口", null, delegate { showWindowsUntil = DateTime.MinValue; HideNapCatWindows(); Refresh(); });
+        // 掉登录要扫码、看令牌要看控制台 —— 都要求窗口能露出来（默认是全藏的）
+        miNapcatShow = new ToolStripMenuItem("显示 NapCat 窗口（登录 / 扫码，10 分钟不自动隐藏）", null, delegate { ShowNapCatWindows(); Refresh(); });
         menu.Items.Add(miNapcatStart);
         menu.Items.Add(miNapcatStop);
+        menu.Items.Add(miNapcatShow);
         menu.Items.Add(miNapcatHide);
+        menu.Items.Add(new ToolStripMenuItem("复制 NapCat 登录令牌", null, delegate { CopyNapCatToken(); }));
         menu.Items.Add(new ToolStripSeparator());
         miWeb = new ToolStripMenuItem("打开配置端", null, delegate { OpenWeb(); });
         menu.Items.Add(miWeb);
@@ -195,6 +208,8 @@ static class Program
         string wsUrl = JsonString(json, "wsUrl", "");
         var pm = Regex.Match(wsUrl ?? "", ":(\\d+)");
         if (pm.Success) { int p; if (int.TryParse(pm.Groups[1].Value, out p)) onebotPort = p; }
+        var wm = Regex.Match(JsonString(json, "napcatWebui", ""), ":(\\d+)");
+        if (wm.Success) { int wp; if (int.TryParse(wm.Groups[1].Value, out wp)) webuiPort = wp; }
 
         if (configured.Length > 0 && File.Exists(configured)) { napcatExe = configured; }
         else napcatExe = AutoFindNapCat();
@@ -356,6 +371,134 @@ static class Program
         napcatVisibleWindows = stillVisible;
     }
 
+
+    // 把 NapCat 的窗口露出来：QQ 掉登录要扫码、确认 OneBot 服务端要看控制台，都靠它。
+    // 露出后 10 分钟内巡检不再自动隐藏，否则自己 3 秒一次的把窗口又收走了。
+    static void ShowNapCatWindows()
+    {
+        var procs = NapCatProcesses();
+        if (procs.Count == 0)
+        {
+            AppendLog("[napcat] 没在跑，没法显示窗口");
+            Notify("NapCat 没在跑", "先在托盘菜单点「只启动 NapCat」，起来再点这个");
+            return;
+        }
+        var pids = new System.Collections.Generic.HashSet<uint>();
+        foreach (var p in procs)
+        {
+            try { pids.Add((uint)p.Id); } catch (Exception) { }
+            finally { try { p.Dispose(); } catch (Exception) { } }
+        }
+        int shown = 0;
+        IntPtr first = IntPtr.Zero;
+        try
+        {
+            EnumWindows(delegate (IntPtr h, IntPtr l)
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (!pids.Contains(pid)) return true;
+                var cls = new StringBuilder(128);
+                GetClassName(h, cls, 128);
+                string c = cls.ToString();
+                if (c == "IME" || c == "MSCTFIME UI" || c == "TooltipWindow" || c == "SysShadow") return true;
+                ShowWindow(h, SW_SHOW);
+                ShowWindow(h, SW_RESTORE);
+                if (first == IntPtr.Zero) first = h;
+                shown++;
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch (Exception) { }
+        if (first != IntPtr.Zero) { try { SetForegroundWindow(first); } catch (Exception) { } }
+        showWindowsUntil = DateTime.Now.AddMinutes(10);
+        napcatVisibleWindows = shown;
+        AppendLog("[napcat] 显示窗口 " + shown + " 个（10 分钟内不自动隐藏）");
+        Notify("NapCat 窗口已显示", shown > 0 ? ("露出 " + shown + " 个窗口，10 分钟内不会被自动隐藏") : "没找到可显示的窗口，NapCat 可能还没起来");
+    }
+
+    // 登录 NapCat 网页控制台要填的那串令牌，就在它自己的 webui.json 里 —— 直接进剪贴板，省得翻文件
+    static void CopyNapCatToken()
+    {
+        string file = FindNapCatWebuiJson();
+        if (file == null)
+        {
+            AppendLog("[napcat] 没找到 webui.json，没法复制登录令牌");
+            Notify("没找到 NapCat 的 webui.json", "它的登录令牌就存在那个文件里；填一下 app.json 的 napcat.launchPath / configPath 指路");
+            return;
+        }
+        string tok = JsonString(ReadAllTextSafe(file), "token", "");
+        if (tok.Length == 0) { Notify("webui.json 里没有 token", file); return; }
+        try
+        {
+            Clipboard.SetText(tok);
+            AppendLog("[napcat] 已复制登录令牌（" + file + "）");
+            Notify("NapCat 登录令牌已复制", "粘进 " + NapCatWebUrl() + " 的登录框就能进去");
+        }
+        catch (Exception ex) { Notify("复制失败", ex.Message); }
+    }
+
+    static string ReadAllTextSafe(string f)
+    {
+        try { return File.ReadAllText(f, Encoding.UTF8); } catch (Exception) { return ""; }
+    }
+
+    static void AddWebuiCand(List<string> cands, string dir)
+    {
+        try
+        {
+            string f = Path.Combine(dir, "webui.json");
+            if (File.Exists(f))
+            {
+                string abs = Path.GetFullPath(f);
+                if (!cands.Contains(abs)) cands.Add(abs);
+            }
+        }
+        catch (Exception) { }
+    }
+
+    // NapCat 的数据目录是版本化的：<NapCat>\<宿主目录>\versions\<版本>\resources\app\napcat\config\webui.json
+    static string FindNapCatWebuiJson()
+    {
+        var cands = new List<string>();
+        var roots = new List<string>();
+        if (napcatDir != null) roots.Add(napcatDir);
+        if (napcatExe != null) { try { roots.Add(Path.GetDirectoryName(napcatExe)); } catch (Exception) { } }
+        roots.Add(Path.Combine(root, "napcat"));
+        foreach (string r in roots)
+        {
+            if (r == null || r.Length == 0) continue;
+            AddWebuiCand(cands, r);
+            AddWebuiCand(cands, Path.Combine(r, "config"));
+            AddWebuiCand(cands, Path.Combine(r, "napcat", "config"));
+            AddWebuiCand(cands, Path.Combine(r, "resources", "app", "napcat", "config"));
+            try
+            {
+                foreach (string v in Directory.GetDirectories(Path.Combine(r, "versions")))
+                    AddWebuiCand(cands, Path.Combine(v, "resources", "app", "napcat", "config"));
+                foreach (string host in Directory.GetDirectories(r))
+                {
+                    AddWebuiCand(cands, Path.Combine(host, "config"));
+                    try
+                    {
+                        foreach (string v in Directory.GetDirectories(Path.Combine(host, "versions")))
+                            AddWebuiCand(cands, Path.Combine(v, "resources", "app", "napcat", "config"));
+                    }
+                    catch (Exception) { }
+                }
+            }
+            catch (Exception) { }
+        }
+        if (cands.Count == 0) return null;
+        cands.Sort(delegate (string a, string b)
+        {
+            try { return File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)); } catch (Exception) { return 0; }
+        });
+        return cands[0];
+    }
+
+    static string PortMark(int port) { return PortOpenOn(port) ? "●通" : "○不通"; }
+
     static void StartNapCat()
     {
         if (napcatExe == null || !File.Exists(napcatExe))
@@ -430,7 +573,16 @@ static class Program
     // ---------- 小助手本体 ----------
     static void StartAll()
     {
-        if (autoLaunch && !NapCatAlive()) { StartNapCat(); NapCatWaitForPort(20000); }
+        if (autoLaunch && !NapCatAlive())
+        {
+            StartNapCat();
+            // 等不到 OneBot 端口就别闷着：NapCat 在跑却没端口，基本就是 QQ 掉登录 / 服务端没开
+            if (!NapCatWaitForPort(20000) && NapCatAlive())
+            {
+                AppendLog("[napcat] OneBot 端口 " + onebotPort + " 一直没通（NapCat 在跑）—— 多半是 QQ 掉登录或服务端没开");
+                Notify("NapCat 的 OneBot 端口没通", "NapCat 在跑，但 " + onebotPort + " 没开：点「显示 NapCat 窗口」扫码登录，或用「复制 NapCat 登录令牌」进 " + NapCatWebUrl() + " 看网络配置");
+            }
+        }
         else if (NapCatAlive()) { /* 已经在了，不重复启动 */ }
         StartBot();
     }
@@ -550,10 +702,21 @@ static class Program
         miNapcat.Text = nc
             ? ("NapCat: 运行中" + (hideWindow ? (napcatVisibleWindows > 0 ? "（还有 " + napcatVisibleWindows + " 个窗口）" : "（已隐藏）") : "（不隐藏）"))
             : (napcatExe == null ? "NapCat: 没找到启动程序" : "NapCat: 未运行");
+        miPorts.Text = "端口: OneBot " + onebotPort + " " + PortMark(onebotPort) + "　控制台 " + webuiPort + " " + PortMark(webuiPort);
+        if (miNapcatShow != null)
+        {
+            if (DateTime.Now < showWindowsUntil)
+            {
+                int left = (int)Math.Ceiling((showWindowsUntil - DateTime.Now).TotalMinutes);
+                miNapcatShow.Text = "NapCat 窗口已显示（约 " + left + " 分钟后恢复自动隐藏）";
+            }
+            else miNapcatShow.Text = "显示 NapCat 窗口（登录 / 扫码，10 分钟不自动隐藏）";
+        }
         tray.Text = AppName + (alive ? " · 运行中" : " · 已停止");
         // 每 3 秒收一次：不管 NapCat 是本次启动的还是之前就开着的，只要露头就藏。
         // （旧版只在"自己启动 NapCat"后跑 12 个 tick，所以早就开着的那些永远藏不住。）
-        if (nc && hideWindow) HideNapCatWindows();
+        // 手动点了「显示 NapCat 窗口」之后的 10 分钟里不藏 —— 否则扫码/看令牌时窗口会自己消失。
+        if (nc && hideWindow && DateTime.Now >= showWindowsUntil) HideNapCatWindows();
         if (hideWatchdogTicks > 0) hideWatchdogTicks--;
     }
 
@@ -614,6 +777,8 @@ static class Program
         sb.AppendLine("autoLaunch = " + autoLaunch + "   autoClose = " + autoClose + "   hideWindow = " + hideWindow);
         sb.AppendLine("napcat 在跑 = " + NapCatAlive());
         sb.AppendLine("onebot 端口通 = " + PortOpen());
+        sb.AppendLine("网页控制台端口 " + webuiPort + " 通 = " + PortOpenOn(webuiPort));
+        sb.AppendLine("napcat webui.json = " + (FindNapCatWebuiJson() ?? "（没找到）"));
         sb.AppendLine("将会关闭的进程（只在这个目录下的）：");
         foreach (var p in NapCatProcesses())
         {

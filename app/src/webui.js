@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, runtimeConfig, saveConfig, getPath, setPath } from "./config.js";
+import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath } from "./config.js";
 import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
 import { buildProfilePrompt } from "./profile.js";
 
@@ -130,6 +130,9 @@ export function createWebUi(deps) {
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
   const pluginInstallFn = d.installPlugin || null;
   const probeOnebot = d.probeOnebot || null;      // async (force) => { state, selfId, online, version, nickname }
+  const napcatInfoFn = d.napcatInfo || null;     // (force) => 本机配置 vs NapCat 配置的对齐情况
+  const napcatAdoptFn = d.napcatAdopt || null;    // async (mode) => 从 NapCat 自动填入 / 清空本机令牌
+  const napcatRevealFn = d.napcatReveal || null;  // ()       => 显式要看 NapCat 控制台的登录令牌时才给明文
   const listGroups = d.listGroups || null;        // async () => [{ group_id, group_name, member_count }]
   const startedAt = Date.now();
 
@@ -171,7 +174,7 @@ export function createWebUi(deps) {
       const body = await readBody(req);
       let patch = null;
       try { patch = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
-      cfg = deepMerge(cfg, (patch && patch.patch) || patch || {});
+      cfg = mergeConfigSafe(cfg, (patch && patch.patch) || patch || {}, table);   // secret 的遮蔽值/空值 = 没改
       if (configFile) { try { saveConfig(cfg, configFile); } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message) }); } }
       let personaNote = null;
       if (onConfigSaved) { try { personaNote = await onConfigSaved(cfg); } catch (e) { personaNote = { ok: false, error: String(e && e.message) }; } }
@@ -184,6 +187,25 @@ export function createWebUi(deps) {
       if (!probeOnebot) return sendJson(res, 200, { ok: true, state: "unknown", note: "没有接 OneBot" });
       const info = await probeOnebot(url.searchParams.get("force") === "1");
       return sendJson(res, 200, Object.assign({ ok: true }, info));
+    }
+
+    // NapCat 自动对接：读 NapCat 自己的 onebot11 配置，把地址/令牌对齐（令牌只回遮蔽值）
+    if (p === "/api/napcat" && req.method === "GET") {
+      if (!napcatInfoFn) return sendJson(res, 200, { ok: false, error: "没有接 NapCat 探测" });
+      return sendJson(res, 200, await napcatInfoFn(url.searchParams.get("force") === "1"));
+    }
+    if (p === "/api/napcat/adopt" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { b = null; }
+      if (!napcatAdoptFn) return sendJson(res, 200, { ok: false, error: "没有接 NapCat 对齐服务" });
+      return sendJson(res, 200, await napcatAdoptFn(String((b && b.mode) || "napcat")));
+    }
+
+    // 要登录 NapCat 的网页控制台时，得把它的令牌抄进去 —— 这一步没法代填，就把明文递给用户
+    if (p === "/api/napcat/reveal" && req.method === "POST") {
+      if (!napcatRevealFn) return sendJson(res, 200, { ok: false, error: "没有接 NapCat 令牌读取" });
+      return sendJson(res, 200, napcatRevealFn());
     }
 
     if (p === "/api/groups") {

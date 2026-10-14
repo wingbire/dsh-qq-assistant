@@ -416,6 +416,13 @@
           "说明": "留空 = 启动器自己在常见位置找 NapCatWinBootMain.exe"
         },
         {
+          "键": "napcat.configPath",
+          "标签": "NapCat 配置文件路径",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空 = 自动在 NapCat 目录里找 config/onebot11_*.json；找到后会自动对齐地址与令牌"
+        },
+        {
           "键": "napcat.autoLaunch",
           "标签": "启动小助手时顺带拉起 NapCat",
           "类型": "bool",
@@ -440,13 +447,15 @@
           "键": "napcat.wsUrl",
           "标签": "OneBot WS 地址",
           "类型": "string",
-          "默认": "ws://127.0.0.1:3001"
+          "默认": "ws://127.0.0.1:3001",
+          "说明": "还是默认值时会按 NapCat 配置里的 WebSocket 服务端自动填"
         },
         {
           "键": "napcat.token",
           "标签": "访问令牌",
           "类型": "secret",
-          "默认": ""
+          "默认": "",
+          "说明": "机密，只存本机；会用 NapCat 配置里的令牌自动对齐（留空 = 不改）"
         },
         {
           "键": "brain.dshCliPath",

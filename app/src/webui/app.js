@@ -7,7 +7,8 @@
   var S = {
     table: null, values: null, runtime: null, defaults: null,
     dirty: false, page: "status",
-    gid: null, groups: [], onebot: null, status: null, labels: null, memes: null
+    gid: null, groups: [], onebot: null, status: null, labels: null, memes: null,
+    napcatInfo: null, napcatLoading: false, napcatToken: null
   };
 
   var PAGES = [
@@ -144,7 +145,11 @@
         return '<button data-val="' + esc(o) + '" class="' + (String(value) === String(o) ? "on" : "") + '">' + esc(lbl ? lbl[o] : o) + '</button>';
       }).join("") + '</div>';
     } else if (type === "secret") {
-      ctrl = '<input type="password" data-key="' + key + '" value="" placeholder="' + (value ? "已配置（留空不改）" : "尚未配置") + '" autocomplete="new-password">';
+      // 令牌这种机密：密码框永远空着，"留空不改"就是它的语义（后端也会把空值/遮蔽值当没改）。
+      // 如果已经从 NapCat 配置里对齐过，就把这件事写进占位提示 —— 免得看起来像"没填"。
+      var aligned = (key === "napcat.token" && S.napcatInfo && S.napcatInfo.matched && S.napcatInfo.targetTokenSet);
+      ctrl = '<input type="password" data-key="' + key + '" value="" placeholder="' +
+        (aligned ? "已与 NapCat 对齐（留空不改）" : (value ? "已配置（留空不改）" : "尚未配置")) + '" autocomplete="new-password">';
     } else if (type === "int" || type === "number") {
       var rng = f.范围 || null;
       if (rng) {
@@ -519,8 +524,100 @@
       '<button class="btn-sm" id="btn-napcat">打开 NapCat 配置页</button>' +
       '<span class="hint" style="margin:0">NapCat 的 OneBot 端口常见是 <code>3001</code>；<code>6099</code> 是它的网页控制台，不是这个</span></div>' +
       '</div></div>';
-    return status + '<details class="card" open><summary>接入参数<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">改完点保存（接入类会自动重连）</span></summary><div class="body">' +
+    return status + napcatCard() + '<details class="card" open><summary>接入参数<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">改完点保存（接入类会自动重连）</span></summary><div class="body">' +
       renderGroupFields("接入") + '</div></details>';
+  }
+
+  /* 接入页第二块：NapCat 自动对接（令牌 / 地址以 NapCat 自己的配置为准） */
+  function napcatCard() {
+    var n = S.napcatInfo;
+    if (!n) return '<div class="card"><div class="body"><div class="muted">正在读 NapCat 的配置…</div></div></div>';
+    var pillCls = n.matched === true ? "ok" : (n.found ? "warn" : "grey");
+    var pillText = n.matched === true ? "已对齐" : (n.found ? "需要对齐" : "没找到 NapCat 配置");
+    var rows = "";
+    rows += '<div class="field"><div class="label">NapCat 配置文件</div><div class="ctrl">' +
+      (n.file ? '<code>' + esc(n.file) + '</code>' : '<span class="muted">没找到（下面把「NapCat 启动程序路径」或「NapCat 配置文件路径」指过去）</span>') + '</div></div>';
+    if (n.found) {
+      rows += '<div class="field"><div class="label">NapCat 想让客户端连的地址</div><div class="ctrl"><code>' + esc(n.url || "（没启用 WebSocket 服务端）") + '</code>' +
+        (n.serverName ? ' <span class="muted">' + esc(n.serverName) + '</span>' : "") + '</div></div>';
+      rows += '<div class="field"><div class="label">NapCat 侧的令牌</div><div class="ctrl">' +
+        (n.targetTokenSet ? '<span class="tag yes">已设置 ' + esc(n.tokenMasked) + '</span>' : '<span class="tag grey">没设令牌</span>') +
+        (n.oursTokenSet ? '<span class="tag ' + (n.matched === true ? "yes" : "grey") + '">本机：已设置</span>' : '<span class="tag grey">本机：空</span>') +
+        '</div></div>';
+      if ((n.extraServers || []).length) {
+        rows += '<div class="hint">NapCat 里还有 ' + n.extraServers.length + ' 个 WebSocket 服务端：' +
+          n.extraServers.map(function (s) { return esc((s.name || "未命名") + " → " + (s.url || "?") + (s.enable ? "" : "（已停用）")); }).join("、") + '</div>';
+      }
+    }
+    rows += '<div class="field"><div class="label">端口状态</div><div class="ctrl">' +
+      '<span class="tag ' + (n.onebotUp ? "yes" : "grey") + '">OneBot ' + esc(String(n.onebotPort || "3001")) + '：' + (n.onebotUp ? "通" : "不通") + '</span>' +
+      '<span class="tag ' + (n.webuiUp ? "yes" : "grey") + '">NapCat 控制台 6099：' + (n.webuiUp ? "通" : "不通") + '</span>' +
+      '</div></div>';
+    if (n.hint) rows += '<div class="hint" style="color:var(--warn)">' + esc(n.hint) + '</div>';
+    // NapCat 网页控制台的登录令牌：登录那一下只能手输，所以给「显示/复制」而不是让人去翻文件
+    var shown = S.napcatToken;
+    rows += '<div class="field"><div class="label">NapCat 控制台登录令牌</div><div class="ctrl">' +
+      (shown && shown.token
+        ? '<code id="napcat-token-value">' + esc(shown.token) + '</code><button class="btn-sm" id="btn-napcat-copy">复制</button>'
+        : '<span class="muted">' + (n.webuiTokenMasked ? "已读到（" + esc(n.webuiTokenMasked) + "）" : "未读到") + '</span><button class="btn-sm" id="btn-napcat-reveal">显示令牌</button>') +
+      '</div><div class="hint">登录 NapCat 网页控制台（<code>' + esc(n.webuiUrl || "http://127.0.0.1:6099") + '</code>）时要填这一串；' +
+      (n.webuiFile ? '它存在 <code>' + esc(n.webuiFile) + '</code>。' : "") + '平时只显示形状，点「显示令牌」才回明文。</div></div>';
+    rows += '<div class="hint">托盘菜单里也有「复制 NapCat 登录令牌」，以及「显示 NapCat 窗口」—— QQ 掉登录时要靠它把登录窗/扫码露出来。</div>';
+    (n.warn || []).forEach(function (w) { rows += '<div class="hint" style="color:var(--warn)">' + esc(w) + '</div>'; });
+    if (n.note) rows += '<div class="hint" style="color:' + (n.matched === true ? "var(--ok)" : "var(--dim)") + '">' + esc(n.note) + '</div>';
+    rows += '<div class="ctl-row" style="margin-top:10px">' +
+      '<button class="btn-sm good" id="btn-napcat-fill" ' + (n.found && n.url ? "" : "disabled") + '>从 NapCat 自动填入</button>' +
+      (n.oursTokenSet ? '<button class="btn-sm" id="btn-napcat-clear">清空本机令牌</button>' : "") +
+      '<button class="btn-sm" id="btn-napcat-rescan">重新扫描</button>' +
+      '<span class="hint" style="margin:0">令牌只在本机进程里对齐，不回显到浏览器</span></div>';
+    return '<div class="card"><div class="head">NapCat 自动对接<span class="pill ' + pillCls + '" style="font-weight:400">' + pillText + '</span></div>' +
+      '<div class="body"><div class="hint" style="margin:-4px 0 6px">地址与令牌以 NapCat 自己的 onebot11 配置为准 —— 两边写岔就是「连不上 / 一直被拒」的常见原因。</div>' +
+      rows + '</div></div>';
+  }
+
+  function loadNapcat(force) {
+    if (S.napcatLoading) return Promise.resolve(S.napcatInfo);
+    S.napcatLoading = true;
+    return api("/api/napcat" + (force ? "?force=1" : "")).then(function (r) {
+      S.napcatLoading = false;
+      S.napcatInfo = r || null;
+      if (S.page === "napcat") render();
+      return S.napcatInfo;
+    }).catch(function () { S.napcatLoading = false; return null; });
+  }
+
+  function doNapcatReveal() {
+    api("/api/napcat/reveal", {}).then(function (r) {
+      if (!r || r.ok === false) { toast("读不到令牌：" + ((r && r.error) || "未知原因"), true); return; }
+      S.napcatToken = r;
+      if (S.page === "napcat") render();
+    });
+  }
+
+  function copyToken(text) {
+    var done = function () { toast("令牌已复制，粘进 NapCat 控制台的登录框即可"); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function () { done(); }); return; }
+    } catch (e) {}
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); document.body.removeChild(ta); done();
+    } catch (e) { toast("复制失败，请手动选中那串令牌", true); }
+  }
+
+  function doNapcatAdopt(mode) {
+    toast(mode === "clear" ? "正在清空本机令牌…" : "正在从 NapCat 自动填入…");
+    api("/api/napcat/adopt", { mode: mode }).then(function (r) {
+      if (r && r.info) S.napcatInfo = r.info;
+      if (!r || r.ok === false) { toast("对齐失败：" + ((r && r.error) || "未知原因"), true); if (S.page === "napcat") render(); return; }
+      return api("/api/config").then(function (c) {
+        if (c && c.values) { S.values = c.values; S.runtime = c.runtime; S.dirty = false; $("#save-btn").disabled = true; $("#save-btn").textContent = "保存"; }
+      }).then(refreshTop).then(function () {
+        toast(mode === "clear" ? "已清空本机令牌并重连" : "已从 NapCat 自动填入并重连");
+        if (S.page === "napcat") render();
+      });
+    });
   }
 
   function card(k, v, s) {
@@ -543,7 +640,7 @@
     else if (S.page === "profile") job = pageProfile();
     else if (S.page === "extra") job = Promise.resolve(renderExtra());
     else if (S.page === "settings") job = Promise.resolve(pageSettings());
-    else if (S.page === "napcat") job = Promise.resolve(pageNapcat());
+    else if (S.page === "napcat") { job = Promise.resolve(pageNapcat()); if (!S.napcatInfo && !S.napcatLoading) loadNapcat(); }
     else if (S.page === "labels") job = pageLabels();
     else if (S.page === "memes") job = pageMemes();
     else job = Promise.resolve(renderGroupFields(meta.group));
@@ -637,6 +734,11 @@
       }
 
       if (e.target.closest("#pill-napcat") || e.target.closest("#btn-napcat")) { openNapcat(); return; }
+      if (e.target.closest("#btn-napcat-fill")) { doNapcatAdopt("napcat"); return; }
+      if (e.target.closest("#btn-napcat-clear")) { doNapcatAdopt("clear"); return; }
+      if (e.target.closest("#btn-napcat-rescan")) { toast("正在重新扫描 NapCat 配置…"); S.napcatToken = null; loadNapcat(true); return; }
+      if (e.target.closest("#btn-napcat-reveal")) { doNapcatReveal(); return; }
+      if (e.target.closest("#btn-napcat-copy")) { if (S.napcatToken && S.napcatToken.token) copyToken(S.napcatToken.token); return; }
       if (e.target.closest("#btn-reconnect")) {
         toast("正在重连…");
         return api("/api/action", { action: "reconnect" }).then(function (r) {
@@ -819,6 +921,7 @@
       api("/api/config", { patch: S.values }).then(function (r) {
         if (r.ok) {
           S.values = r.values; S.dirty = false;
+          S.napcatInfo = null;                       // 配置变了，NapCat 对齐情况要重读
           $("#save-btn").disabled = true; $("#save-btn").textContent = "保存";
           toast("已保存 —— 判定/人设类改动即时生效，接入类需重启程序");
         } else { toast("保存失败：" + (r.error || ""), true); }

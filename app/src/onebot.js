@@ -1,3 +1,4 @@
+import net from "node:net";
 import { oneLine, normalizeName } from "./untrusted.js";
 
 // OneBot v11 群消息接入。P1：只用群消息；私聊/通知/请求一律忽略。
@@ -10,6 +11,45 @@ export const ONEBOT_DEFAULT = {
   dedupeWindowMs: 180000,
   maxTextLen: 300
 };
+
+// 连接失败要能一眼看懂。undici 的 WebSocket 触发的是 ErrorEvent：
+// 直接 String(e) 出来是 "[object ErrorEvent]" —— 排查时等于什么都没说。
+// 真正有用的（ECONNREFUSED / 端口没开 / 握手被拒）在 e.error / e.code 里。
+export function errorText(e) {
+  if (!e) return "未知错误";
+  const inner = (e && e.error) || null;
+  const code = (e && e.code) || (inner && inner.code) || "";
+  const msg = String((e && e.message) || (inner && inner.message) || "").trim();
+  if (msg) return (code && msg.indexOf(String(code)) < 0) ? msg + "（" + code + "）" : msg;
+  if (inner && inner.message) return String(inner.message);
+  if (code) return String(code);
+  try {
+    const s = String(e);
+    return (s === "[object Object]" || s === "[object ErrorEvent]") ? "连接失败（拿不到原因）" : s;
+  } catch (err) { return "连接失败（拿不到原因）"; }
+}
+
+// Node 自带的 WebSocket（undici）连不上时只丢一个"消息为空的 TypeError"：
+// 实测 e.error.message === ""、cause === undefined —— 光靠它排查等于抓瞎。
+// 所以自己再戳一下 TCP 端口，把「端口没开」和「端口通了但握手被拒」分开说清楚。
+export function probePort(url, timeoutMs) {
+  return new Promise(function (resolve) {
+    let host = "127.0.0.1", port = 0;
+    try {
+      const u = new URL(String(url || "").replace(/^wss:/, "https:").replace(/^ws:/, "http:"));
+      host = u.hostname || host;
+      port = Number(u.port) || (u.protocol === "https:" ? 443 : 80);
+    } catch (e) { return resolve({ ok: false, host: host, port: port, error: "地址不合法" }); }
+    if (!port) return resolve({ ok: false, host: host, port: port, error: "地址里没有端口" });
+    const sock = net.connect({ host: host, port: port });
+    let done = false;
+    function finish(r) { if (done) return; done = true; try { sock.destroy(); } catch (e) {} resolve(r); }
+    let timer = setTimeout(function () { finish({ ok: false, host: host, port: port, error: "连接超时" }); }, timeoutMs || 1200);
+    if (timer.unref) timer.unref();
+    sock.on("connect", function () { clearTimeout(timer); finish({ ok: true, host: host, port: port }); });
+    sock.on("error", function (e) { clearTimeout(timer); finish({ ok: false, host: host, port: port, error: String((e && e.message) || e) }); });
+  });
+}
 
 export function withToken(url, token) {
   const u = String(url || "");
@@ -157,23 +197,41 @@ export function createOneBot(opts) {
     setState(retry === 0 ? "connecting" : "reconnecting", { retry: retry });
     let sock = null;
     try { sock = transport(withToken(o.url, o.token), o.transportOptions || {}); } catch (e) {
-      setState("error", { error: String(e && e.message) });
+      setState("error", { error: errorText(e) });
       return scheduleRetry();
     }
     ws = sock;
     sock.onopen = function () { retry = 0; setState("open"); if (o.onOpen) { try { o.onOpen(); } catch (e) {} } };
     sock.onmessage = function (m) { handlePayload(m && m.data !== undefined ? m.data : m); };
-    sock.onclose = function () {
-    if (stopped) return;
-    // 被服务端拒绝（例如 token 不符）不是普通的断开：保留 rejected，别让重连把它盖成一句"closed"
-    if (state !== "rejected") setState("closed");
-    scheduleRetry();
-  };
+    sock.onclose = function (ev) {
+      if (stopped) return;
+      // 被服务端拒绝（例如 token 不符）不是普通的断开：保留 rejected，别让重连把它盖成一句"closed"
+      if (state !== "rejected") {
+        const code = ev && ev.code;
+        const reason = (ev && ev.reason) || "";
+        if (reason || code !== 1006) {
+          setState("closed", { code: code, reason: reason });
+        } else {
+          // 1006 = 没拿到正常关闭帧。自己戳一下端口，把原因说成人话（别让用户对着 1006 猜）
+          setState("closed", { code: code, reason: "连接异常中断" });
+          probePort(o.url).then(function (p) {
+            if (stopped || state === "rejected" || state === "open") return;
+            setState("closed", {
+              code: code,
+              reason: p.ok
+                ? ("端口 " + p.host + ":" + p.port + " 是通的，但 WebSocket 握手没过（多半是令牌或路径不对）")
+                : ("连不上 " + p.host + ":" + p.port + " —— " + (p.error || "端口没开") + "（NapCat 没起来，或它的 WebSocket 服务端没开）")
+            });
+          });
+        }
+      }
+      scheduleRetry();
+    };
     // 被拒之后紧跟着的异常关闭（undici 会先 onerror 再 onclose）不能把 rejected 盖掉，
     // 否则用户看到的永远是"断开"，查不出是 token 不对。
     sock.onerror = function (e) {
       if (state === "rejected") return;
-      setState("error", { error: String((e && e.message) || e) });
+      setState("error", { error: errorText(e) });
     };
     return sock;
   }

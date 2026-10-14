@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-169%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-179%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)
@@ -149,7 +149,7 @@ git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
 
 # 1. 自检（不需要 QQ、不需要 key）
-node test/run-tests.mjs         # 169 项
+node test/run-tests.mjs         # 179 项
 node demo/run-acceptance.mjs    # 全量验收记分卡
 
 # 2. 起程序（默认「新群先观察」，一个字都不发）
@@ -262,13 +262,13 @@ flowchart LR
 ## 测试与证据
 
 ```
-node test/run-tests.mjs        →  通过 169 项，失败 0 项
+node test/run-tests.mjs        →  通过 179 项，失败 0 项
 node demo/run-acceptance.mjs   →  通过 9 / 9
 ```
 
 | 验收项 | 结果 |
 |---|---|
-| 骨架回归测试 | **169 项全过** |
+| 骨架回归测试 | **179 项全过** |
 | 判定中枢演示 | 判决分布符合预期 |
 | 大脑通道（mock CLI） | ok |
 | 接入端到端（mock OneBot） | **11 / 11** |
@@ -304,7 +304,7 @@ app/
 prompts/             人设 群档案 二判 rubric 字段表
 launcher/            Windows 托盘启动器（C# 源码 + 已编译 exe + 图标）
 demo/                8 个演示（含自写 mock OneBot / mock DSH CLI）
-test/                169 项回归测试
+test/                179 项回归测试
 dist/                分发版打包（白名单 + 双闸门自检）
 ```
 
@@ -324,7 +324,22 @@ dist/                分发版打包（白名单 + 双闸门自检）
 
 先看**端口**。NapCat 的 OneBot 端口通常是 **3001**；**6099 是它的网页控制台**，不是这个。
 配置端「接入」页会同时显示「正在连的地址」和「配置里保存的地址」，对不上就点「重连」。
-Token 不对时状态会明确显示**被服务端拒绝**并带上 NapCat 的原话。
+
+**令牌不用手抄**：「接入」页的「NapCat 自动对接」会直接去读 NapCat 自己的 `onebot11_*.json` ——
+本机没填就自动填上，同地址而两边令牌不一样就以 NapCat 为准，启动时就悄悄对齐；
+地址都不一样才只提醒、不乱改。没找到配置（NapCat 装在别处）就在下面把「NapCat 配置文件路径」指过去。
+两边一致时那一栏的占位提示会写「已与 NapCat 对齐」。
+
+日志里也不再只说一句 `closed`：连不上会直接告诉你**是端口没开还是握手没过**
+（`连不上 127.0.0.1:3001 —— connect ECONNREFUSED（NapCat 没起来…）`）。
+Token 真的不对时状态会明确显示**被服务端拒绝**并带上 NapCat 的原话。
+
+**「NapCat 明明在跑，就是连不上」**：接入页的「端口状态」把两件事分开了 ——
+**控制台 6099 通、OneBot 3001 不通** = NapCat 活着，但它的 OneBot 服务端没起来。
+最常见是 **QQ 掉登录**（重启 NapCat 之后要重新扫码），其次才是那个号自己的 `onebot11_<号>.json` 里没开服务端。
+两条路都能走通：托盘菜单 →「显示 NapCat 窗口」（把登录窗/扫码露出来，10 分钟内不会被自动隐藏），
+或托盘菜单 →「复制 NapCat 登录令牌」→ 打开 NapCat 控制台 → 网络配置里把 WebSocket 服务端开上。
+登录控制台要填的那串令牌，接入页也有「显示令牌 / 复制」，不用再去翻 `webui.json`。
 </details>
 
 <details>

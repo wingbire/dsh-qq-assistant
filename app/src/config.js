@@ -68,16 +68,35 @@ export function deepMerge(base, patch) {
   return out;
 }
 
-// secret 字段永不回给前端 —— 只回一个「是否已配置」的布尔。
+// secret 字段永不回给前端 —— 只回一个「已配置」的遮蔽值。
+export const REDACTED = "<已配置>";
+
 export function redactConfig(cfg, table) {
   const out = JSON.parse(JSON.stringify(cfg || {}));
   const entries = fieldEntries(table || loadFieldTable());
   for (const f of entries) {
     if (f.类型 !== "secret") continue;
     const v = getPath(out, f.键);
-    setPath(out, f.键, v ? "<已配置>" : "");
+    setPath(out, f.键, v ? REDACTED : "");
   }
   return out;
+}
+
+// 配置端保存时的安全合并：secret 字段前端永远只拿到遮蔽值（甚至空串，
+// 因为密码框不回显），所以这两种值必须理解为「没改」，保留原值。
+// 少了这一步，一次普通保存就会把真令牌写成 "<已配置>"：
+// 客户端随后带着假令牌去连 NapCat，表现就是"重启之后再也连不上"。
+export function mergeConfigSafe(cur, patch, table) {
+  const next = deepMerge(cur, patch || {});
+  for (const f of fieldEntries(table || loadFieldTable())) {
+    if (f.类型 !== "secret" || !f.键) continue;
+    const v = getPath(next, f.键);
+    if (v === undefined || v === null || v === "" || v === REDACTED) {
+      const keep = getPath(cur, f.键);
+      setPath(next, f.键, keep === undefined ? "" : keep);
+    }
+  }
+  return next;
 }
 
 // 运行期用的派生配置（把判定/主动/接入的默认值集中到一处，供 runtime 消费）

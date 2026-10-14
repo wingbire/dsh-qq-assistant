@@ -23,6 +23,7 @@
 ```
 app/main.js
   ├─ src/onebot.js        接入层：WebSocket 客户端、动作调用、事件归一化、去重
+  ├─ src/napcat.js        NapCat 对接：读它的 onebot11 配置，自动对齐地址与令牌（只在进程内）
   ├─ src/runtime.js       运行时：合并 → 判定 → 阶段机 → 刹车 → 预算 → 表达 → 反馈
   ├─ src/classify.js      判定中枢：六因子 → p_say
   ├─ src/audit.js         二判通道（独立 profile）
@@ -32,7 +33,7 @@ app/main.js
   └─ src/store.js         落盘（原文不落）
 ```
 
-所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 169 项测试能跑得又快又稳的原因。
+所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 179 项测试能跑得又快又稳的原因。
 
 ## 判定链路
 
