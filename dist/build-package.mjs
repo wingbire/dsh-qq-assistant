@@ -28,6 +28,8 @@ export const WHITELIST = [
   { from: "demo/run-brain-mock.mjs" },
   { from: "demo/run-acceptance.mjs" },
   { from: "demo/import-key.mjs" },
+  { from: "demo/cost-report.mjs" },
+  { from: "demo/scenario-tagged.mjs" },
   { from: "README.md" },
   { from: "LICENSE" },
   { from: "docs/INSTALL.md", to: "INSTALL.md" },
@@ -35,6 +37,7 @@ export const WHITELIST = [
   { from: "docs/ARCHITECTURE.md" },
   { from: "docs/DESIGN.md" },
   { from: "docs/ROADMAP.md" },
+  { from: "docs/COST.md" },
   { from: "dist/首次运行.txt", to: "首次运行.txt" }
 ];
 
