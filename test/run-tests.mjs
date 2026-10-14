@@ -36,6 +36,7 @@ import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImag
 import { createTts, parseVoiceTag, buildSapiScript, voiceCapability, listSapiVoices, TTS_DEFAULTS } from "../app/src/tts.js";
 import fs from "node:fs";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -2199,6 +2200,26 @@ t("runtime: 每群每小时上限（groupHourlyLimit）真的会拦", async func
   const r2 = await rt.tick(1200);
   eq(r2.results.some(function (x) { return x.action === "group_limit"; }), true, "超上限就该静默丢弃");
   eq(sent.length, 1, "第二条不再发");
+});
+
+t("语法：所有源码都要过 node --check（防呆：别再提交一个启动就崩的文件）", function () {
+  const files = ["app/main.js"];
+  for (const d of ["app/src", "app/src/webui"]) {
+    try { for (const f of fs.readdirSync(d)) if (f.endsWith(".js")) files.push(d + "/" + f); } catch (e) {}
+  }
+  // 先自检这个防呆本身抓得到坏文件，别形同虚设
+  const tmp = path.join(os.tmpdir(), "dshqq-broken-guard.mjs");
+  fs.writeFileSync(tmp, "const a = \"x\" \"y\";" + String.fromCharCode(10));
+  const rb = spawnSync(process.execPath, ["--check", tmp], { encoding: "utf8" });
+  ok(rb.status !== 0, "防呆本身要能抓到坏文件");
+  try { fs.unlinkSync(tmp); } catch (e) {}
+
+  const bad = [];
+  for (const f of files) {
+    const r = spawnSync(process.execPath, ["--check", f], { encoding: "utf8" });
+    if (r.status !== 0) bad.push(f + " :: " + String(r.stderr || "").split(String.fromCharCode(10)).filter(Boolean).slice(-3).join(" / "));
+  }
+  eq(bad, [], "这些文件语法不过：" + bad.join(" | "));
 });
 
 t("vision: 模型视觉能力识别（自动 / 有 / 无）", function () {
