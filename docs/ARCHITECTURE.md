@@ -32,7 +32,7 @@ app/main.js
   └─ src/store.js         落盘（原文不落）
 ```
 
-所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 167 项测试能跑得又快又稳的原因。
+所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 169 项测试能跑得又快又稳的原因。
 
 ## 判定链路
 
