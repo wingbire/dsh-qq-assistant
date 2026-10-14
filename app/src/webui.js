@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath } from "./config.js";
+import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath, REDACTED } from "./config.js";
 import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
 import { buildProfilePrompt } from "./profile.js";
 import { moneyOfRows, costOf, isPeakTime, PRICE_MODEL, PRICE_NOTE } from "./cost.js";
@@ -146,6 +146,8 @@ export function createWebUi(deps) {
   const depsProbeFn = d.depsProbe || null;        // async () => { items: [...] }
   const modelListFn = d.modelList || null;        // async () => { ok, models: [...], current }
   const modelProbeFn = d.modelProbe || null;      // async () => { ok, at, results, models }
+  const secretValues = d.secretValues || null;    // async () => ({ llm: { deepseekApiKey: "sk-abc...1234" } }) 遮蔽值
+  const onSecrets = d.onSecrets || null;          // async (patch) => 把真密钥写进工作区的 secrets.json
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
@@ -194,13 +196,29 @@ export function createWebUi(deps) {
     const p = url.pathname;
 
     if (p === "/api/config" && req.method === "GET") {
-      return sendJson(res, 200, { ok: true, table: table, values: redactConfig(cfg, table), runtime: runtimeConfig(cfg), defaults: defaultsFromTable(table) });
+      const vals = redactConfig(cfg, table);
+      // 大脑 key 存在 secrets.json（不在 app.json），这里补一个遮蔽后的值给界面显示
+      if (secretValues) {
+        try {
+          const sv = await secretValues();
+          if (sv) for (const k of Object.keys(sv)) vals[k] = Object.assign({}, vals[k] || {}, sv[k]);
+        } catch (e) { /* 显示不出来不影响 */ }
+      }
+      return sendJson(res, 200, { ok: true, table: table, values: vals, runtime: runtimeConfig(cfg), defaults: defaultsFromTable(table) });
     }
     if (p === "/api/config" && req.method === "POST") {
       const body = await readBody(req);
       let patch = null;
       try { patch = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
-      cfg = mergeConfigSafe(cfg, (patch && patch.patch) || patch || {}, table);   // secret 的遮蔽值/空值 = 没改
+      const incoming = (patch && patch.patch) || patch || {};
+      // 大脑 key：真值走 secrets.json（工作区自持），app.json 里那格留空免得抄两份
+      const kField = "llm.deepseekApiKey";
+      const kIn = incoming && incoming.llm ? String(incoming.llm.deepseekApiKey || "").trim() : "";
+      if (kIn && kIn !== REDACTED && onSecrets) {
+        try { await onSecrets({ deepseekApiKey: kIn }); } catch (e) { /* 落盘失败下面会说 */ }
+      }
+      cfg = mergeConfigSafe(cfg, incoming, table);   // secret 的遮蔽值/空值 = 没改
+      if (kIn) { try { setPath(cfg, kField, ""); } catch (e) { /* ignore */ } }
       if (configFile) { try { saveConfig(cfg, configFile); } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message) }); } }
       let personaNote = null;
       if (onConfigSaved) { try { personaNote = await onConfigSaved(cfg); } catch (e) { personaNote = { ok: false, error: String(e && e.message) }; } }

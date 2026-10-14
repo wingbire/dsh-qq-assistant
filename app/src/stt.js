@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 
 // 语音转写侧车客户端。
@@ -12,6 +14,19 @@ export const STT_DEFAULTS = {
   maxBytes: 8 * 1024 * 1024,
   lang: "zh"
 };
+
+// AbortSignal.timeout() 会在退出时留下定时器句柄，Windows 上 libuv 会在进程退出时断言崩溃
+// （Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c:94）。
+// 所以自己管这个定时器：用完 clearTimeout，并 unref 掉别钉住进程。
+function withTimeout(ms) {
+  const c = new AbortController();
+  const t = setTimeout(function () { try { c.abort(); } catch (e) { /* 已经结束 */ } }, ms || 30000);
+  if (typeof t.unref === "function") t.unref();
+  return {
+    signal: c.signal,
+    done: function () { try { clearTimeout(t); } catch (e) { /* ignore */ } }
+  };
+}
 
 export const AUDIO_EXT = [".amr", ".silk", ".slk", ".wav", ".mp3", ".m4a", ".ogg", ".aac", ".flac", ".opus", ".webm"];
 
@@ -90,9 +105,13 @@ export function createStt(opts) {
       const fd = new FormData();
       fd.append("file", new Blob([buf]), path.basename(filePath));
       if (cfg.lang) fd.append("language", String(cfg.lang));
-      const res = await doFetch(cfg.endpoint, { method: "POST", body: fd, signal: (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ? AbortSignal.timeout(cfg.timeoutMs || STT_DEFAULTS.timeoutMs) : undefined });
-      if (!res || !res.ok) throw new Error("HTTP " + (res && res.status));
-      const json = await res.json();
+      const tm = withTimeout(cfg.timeoutMs || STT_DEFAULTS.timeoutMs);
+      let res = null, json = null;
+      try {
+        res = await doFetch(cfg.endpoint, { method: "POST", body: fd, signal: tm.signal });
+        if (!res || !res.ok) throw new Error("HTTP " + (res && res.status));
+        json = await res.json();
+      } finally { tm.done(); }
       const text = parseSttAnswer(json);
       if (!text) throw new Error("侧车没返回文字");
       const ms = Date.now() - t0;
@@ -104,15 +123,50 @@ export function createStt(opts) {
     }
   }
 
-  // 体检：能不能连上侧车（给设置页「拓展依赖」用）
+  // 体检：能不能连上侧车（给设置页「拓展依赖」和启动日志用）
+  // 用 node:http + agent:false，**不走 fetch 的连接池**：池化 socket 会在"干净退出"时
+  // 还挂着未关闭的句柄，Windows 上 libuv 直接断言崩（实测 --selftest 就是这么崩的）。
+  function probeOnce(url, ms) {
+    return new Promise(function (resolve) {
+      let done = false;
+      const finish = function (v) { if (done) return; done = true; try { clearTimeout(t); } catch (e) {} try { req.destroy(); } catch (e) {} resolve(v); };
+      let u = null;
+      try { u = new URL(url); } catch (e) { return resolve({ ok: false, error: "地址不对：" + url }); }
+      const mod = u.protocol === "https:" ? https : http;
+      const req = mod.request({
+        hostname: u.hostname, port: u.port || (u.protocol === "https:" ? 443 : 80),
+        path: u.pathname + u.search, method: "GET", agent: false, headers: { "User-Agent": "dshqq/3.0" }
+      }, function (res) {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", function (c) { body += c; });
+        res.on("end", function () {
+          let j = null; try { j = JSON.parse(body); } catch (e) { j = null; }
+          finish({ ok: res.statusCode === 200 && !!(j && j.ok), model: j && j.model ? String(j.model) : null, device: j && j.device ? String(j.device) : null, status: res.statusCode });
+        });
+      });
+      const t = setTimeout(function () { finish({ ok: false, error: "超时" }); }, ms || 3000);
+      if (typeof t.unref === "function") t.unref();
+      req.on("error", function (e) { finish({ ok: false, error: String(e && e.message) }); });
+      req.end();
+    });
+  }
+
   async function probe() {
-    if (!doFetch) return { ok: false, error: "运行时不带 fetch" };
-    try {
-      const res = await doFetch(healthUrlOf(cfg.endpoint), { signal: (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ? AbortSignal.timeout(3000) : undefined });
-      if (!res || !res.ok) return { ok: false, error: "HTTP " + (res && res.status) };
-      const j = await res.json().catch(function () { return null; });
-      return { ok: !!(j && j.ok), model: j && j.model ? String(j.model) : null, device: j && j.device ? String(j.device) : null };
-    } catch (e) { return { ok: false, error: String(e && e.message) }; }
+    // 测试注入了 fetch → 走 fetch（可控、不打真实网络）；生产不注入 → 走上面那条非池化 http
+    if (o.fetch) {
+      try {
+        const tm = withTimeout(3000);
+        let res = null, j = null;
+        try {
+          res = await doFetch(healthUrlOf(cfg.endpoint), { signal: tm.signal });
+          if (!res || !res.ok) return { ok: false, error: "HTTP " + (res && res.status) };
+          j = await res.json().catch(function () { return null; });
+        } finally { tm.done(); }
+        return { ok: !!(j && j.ok), model: j && j.model ? String(j.model) : null, device: j && j.device ? String(j.device) : null };
+      } catch (e) { return { ok: false, error: String(e && e.message) }; }
+    }
+    return probeOnce(healthUrlOf(cfg.endpoint), 3000);
   }
 
   return { config: cfg, enabled: enabled, transcribe: transcribe, probe: probe, stats: function () { return Object.assign({}, stats); } };

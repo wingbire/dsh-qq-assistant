@@ -9,8 +9,12 @@ DSH-QQ 群小助手 · 首次运行三步
    （程序会直接读 NapCat 自己的 onebot11 配置自动对齐，两边不一致时以 NapCat 为准，不用手抄）
    在「人设」页填小助手的名字 / 年龄段 / 三条性格 / 兴趣 / 雷点
 
-3. 准备一把你自己的 DeepSeek API key，写进
-   app\dsh-data\config\secrets.json  ->  { "deepseekApiKey": "sk-..." }
+3. 准备一把你自己的 DeepSeek API key（BYO key），二选一：
+   ① 配置端 →「接入」→「大脑 API Key（DeepSeek）」粘贴进去（推荐，保存即生效）
+   ② 或手工写进 app\dsh-data\config\secrets.json  ->  { "deepseekApiKey": "sk-..." }
+   也可以设环境变量 DEEPSEEK_API_KEY；优先级：工作区文件 > 环境变量。
+   注意：程序借 DSH 通道发请求，但用的是你自己的 key，不会复用桌面版 DSH 的凭据。
+        想 0 成本可以改走「额外功能 → 免费模型」（设置页点检测，挑一个能用的）
 
 连不上 NapCat 时先看托盘的「端口」那行：
    控制台 6099 通、OneBot 3001 不通  ->  NapCat 活着但服务端没起来，多半是 QQ 掉登录了
@@ -22,3 +26,4 @@ DSH-QQ 群小助手 · 首次运行三步
       或在安装目录放一个 STOP 文件 -> 全局停
 
 详细说明看 INSTALL.md，数据与隐私边界看 隐私说明.md
+

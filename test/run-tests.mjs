@@ -94,6 +94,27 @@ t("gatescore: 深档映射", function () {
   eq(depthTier(0.4, null).tier, "mid");
   eq(depthTier(0.8, null).tier, "high");
 });
+t("dshprofile: 三档思考强度可配（免费车道上自动去掉）", function () {
+  const pick = function (s) { return JSON.parse(s)[0].config; };
+  eq(pick(renderTierOverlay("low", {})).reasoningEffort, "off", "短评档默认 off");
+  eq(pick(renderTierOverlay("mid", {})).reasoningEffort, "low", "总结档默认 low");
+  eq(pick(renderTierOverlay("high", {})).reasoningEffort, "high", "详细档默认 high");
+  eq(pick(renderTierOverlay("mid", { efforts: { mid: "medium" } })).reasoningEffort, "medium", "配置能覆盖默认");
+  eq("reasoningEffort" in pick(renderTierOverlay("mid", { efforts: { mid: null } })), false, "走免费模型：不带这个字段（免费池不认）");
+  eq("efforts" in pick(renderTierOverlay("mid", { efforts: { mid: "high" } })), false, "内部传参不能漏进 DSH 配置");
+});
+
+t("字段表：大脑 API Key 与三档思考强度都在（配置端可填）", function () {
+  const table = loadFieldTable();
+  const fields = table.分组.flatMap(function (g) { return g.字段; });
+  const keys = fields.map(function (f) { return f.键; });
+  ok(keys.indexOf("llm.deepseekApiKey") >= 0, "有「大脑 API Key」字段（新人不用再找 secrets.json）");
+  const kf = fields.filter(function (f) { return f.键 === "llm.deepseekApiKey"; })[0];
+  eq(kf.类型, "secret", "key 是 secret：界面遮蔽、日志不落明文");
+  for (const k of ["brain.effort.low", "brain.effort.mid", "brain.effort.high"]) ok(keys.indexOf(k) >= 0, "有 " + k);
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

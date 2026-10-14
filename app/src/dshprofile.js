@@ -23,8 +23,12 @@ export function tierOverlayPath(dshHome, profileId, tier) {
 // 三档 overlay：只改模型调用参数，不碰人设 —— 所以 personaPrefix 的字节在三档间完全一致，
 // 前缀缓存可以跨档共享（这是把「三个 profile」换成「一个 profile + 三个补丁」的原因）。
 export function renderTierOverlay(tier, base) {
-  const effort = TIER_EFFORT[tier] || "low";
-  const cfg = Object.assign({ provider: "deepseek-official", model: "deepseek-flash", reasoningEffort: effort }, base || {});
+  const b = Object.assign({}, base || {});
+  const overrides = b.efforts || null;                 // 配置里可调的三档强度
+  delete b.efforts;                                    // 只是我们的传参，别漏进 DSH 配置
+  if (overrides && overrides[tier] === null) { b.reasoningEffort = null; }
+  const effort = (overrides && overrides[tier]) || TIER_EFFORT[tier] || "low";
+  const cfg = Object.assign({ provider: "deepseek-official", model: "deepseek-flash", reasoningEffort: effort }, b);
   // 走社区插件（Our Free Model）时不能带 reasoningEffort：免费池里的模型大多不认这个字段，
   // 会直接报 'does not support reasoning effort "off"'。传 null 就等于不带。
   if (cfg.reasoningEffort == null) delete cfg.reasoningEffort;

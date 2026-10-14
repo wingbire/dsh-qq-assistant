@@ -35,7 +35,7 @@ app/main.js
   └─ src/store.js         落盘（原文不落）
 ```
 
-所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 221 项测试能跑得又快又稳的原因。
+所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 223 项测试能跑得又快又稳的原因。
 
 ## 判定链路
 
@@ -236,6 +236,31 @@ U        = benefit − costTerm
 - 管理员在配置端**手写**的话题一律钉住（pinned）：不降级、不淘汰；老档案里 updatedBy=admin 的也自动钉住。
 - 每次提炼都记 interestLog（added/promoted/demoted/dropped + 当前固化与观察区），排查「这词为什么不见了」直接看它。
 - 提示词里只放**固化**的词：观察区换来换去，放进去会破坏前缀缓存。
+
+### 大脑思考强度（三档可调，之前是死的）
+
+三档走的是「一个 profile + 三个 overlay 补丁」：补丁只改模型调用参数、不碰人设，
+所以 personaPrefix 在三档之间字节一致，前缀缓存可以跨档共享。
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| brain.effort.low | off | 短评档（本地短答一般不进大脑） |
+| brain.effort.mid | low | 总结档，平时用的就是它 |
+| brain.effort.high | high | 详细档 |
+
+- 取值 off / low / medium / high；改完保存**立刻重写** tier-*.patch.yml（不用重启）。
+- 走免费模型（Our Free Model）时自动**去掉**这个字段：免费池的模型大多不认，传了会直接报错。
+- **修复**：以前 askBrain 只把 promptText 传下去，档位补丁根本没进命令行 —— 于是「思考强度」怎么配都不生效。
+  现在按当轮档位把 tier-<tier>.patch.yml 用 --patch 真的传进去。
+
+### 大脑 API Key 填在哪（新人最容易卡住的一步）
+
+- 首选：配置端 →「接入」→「**大脑 API Key（DeepSeek）**」粘贴，保存即写进 app/dsh-data/config/secrets.json（只存本机、界面只显示遮蔽值）。
+- 也可以：直接编辑 app/dsh-data/config/secrets.json 里的 deepseekApiKey；或设环境变量 DEEPSEEK_API_KEY。
+  优先级：工作区文件 > 环境变量。
+- **通道 ≠ 凭据**：程序是借 DSH 这条通道发请求，但用的是**你自己的 key**，不会复用桌面版 DSH 的凭据。
+  注意别把 key 填进 brain.dshCliPath（那是 DSH 启动器路径）。
+- 想 0 成本：设置页「免费模型」→ 检测 → 勾「大脑走免费模型」。
 
 ### 提示词装配顺序（缓存优先级，默认生效）
 

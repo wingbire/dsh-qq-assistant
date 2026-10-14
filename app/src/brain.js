@@ -269,7 +269,11 @@ export function ensureBrainProfile(opts) {
   const personaText = o.personaText != null ? String(o.personaText) : buildPersonaText(o.persona);
   // 模型通道：不传就维持官方默认；传了（社区插件 Our Free Model）就连 patch 带三档一起改
   const model = o.model || null;
-  const tierBase = model ? { provider: model.provider, model: model.model, reasoningEffort: null } : undefined;
+  const tierBase = Object.assign(
+    {},
+    model ? { provider: model.provider, model: model.model, reasoningEffort: null } : {},
+    o.efforts ? { efforts: o.efforts } : {}          // 三档思考强度（配置端可调）
+  );
   const file = writeProfilePatch(dshHome, profileId, personaText, null, model);
   const tiers = writeAllTierOverlays(dshHome, profileId, tierBase);
   return { ok: true, created: r.created, dir: r.dir, patch: file, tiers: tiers };

@@ -7,6 +7,7 @@ import { createBot } from "./src/index.js";
 import { createOneBot, probePort } from "./src/onebot.js";
 import { createRuntime } from "./src/runtime.js";
 import { runBrain, ensureBrainProfile, resolveDshCli, PROFILE_DEFAULT } from "./src/brain.js";
+import { tierOverlayPath } from "./src/dshprofile.js";
 import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
@@ -18,7 +19,7 @@ import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, wri
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
 import { visionCapability } from "./src/vision.js";
 import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from "./src/paths.js";
-import { pickApiKey } from "./src/secrets.js";
+import { pickApiKey, saveSecrets, maskKey } from "./src/secrets.js";
 import { checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "./src/update.js";
 import { createPluginProbe, installPlugin } from "./src/plugins.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, readWebuiToken } from "./src/napcat.js";
@@ -166,7 +167,13 @@ const quoteCache = new Map();   // 被引用消息原文（10 分钟）
 const OFM_PROBE_FILE = path.join(DATA_ROOT, "ofm-models.json");   // 免费模型真机检测结果
 let ofmProbing = false;
 
-const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg) });
+// 三档思考强度：配置端可调（off / low / medium / high），走免费模型时会被自动去掉
+function effortsOf(c) {
+  const conf = c || cfg || {};
+  const g = function (k, d) { const v = String(getPath(conf, "brain.effort." + k) || "").trim(); return v || d; };
+  return { low: g("low", "off"), mid: g("mid", "low"), high: g("high", "high") };
+}
+const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg), efforts: effortsOf(cfg) });
 log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));
 
 // OneBot 客户端做成可重建的：改完接入设置点「重连」就能立刻生效，不用重启程序
@@ -300,7 +307,14 @@ const runtime = createRuntime({
   send: function (gid, text, opts) { log("→ " + gid + " : " + text + (opts && opts.replyTo ? "（引用）" : "")); return link.ob ? link.ob.sendGroupMsg(gid, text, opts) : false; },
   askBrain: async function (o) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
-    return runBrain({ cliPath: cli, promptText: o.promptText, timeoutMs: 60000 });
+    // 关键：把当前档位的 overlay 真的传下去 —— 以前这里只传了 prompt，导致「思考强度」配置一直是死的
+    const tier = (o && o.tier) || "mid";
+    const patches = [];
+    try {
+      const p = tierOverlayPath(DSH_HOME, PROFILE_DEFAULT, tier);
+      if (fs.existsSync(p)) patches.push(p);
+    } catch (e) { /* 没有档位补丁就按默认跑 */ }
+    return runBrain({ cliPath: cli, profile: PROFILE_DEFAULT, patchFiles: patches, promptText: o.promptText, timeoutMs: 60000 });
   },
   log: log
 });
@@ -389,7 +403,7 @@ async function onConfigSaved(next) {
   if (!cli) return { ok: false, error: "找不到 DSH 启动器，改完要重启程序才生效", reconnect: linkNote };
   const p = personaFromConfig(next);
   const text = String(getPath(next, "persona.globalText") || "").trim();
-  const r = ensureBrainProfile({ cliPath: cli, persona: p, personaText: text || undefined, model: channelModel("brain", next) });
+  const r = ensureBrainProfile({ cliPath: cli, persona: p, personaText: text || undefined, model: channelModel("brain", next), efforts: effortsOf(next) });
   if (!r.ok) return { ok: false, error: r.error || "写 profile 失败", reconnect: linkNote };
   return { ok: true, source: text ? "手写的全局人设" : "按字段拼装", patch: r.patch, reconnect: linkNote };
 }
@@ -439,6 +453,16 @@ const webui = createWebUi({
   configFile: CONFIG_FILE, probeOnebot: probeOnebot, listGroups: listGroups, onConfigSaved: onConfigSaved,
   napcatInfo: napcatView, napcatAdopt: adoptNapCat, napcatReveal: napcatReveal,
   checkUpdate: doCheckUpdate, applyUpdate: doApplyUpdate, depsProbe: async function () { return depsProbe.probe(); }, depFix: doDepFix,
+  // 大脑 key：界面显示遮蔽值；填真值就落进工作区的 secrets.json（只存本机，绝不出现在日志里）
+  secretValues: async function () {
+    const k = pickApiKey();
+    return k ? { llm: { deepseekApiKey: maskKey(k) } } : null;
+  },
+  onSecrets: async function (patch) {
+    saveSecrets(patch || {});
+    log("[配置] DeepSeek API Key 已写进 secrets.json（" + maskKey((patch || {}).deepseekApiKey) + "）");
+    return { ok: true };
+  },
   // 免费模型：清单（读插件目录 + 上次检测结果）
   modelList: async function () {
     const st = readOfmState(DSH_HOME);
