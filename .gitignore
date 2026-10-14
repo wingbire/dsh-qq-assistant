@@ -33,3 +33,7 @@ app/dsh-home/profiles/*/pnpm-lock.yaml
 
 # archify 渲染出的交互 HTML（大文件，源在 docs/diagrams/*.json）
 docs/diagrams/*.html
+
+# B站宣传视频制作说明（本地文档，不上传）
+B站宣传视频制作说明.md
+视频制作/
