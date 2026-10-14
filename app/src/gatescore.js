@@ -17,7 +17,7 @@ export function valve(pSay, bounds) {
 }
 
 export function depthTier(U, tiers) {
-  const t = Object.assign({}, { speakAt: 0.20, terseAt: 0.35, detailedAt: 0.65 }, tiers || {});
+  const t = Object.assign({}, { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 }, tiers || {});
   if (U < t.speakAt) return { tier: "low", maxChars: 20, reason: "U < 开口线" };
   if (U < t.terseAt) return { tier: "low", maxChars: 20, reason: "U < 常规线" };
   if (U < t.detailedAt) return { tier: "mid", maxChars: 60, reason: "U < 多讲线" };

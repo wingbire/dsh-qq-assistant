@@ -135,7 +135,10 @@ log("预算：日 " + rc.budget.dailyTokens + " token，超 " + (rc.budget.softR
 log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / 8s 超时 → 不确定");
 
 const store = createStore(path.join(DATA_ROOT, "data"));
-const bot = createBot({ dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName] });
+const bot = createBot({
+  dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName],
+  bounds: rc.gates.bounds, tiers: rc.gates.tiers, utilityWeights: rc.gates.weights   // 判定阈值现在真的生效
+});
 const cli = resolveDshCli();
 const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg) });
 log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));

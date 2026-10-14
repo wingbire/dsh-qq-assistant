@@ -490,7 +490,7 @@ export function createRuntime(deps) {
     let usage = null;
     let searchInfo = null;
     if (dec.action === "local_short") {
-      text = localReply(dec, { rng: rng });
+      text = localReply(dec, { rng: rng, text: evt.text });
     } else if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
       const policy = depthPolicy(dec.tier, { contextWindow: rc.contextWindow });

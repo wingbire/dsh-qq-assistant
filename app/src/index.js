@@ -12,7 +12,7 @@ export function createBot(opts) {
   const store = o.store || createStore(o.dataRoot);
   const score = Object.assign({}, defaultScoreConfig(), o.score || {});
   const bandit = createBandit({ rng: o.rng, priorVar: 4 });
-  const gates = createGates({ bandit: bandit, bounds: o.bounds, tiers: o.tiers });
+  const gates = createGates({ bandit: bandit, bounds: o.bounds, tiers: o.tiers, utilityWeights: o.utilityWeights });
   const proactive = createProactive({ config: o.proactive, rng: o.rng });
 
   if (o.restore !== false) {

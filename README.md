@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-181%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-184%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)
@@ -44,7 +44,7 @@
 | | 普通群机器人 | 本程序 |
 |---|---|---|
 | **什么时候说话** | 被 @ 就回 | 六因子加权算「话用值」，低于开口线就**闭嘴** |
-| **说多深** | 一律长答 | 三档：短评 / 总结 / 详细，各档字数自己定 |
+| **说多深** | 一律长答 | 三档：短评 / 总结 / 详细，各档字数自己定；**被点名 / 要求展开 / 问句有地板**——至少进中档走大脑，不会被"成本"压成"嗯？/啥事" |
 | **没人接话** | 照样回 | 灰区送**二判**（独立一次调用，8 秒超时 → 不确定） |
 | **要不要查资料** | 直接答 | 判定要查才搜，搜完把摘要塞进上下文 |
 | **配不配图** | 固定 | 按情绪标记配图；详细档**一律不配** |
@@ -149,7 +149,7 @@ git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
 
 # 1. 自检（不需要 QQ、不需要 key）
-node test/run-tests.mjs         # 181 项
+node test/run-tests.mjs         # 184 项
 node demo/run-acceptance.mjs    # 全量验收记分卡
 
 # 2. 起程序（默认「新群先观察」，一个字都不发）
@@ -262,13 +262,13 @@ flowchart LR
 ## 测试与证据
 
 ```
-node test/run-tests.mjs        →  通过 181 项，失败 0 项
+node test/run-tests.mjs        →  通过 184 项，失败 0 项
 node demo/run-acceptance.mjs   →  通过 9 / 9
 ```
 
 | 验收项 | 结果 |
 |---|---|
-| 骨架回归测试 | **181 项全过** |
+| 骨架回归测试 | **184 项全过** |
 | 判定中枢演示 | 判决分布符合预期 |
 | 大脑通道（mock CLI） | ok |
 | 接入端到端（mock OneBot） | **11 / 11** |
@@ -304,7 +304,7 @@ app/
 prompts/             人设 群档案 二判 rubric 字段表
 launcher/            Windows 托盘启动器（C# 源码 + 已编译 exe + 图标）
 demo/                8 个演示（含自写 mock OneBot / mock DSH CLI）
-test/                181 项回归测试
+test/                184 项回归测试
 dist/                分发版打包（白名单 + 双闸门自检）
 ```
 

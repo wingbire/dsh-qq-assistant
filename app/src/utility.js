@@ -5,7 +5,10 @@ export const UTILITY_WEIGHTS = {
 
 export const TOPIC_DEPTH_K = 0.10;
 
-export const TIERS = { speakAt: 0.20, terseAt: 0.35, detailedAt: 0.65 };
+// terseAt = "进中档（走大脑）"的线。定 0.15 而不是 0.35：U 里含成本惩罚，
+// 实测一句普通的"打个招呼" U 只有 0.27、一句"展开说说"甚至 -238 —— 0.35 那条线等于
+// 把绝大部分正常发言都压在"本地短句"档。
+export const TIERS = { speakAt: 0.20, terseAt: 0.15, detailedAt: 0.65 };
 
 export function clamp01(x) {
   if (!isFinite(x)) return 0;

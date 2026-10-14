@@ -99,6 +99,27 @@ export function mergeConfigSafe(cur, patch, table) {
   return next;
 }
 
+function numOf(v, d) { const n = Number(v); return isFinite(n) ? n : d; }
+
+// 判定阈值（开口线/三档线/灰区/六因子权重）。
+// 以前这几项只写在字段表里、**没有任何代码读它们** —— 配置端改了没反应，等于摆设。
+export function gatesFromConfig(cfg) {
+  const c = cfg || {};
+  const w = getPath(c, "gates.weights");
+  const weights = (Array.isArray(w) && w.length >= 4)
+    ? { w1: numOf(w[0], 0.40), w2: numOf(w[1], 0.20), w3: numOf(w[2], 0.25), w4: numOf(w[3], 0.15) }
+    : null;
+  return {
+    bounds: { lo: numOf(getPath(c, "gates.greyLo"), 0.40), hi: numOf(getPath(c, "gates.greyHi"), 0.75) },
+    tiers: {
+      speakAt: numOf(getPath(c, "gates.utilitySpeakAt"), 0.20),
+      terseAt: numOf(getPath(c, "gates.utilityTerseAt"), 0.15),
+      detailedAt: numOf(getPath(c, "gates.utilityDetailedAt"), 0.65)
+    },
+    weights: Object.assign({ lambda: numOf(getPath(c, "gates.utilityLambda"), 0.5) }, weights || {})
+  };
+}
+
 // 运行期用的派生配置（把判定/主动/接入的默认值集中到一处，供 runtime 消费）
 export function runtimeConfig(cfg) {
   const c = cfg || {};
@@ -111,6 +132,7 @@ export function runtimeConfig(cfg) {
     semiAutoDays: getPath(c, "runtime.semiAutoDays") != null ? getPath(c, "runtime.semiAutoDays") : 3,
     contextWindow: getPath(c, "runtime.contextWindow") != null ? getPath(c, "runtime.contextWindow") : 10, // N8
     depthChars: depthChars,
+    gates: gatesFromConfig(c),
     searchPerTier: getPath(c, "runtime.searchPerTier") || [0, 1, 1],
     coalesceWindowMs: getPath(c, "runtime.coalesceWindowMs") != null ? getPath(c, "runtime.coalesceWindowMs") : 6000,  // N23
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,

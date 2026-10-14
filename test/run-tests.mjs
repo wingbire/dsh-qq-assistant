@@ -1,6 +1,8 @@
 import { classify, CLASSIFY_TABLE, extractKeywords } from "../app/src/classify.js";
 import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
+import { createGates } from "../app/src/gates.js";
+import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL } from "../app/src/localreply.js";
 import { engagementOf, reward, costOf } from "../app/src/score.js";
 import { createProactive } from "../app/src/proactive.js";
 import { createStore } from "../app/src/store.js";
@@ -2055,6 +2057,55 @@ t("runtime: 跳过观察期——某群直接全自动、群间隔离、可回�
   const rt2 = mk({ observe: true });
   rt2.setStage("G1", "full");
   eq(rt2.stage("G1").stage, "observe", "强制观察优先于手动跳过");
+});
+
+t("gates: 被点名 / 要求展开不许被成本压成「本地短句」", async function () {
+  const g = createGates({});
+  const base = { gid: "G1", uid: "u1", now: 0, botNames: ["小肥鱼"], nicknames: [], interests: [] };
+
+  const nick = await g.decide(Object.assign({}, base, { text: "小肥鱼，打个招呼" }), {});
+  eq(nick.hardHits.indexOf("nick") >= 0, true, "先确认硬触发认得出来");
+  eq(nick.action, "brain", "叫到名字必须进大脑（原来 U=0.27 → 本地短句「嗯？」）");
+  eq(nick.tier === "low", false);
+
+  const at = await g.decide(Object.assign({}, base, { text: "打个招呼", atBot: true }), {});
+  eq(at.action, "brain", "@ 到它也一样，至少中档");
+
+  const detail = await g.decide(Object.assign({}, base, { text: "@我 展开说说这个原理", atBot: true }), {});
+  eq(detail.detailAsk, true);
+  eq(detail.tier === "low", false, "要求展开 → 至少中档（原来是 U=-238 → 回「啥事」）");
+
+  const plain = await g.decide(Object.assign({}, base, { text: "嘻嘻，现在好了" }), {});
+  eq(plain.action !== "brain", true, "没人搭理你的闲聊，别自己花钱开口");
+});
+
+t("localreply: 被点名和打招呼不再回「啥事」", function () {
+  const zero = function () { return 0; };
+  eq(localReply({ bucket: "general", hardStrength: 1, hardHits: ["at"] }, { rng: zero, text: "打个招呼" }), GREET_POOL[0], "打招呼 → 寒暄池");
+  const a = localReply({ bucket: "general", hardStrength: 0.7, hardHits: ["nick"] }, { rng: zero, text: "在干嘛呢" });
+  eq(ADDRESSED_POOL.general.indexOf(a) >= 0, true, "被点名 → 应答型");
+  const p = localReply({ bucket: "general" }, { rng: zero, text: "今天天气不错" });
+  eq(LOCAL_POOL.general.indexOf(p) >= 0, true, "没点名才用老池子");
+  eq(isGreeting("小肥鱼在吗"), true);
+  eq(isGreeting("晚饭吃了吗"), false);
+});
+
+t("config: 调整页的开口线 / 三档线真的会进判定（原来没人读）", function () {
+  const table = loadFieldTable();
+  const def = runtimeConfig(defaultsFromTable(table));
+  eq(def.gates.tiers.terseAt, 0.15, "常规线默认改成 0.15 了");
+  eq(def.gates.bounds.lo, 0.4);
+  eq(def.gates.weights.w1, 0.4);
+  eq(def.gates.weights.lambda, 0.5);
+
+  const tuned = runtimeConfig(deepMerge(defaultsFromTable(table), { gates: { utilityTerseAt: 0.9, greyLo: 0.3, weights: [0.5, 0.2, 0.2, 0.1], utilityLambda: 0.2 } }));
+  eq(tuned.gates.tiers.terseAt, 0.9);
+  eq(tuned.gates.bounds.lo, 0.3);
+  eq(tuned.gates.weights.lambda, 0.2);
+  eq(tuned.gates.weights.w1, 0.5);
+  // 同一句话：默认三档线进中档，把常规线拉到 0.9 就只配短句 —— 证明配置真的喂给了判定
+  eq(depthTier(0.30, def.gates.tiers).tier, "mid");
+  eq(depthTier(0.30, tuned.gates.tiers).tier, "low");
 });
 
 t("runtime: 同类问题扫一遍——预算 / 群内停 / 学习权重都要活过重启", function () {

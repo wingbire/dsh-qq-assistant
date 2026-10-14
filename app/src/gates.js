@@ -101,7 +101,14 @@ export function createGates(opts) {
       reason.push("本地判否 → 不回复、不进大脑");
     } else {
       tierInfo = depthTier(u.U, tiers);
-      if (detailAsk && hard.strength >= 0.9) tierInfo = { tier: "high", maxChars: 200, reason: "被点名且要求详细 → 强制高深度" };
+      // 深度只看 U 有个反直觉的坑：U = benefit - λ·diff·(cost/costScale)，而"要求越详细"会让
+      // diff 和 estOut 一起涨 → U 更负 → 越可能被压成本地短句（实测"展开说说" U=-238）。
+      // 三种语义明确的情况给地板，成本控制交给预算/条数，不该由"问得更具体"来埋单。
+      const addressed = hard.strength >= 0.9 || hard.hits.indexOf("nick") >= 0;
+      if (detailAsk && addressed) tierInfo = { tier: "high", maxChars: 200, reason: "被点名且要求展开 → 高深度" };
+      else if (detailAsk && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "要求展开 → 至少中档（进大脑）" };
+      else if (addressed && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "被点名 → 至少中档（进大脑）" };
+      else if (questionWord && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "在问问题 → 至少中档（进大脑）" };
       plan = searchPlan(tierInfo.tier, cls.keywords);
       reason.push("深度分档：" + tierInfo.reason);
       if (tierInfo.tier === "high") {
@@ -135,6 +142,7 @@ export function createGates(opts) {
       tier: tierInfo.tier, maxChars: tierInfo.maxChars,
       search: plan.search, keywords: plan.keywords,
       bucket: bucket, arm: arm, topicDepth: cls.topicDepth, detailAsk: detailAsk,
+      hardHits: hard.hits, hardStrength: hard.strength,          // 本地短句据此换"应答型"口气
       audit: auditRes ? auditRes.verdict : "none",
       score: u.parts, signals: j.signals, reason: reason, bounds: v0.bounds, injected: injected
     };
