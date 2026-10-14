@@ -142,7 +142,8 @@ export function auditFromConfig(cfg) {
     timeoutMs: numOf(getPath(c, "audit.timeoutMs"), 8000),
     scope: getPath(c, "audit.scope") || "高档+复核救回",       // 只审高档 / 高档+复核救回 / 灰区也审
     onTimeout: getPath(c, "audit.onTimeout") || "降档",         // 降档 / 保持
-    maxPerHour: numOf(getPath(c, "audit.maxPerHour"), 30)      // 0 = 不限
+    maxPerHour: numOf(getPath(c, "audit.maxPerHour"), 30),     // 0 = 不限
+    auditUnaddressed: getPath(c, "audit.auditUnaddressed") !== false   // 未点名却要进大脑的也审（默认开）
   };
 }
 

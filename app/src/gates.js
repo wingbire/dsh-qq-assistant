@@ -1,6 +1,7 @@
 import { maskUntrusted, normalizeName, isInstructionLike } from "./untrusted.js";
 import { classify } from "./classify.js";
 import { createAddressee } from "./addressee.js";
+import { isGreeting } from "./localreply.js";
 import { utilityScore, UTILITY_WEIGHTS, TIERS, gateFactor, clamp01 } from "./utility.js";
 import { valve, depthTier, searchPlan, clampBounds, DEFAULT_BOUNDS } from "./gatescore.js";
 import { bucketOf } from "./bandit.js";
@@ -53,6 +54,8 @@ export function createGates(opts) {
   const auditGrey = auditScope === "灰区也审";
   const auditTimeoutMode = String(auditCfg.onTimeout || "降档");
   const auditMaxPerHour = Number(auditCfg.maxPerHour) || 0;   // 0 = 不限
+  // 未点名、但本地准备进大脑的（"你/他/她"到底指谁，本地规则分不清）→ 交给外审定夺
+  const auditUnaddressed = auditCfg.auditUnaddressed !== false;
   const auditTimes = [];
   function auditAllow(nowMs) {
     if (!auditMaxPerHour) return true;
@@ -114,6 +117,9 @@ export function createGates(opts) {
     }
     // 疑似注入的外部指令：直接不回，也不送大脑（pSay×0.5 不够；rubric 第 5 条要求判否）
     if (injected && blockInjected) { verdict = "no"; rescued = false; reason.push("疑似注入指令 → 直接不回（不送大脑）"); }
+    // 灌水拦截：单字符 / 纯标点（"?"、"。"、"哈"）不值得回 —— rubric 第 3 条
+    const stripped = String(text || "").replace(/[\s\p{P}\p{S}]/gu, "");
+    if (stripped.length <= 1) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
 
     const sem = signalOf(j.signals, "idfOverlapToMyWords").v;
     const cont = signalOf(j.signals, "continuation").v;
@@ -151,6 +157,28 @@ export function createGates(opts) {
       if (rescued && rescueAsk === "中档" && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "语义补救 → 中档（进大脑）" };
       // 配置只要短句时，别让"求展开"之类的地板把档位又抬回去
       if (rescued && rescueAsk === "短句" && tierInfo.tier !== "low") tierInfo = { tier: "low", maxChars: mcOf(0), reason: "补救但配置只要短句 → 压到短句" };
+      // 进中档 = 花钱调模型，必须有"语义理由"。U 只是净值估算，光靠它过线会把
+      // 灌水、劝架、对着别人说话、单个问号都送进大脑（实测 24 条情景里 8 条如此）。
+      // "上下文延续"也算理由：上一条就是它说的、隔了半分钟又来一句，那是接着跟它聊
+      const semanticReason = questionWord || detailAsk || rescued || cont >= 0.5;
+      // 寒暄要看有没有"实义"——"小肥鱼在吗"里的"吗"不该算提问（否则一句招呼就调模型）
+      const substance = /怎么|为什么|什么|哪|原因|帮我|教我|能不能|可以|值不值|行不行|对不对/.test(text);
+      // 光叫一声名字（"小肥鱼"）＝ 试探在不在，回一句短的就行，别为它调模型
+      let withoutName = String(text || "");
+      for (const n of botNames) if (n) withoutName = withoutName.split(n).join("");
+      const bareName = addressed && withoutName.replace(/[\s\p{P}\p{S}]/gu, "").length <= 1;
+      // 情绪宣泄（他妈的…又崩了）：没点名、也没问号 → 给一句短答，不送大脑
+      const vent = !addressed && !/[?？]/.test(text) && /他妈|特么|妈的|卧槽|靠|服了|醉了|绝了|气死/.test(text);
+      const greetingOnly = (!detailAsk && isGreeting(text) && !substance) || bareName;
+      if (tierInfo.tier !== "low") {
+        if (addressed && greetingOnly) {
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "点名但只是寒暄 → 本地短答（省一次模型调用）" };
+        } else if (!addressed && vent) {
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "情绪宣泄、没点名 → 本地短答，不送大脑" };
+        } else if (!addressed && !semanticReason) {
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "没点名、也没有求详/提问 → 只给本地短答" };
+        }
+      }
       plan = searchPlan(tierInfo.tier, cls.keywords);
       reason.push("深度分档：" + tierInfo.reason);
 
@@ -160,12 +188,17 @@ export function createGates(opts) {
       //   灰区也审     → 可选：本地灰 + 中档也交给外审定"是 / 短 / 否"
       const needAudit = (tierInfo.tier === "high"
         || (rescued && auditRescue)
+        || (auditUnaddressed && !addressed && tierInfo.tier !== "low")
         || (auditGrey && verdict === "grey" && tierInfo.tier === "mid")) && auditAllow(evt.now);
       if (needAudit) {
         auditTimes.push(evt.now == null ? nowFn() : evt.now);
         auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames });
         reason.push("外审（" + auditScope + "）：" + auditRes.verdict);
-        if (auditRes.verdict === "no") {
+        if (auditRes.error) {
+          // 外审坏了（超时/认证失败/通道不通）→ 一律沿用本地判断。
+          // 以前这里会把"补救回来的"直接丢掉，等于外审一坏，整条补救路径静默失效。
+          reason.push("外审不可用 → 沿用本地判断");
+        } else if (auditRes.verdict === "no") {
           verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };
         } else if (auditRes.verdict === "short") {
