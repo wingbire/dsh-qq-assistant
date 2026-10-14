@@ -50,6 +50,9 @@
     { name: "识图", icon: "▨", desc: "收到图片时额外调一次多模态模型，把画面内容描述拼进上下文",
       master: "runtime.vision.enabled", keys: ["runtime.vision.enabled", "runtime.vision.mode", "runtime.vision.endpoint", "runtime.vision.apiKey", "runtime.vision.model"],
       persona: "打开后会写进人设：你看得到群里的图" },
+    { name: "立绘（图片）", icon: "✦", desc: "允许大脑写 [立绘] 发自绘形象图（幼年 / 成年）",
+      master: "plugins.illustration", keys: ["plugins.illustration"],
+      persona: "关掉后人设里不再提立绘，程序也不会发" },
     { name: "表情包", icon: "☺", desc: "配图频率（详细回答与管理指令一律不配图）",
       master: "persona.memeFreq", masterOff: "关", keys: ["persona.memeFreq"],
       persona: "设为「关」后人设里不再提配图，模型也就不会发 [表情: …]" }

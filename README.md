@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-203%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-205%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)
@@ -155,7 +155,7 @@ git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
 
 # 1. 自检（不需要 QQ、不需要 key）
-node test/run-tests.mjs         # 203 项
+node test/run-tests.mjs         # 205 项
 node demo/run-acceptance.mjs    # 全量验收记分卡
 
 # 2. 起程序（默认「新群先观察」，一个字都不发）
@@ -192,8 +192,9 @@ launcher/DSHQQTray.exe
 |---|---|---|
 | **语音** | 关 | Windows 自带 SAPI 离线合成 wav → OneBot `record` 段。大脑写 `[语音: 内容]` 触发，管理员也能 `/说`。**开机探本机音色**：音色名不对会提示退回国语默认音色 |
 | **识图** | 关 | 收到图片额外调一次多模态，把画面描述拼进上下文。**默认「同大脑」**（与大脑同一个模型，实测 6.9 秒出画面描述）；也可切 `http`（任意 OpenAI 兼容多模态） |
-| **图表** | 开 | 大脑用 archify 画结构图 → 程序把 HTML 转成 PNG（无头浏览器）→ 发进群 → **发完删掉本地文件** |
-| **立绘** | 开 | 角色形象图写进人设，`[立绘]` 按「当前形态」发对应那张（幼年/成年） |
+| **图表** | 开 | 大脑用 archify 画结构图 → 程序把 HTML 转成 PNG（无头浏览器）→ 发进群 → **发完删掉本地文件**（开关 `plugins.archify`） |
+| **立绘** | 开 | 角色形象图写进人设，`[立绘]` 按「当前形态」发对应那张（幼年/成年）。**开关 `plugins.illustration`**（在「额外功能」页） |
+| **表情包** | 开 | 大脑写 `[表情: 描述]` → 本地图库按情绪/关键词取图；频率 `persona.memeFreq`（关/少/中）。**什么时候发由模型自己判断**，程序只做兜底（高档不配图、"少"档要隔几次回复） |
 
 > **人设里的能力声明跟着"真做得到"走**：识图按模型能力判、语音探本机音色，**本程序不做语音转写** ——
 > 所以人设里会写【看不到图】【听不到语音】，被问到就直说、不猜不编（见 [ARCHITECTURE](docs/ARCHITECTURE.md)）。
@@ -271,13 +272,13 @@ flowchart LR
 ## 测试与证据
 
 ```
-node test/run-tests.mjs        →  通过 203 项，失败 0 项
+node test/run-tests.mjs        →  通过 205 项，失败 0 项
 node demo/run-acceptance.mjs   →  通过 9 / 9
 ```
 
 | 验收项 | 结果 |
 |---|---|
-| 骨架回归测试 | **203 项全过** |
+| 骨架回归测试 | **205 项全过** |
 | 判定中枢演示 | 判决分布符合预期 |
 | 大脑通道（mock CLI） | ok |
 | 接入端到端（mock OneBot） | **11 / 11** |
@@ -313,7 +314,7 @@ app/
 prompts/             人设 群档案 二判 rubric 字段表
 launcher/            Windows 托盘启动器（C# 源码 + 已编译 exe + 图标）
 demo/                8 个演示（含自写 mock OneBot / mock DSH CLI）
-test/                203 项回归测试
+test/                205 项回归测试
 dist/                分发版打包（白名单 + 双闸门自检）
 ```
 

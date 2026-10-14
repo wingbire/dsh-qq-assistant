@@ -564,7 +564,7 @@ export function createRuntime(deps) {
     }
     // 立绘：[立绘] 发当前形态的图，[立绘: 幼年] 临时换形态
     let artInfo = null;
-    if (drawn.wanted) {
+    if (drawn.wanted && (!rc.plugins || rc.plugins.illustration !== false)) {
       const pick = illustrationFor(drawn.stage,
         rc && rc.illustrations ? rc.illustrations.young : null,
         rc && rc.illustrations ? rc.illustrations.adult : null);

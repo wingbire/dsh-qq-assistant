@@ -2217,13 +2217,62 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 
   const bad = [];
   for (const f of files) {
-    const r = spawnSync(process.execPath, ["--check", f], { encoding: "utf8" });
+    // 注意：直接 --check 一个 .js 时 Node 会假通过（按 CJS 解析）—— 必须拷成 .mjs 再查
+    const tmpF = path.join(os.tmpdir(), "dshqq-syntax-" + f.replace(/[\\/]/g, "_") + ".mjs");
+    try { fs.copyFileSync(f, tmpF); } catch (e) { continue; }
+    const r = spawnSync(process.execPath, ["--check", tmpF], { encoding: "utf8" });
     if (r.status !== 0) bad.push(f + " :: " + String(r.stderr || "").split(String.fromCharCode(10)).filter(Boolean).slice(-3).join(" / "));
+    try { fs.unlinkSync(tmpF); } catch (e) {}
   }
   eq(bad, [], "这些文件语法不过：" + bad.join(" | "));
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("persona: 表达层都是可变块（关掉就不写进人设）", function () {
+  const table = loadFieldTable();
+  const on = deepMerge(defaultsFromTable(table), { plugins: { meme: true, illustration: true, archify: true }, runtime: { vision: { enabled: false } } });
+  const off = deepMerge(defaultsFromTable(table), { plugins: { meme: false, illustration: false, archify: false }, persona: { memeFreq: "关" } });
+  const a = buildPersonaText(personaFromConfig(on, { ttsVoices: [] }), on);
+  ok(a.indexOf("【表情包】") >= 0, "开：有表情包段");
+  ok(a.indexOf("【立绘（图片）】") >= 0, "开：有立绘段");
+  ok(a.indexOf("【画图】") >= 0, "开：有画图段");
+  ok(a.indexOf("【当前形态】") >= 0, "形态描述始终在（只是哪一形态）");
+  const b = buildPersonaText(personaFromConfig(off, { ttsVoices: [] }), off);
+  ok(b.indexOf("【表情包】") < 0, "关：不写表情包段");
+  ok(b.indexOf("【立绘（图片）】") < 0, "关：不写立绘段");
+  ok(b.indexOf("【画图】") < 0, "关：不写画图段");
+  ok(b.indexOf("只能发文字") >= 0, "全关掉时明说只能发文字");
+  ok(a.indexOf("【画图】") > a.indexOf("【安全底线】"), "这些块都在可变段（稳定段之后）");
+  ok(a.indexOf("什么时候发由你判断") >= 0 || a.indexOf("什么时候画由你判断") >= 0, "要写清是模型自己判断时机");
+});
+
+t("runtime: 立绘开关关掉就不发图（表达层按开关兜底）", async function () {
+  const store = fakeStore();
+  const sentImgs = [];
+  const mk = async function (illustration) {
+    const rt = createRuntime({
+      config: {}, runtime: {
+        observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5,
+        plugins: { illustration: illustration, archify: false },
+        illustrations: { young: "角色形象图/幼年.jpg", adult: "角色形象图/成年.jpg" }
+      },
+      store: store, bot: fakeBot({ action: "brain", tier: "mid", maxChars: 60 }),
+      send: function () {}, sendImage: function (gid, f) { sentImgs.push(f); },
+      askBrain: async function () { return { ok: true, text: "看我。[立绘]", usage: { totalTokens: 3 } }; },
+      now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+    });
+    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "发张立绘看看", now: 0 });
+    return await rt.tick(500);
+  };
+  sentImgs.length = 0;
+  await mk(true);
+  eq(sentImgs.length, 1, "开着就发");
+  ok(/成年\.jpg$/.test(sentImgs[0]), "发的是当前形态那张：" + sentImgs[0]);
+  sentImgs.length = 0;
+  await mk(false);
+  eq(sentImgs.length, 0, "关掉就不发");
+});
 
 t("uimessages: 每群有上限，满了丢最旧；群太多也按时间淘汰", function () {
   const u = createUiMessages({ perGroup: 3, maxGroups: 2 });

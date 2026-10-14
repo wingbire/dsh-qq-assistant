@@ -120,6 +120,7 @@ export function personaFromConfig(cfg, opts) {
     illustrationYoung: p.illustrationYoung || DEFAULT_PERSONA.illustrationYoung,
     illustrationAdult: p.illustrationAdult || DEFAULT_PERSONA.illustrationAdult,
     memeEnabled: (c.plugins ? c.plugins.meme !== false : true) && p.memeFreq !== "关",
+    illustrationEnabled: (c.plugins ? c.plugins.illustration !== false : true),   // 立绘（图片）开关
     voiceEnabled: voiceOn,
     voiceMaxChars: (rt.voice && rt.voice.maxChars) || 60,
     visionEnabled: visionOn
@@ -176,22 +177,30 @@ export function buildPersonaText(persona, cfg) {
   T.push(artStage === "幼年"
     ? "- 你现在的形态是**幼年**：个子小小的，脸圆圆的，笑起来会露牙齿，动作活泼，总爱抬手打招呼。"
     : "- 你现在的形态是**成年**：身量修长，神情大方，长裙及地，会拎起裙摆行个礼。");
-  T.push("- 有人问「你长什么样」「发张立绘」「有照片吗」，或聊天里想露个脸，就在正文末尾写标记：[立绘]。系统会把当前形态的立绘发出去，一条消息最多一次。");
   T.push("");
+  if (p.illustrationEnabled !== false) {
+    T.push("【立绘（图片）】");
+    T.push("- **什么时候发由你判断**：有人问「你长什么样」「发张立绘」「有照片吗」，或聊天里想露个脸，就在正文末尾写标记：[立绘]（想临时换形态写 [立绘: 幼年]）。系统会把当前形态的立绘发出去。");
+    T.push("- 节制：一条消息最多一次；正式解释、对方在求助或难过时不发。");
+    T.push("");
+  }
   if (p.memeEnabled !== false) {
     T.push("【表情包】");
-    T.push("- 想配图时在正文末尾写标记：[表情: 描述]。一条最多 1 张；" + p.memeRate + "。");
+    T.push("- **什么时候发由你判断**：情绪明确（开心 / 无语 / 震惊 / 得意 / 求饶），或文字接不住梗时，在正文末尾写标记：[表情: 描述]（例：[表情: 猫猫无语]）。");
+    T.push("- 节制：" + p.memeRate + "；正式解释、管理指令、对方在求助或难过时不配图；没有合适的图就别写标记。");
     T.push("");
   }
   if (p.voiceEnabled) {
     T.push("【语音】");
-    T.push("- 想用语音说话时，在正文末尾写标记：[语音: 要念的内容]。不超过 " + (p.voiceMaxChars || 60) + " 个字，正式解释别用语音。");
+    T.push("- **什么时候用由你判断**：想让语气活一点、或内容本来就是一句话时，在正文末尾写标记：[语音: 要念的内容]。");
+    T.push("- 节制：不超过 " + (p.voiceMaxChars || 60) + " 个字；正式解释、长内容别用语音（听不清还费时间）。");
     T.push("");
   }
   if (p.archifyEnabled) {
     T.push("【画图】");
-    T.push("- 有人要「画个流程图/架构图/时序图」，或一段话用图讲更清楚时，用 archify 技能：写 candidate.json，再用它的 CLI 渲染成 HTML。");
-    T.push("- 画完在正文末尾写标记：[图表: 那个 HTML 的绝对路径]。系统会自己转成图片发进群，并清理本地文件。一条消息最多一张。");
+    T.push("- **什么时候画由你判断**：有人要「画个流程图 / 架构图 / 时序图」，或一段话用图讲更清楚时，用 archify 技能：写 candidate.json，再用它的 CLI 渲染成 HTML。");
+    T.push("- 画完在正文末尾写标记：[图表: 那个 HTML 的绝对路径]。系统会自己转成图片发进群，并清理本地文件。");
+    T.push("- 节制：一条消息最多一张；只是「好看」别画，对方在等答案也别画。");
     T.push("");
   }
   if (p.visionEnabled) {

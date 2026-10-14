@@ -12,7 +12,7 @@
 ```bash
 git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
-node test/run-tests.mjs       # 先确认环境没问题：应输出 通过 203 项，失败 0 项
+node test/run-tests.mjs       # 先确认环境没问题：应输出 通过 205 项，失败 0 项
 ```
 
 ## 二、装 NapCat（推荐 NapCat.Shell）
