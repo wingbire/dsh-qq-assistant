@@ -88,6 +88,11 @@ flowchart TD
 
 ## 系统架构
 
+![系统架构全景](docs/diagrams/architecture.png)
+
+*上图是拿项目自己的 **archify** 画的（源文件 [architecture.json](docs/diagrams/architecture.json)，改完可重新渲染）。
+下面这张 Mermaid 是**纯文本、可编辑、能 diff** 的版本——两版讲的是同一套结构。*
+
 ```mermaid
 flowchart LR
     subgraph QQ[QQ 侧]
