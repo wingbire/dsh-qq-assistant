@@ -20,6 +20,7 @@ import { createBudget, dayKeyOf } from "../app/src/budget.js";
 import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
 import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
+import { createStt } from "../app/src/stt.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
 import { parseAuditVerdict, auditStub, createAuditor, setAuditChannel, getAuditChannel, audit as runAudit, AUDIT_PROFILE_ID, AUDIT_TIMEOUT_MS } from "../app/src/audit.js";
@@ -1850,7 +1851,7 @@ t("deps: 依赖体检列出必需项并标出缺失", function () {
   const p = createDepsProbe({ run: run, dshCli: null, onebotState: function () { return "closed"; }, hasApiKey: function () { return true; }, requireFn: function () { return {}; }, qqPaths: ["C:/nope/QQ.exe"] });
   const d = p.probe();
   eq(d.ok, true);
-  eq(d.items.length, 9);
+  eq(d.items.length, 11);
   const by = {}; d.items.forEach(function (x) { by[x.id] = x; });
   eq(by.node.ok, true, "当前 Node 版本应满足");
   eq(by.dsh.ok, false, "没给 dsh 路径就是缺");
@@ -2361,6 +2362,62 @@ t("runtime: 识图提前到判定之前（纯图片不再被当无意义文本�
   await rt.tick(3000);
   eq(calls, 1, "同一张图十分钟内只识别一次");
 });
+
+t("stt: 语音转写客户端（探活 / 转写 / 失败降级）", async function () {
+  const calls = [];
+  const fakeFetch = async function (url, opt) {
+    calls.push({ url: String(url), method: (opt && opt.method) || "GET" });
+    if (String(url).indexOf("/health") >= 0) return { ok: true, status: 200, json: async function () { return { ok: true, model: "tiny", device: "cpu" }; } };
+    return { ok: true, status: 200, json: async function () { return { text: " 明天晚上八点开黑 ", ms: 12 }; } };
+  };
+  const s = createStt({ config: { enabled: true, endpoint: "http://127.0.0.1:8910/v1/audio/transcriptions" }, fetch: fakeFetch });
+  eq(s.enabled(), true);
+  const p = await s.probe();
+  eq(p.ok, true); eq(p.model, "tiny");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-stt-"));
+  const f = path.join(dir, "v.amr");
+  fs.writeFileSync(f, Buffer.from("amr"));
+  const r = await s.transcribe(f);
+  eq(r.ok, true);
+  eq(r.text, "明天晚上八点开黑", "首尾空格要去掉");
+  eq(calls.filter(function (c) { return c.method === "POST"; }).length, 1, "转写走一次 POST");
+  const off = createStt({ config: { enabled: false }, fetch: fakeFetch });
+  eq((await off.transcribe(f)).ok, false, "没启用就不转");
+  const bad = createStt({ config: { enabled: true, endpoint: "http://x/y" }, fetch: async function () { return { ok: false, status: 503, json: async function () { return {}; } }; } });
+  const r3 = await bad.transcribe(f);
+  eq(r3.ok, false);
+  ok(String(r3.error).indexOf("503") >= 0, "失败要说清楚：" + r3.error);
+  const missing = await s.transcribe(path.join(dir, "nope.amr"));
+  eq(missing.ok, false);
+  ok(String(missing.error).indexOf("读不到音频") >= 0, "文件没了也要说清楚");
+});
+
+t("runtime: 语音走本机 STT，转写拼进正文并参与本地一判", async function () {
+  const seen = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-voice-"));
+  const voiceFile = path.join(dir, "v.amr");
+  fs.writeFileSync(voiceFile, Buffer.from("amr"));
+  let sttCalls = 0;
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function () {} },
+    stt: { enabled: function () { return true; }, probe: async function () { return { ok: true }; },
+      transcribe: async function (p) { sttCalls += 1; return { ok: true, text: "明天晚上八点开黑", ms: 9, bytes: 3 }; } },
+    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "local_short", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
+    send: function () {}, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[语音]", hasVoice: true, voiceRef: { path: voiceFile, file: voiceFile, url: "http://x/a.amr" }, now: 0 });
+  await rt.tick(500);
+  const j = seen.filter(function (x) { return x.kind === "judge"; })[0];
+  ok(j && j.text.indexOf("明天晚上八点开黑") >= 0, "本地判定看到的是转写后的正文：" + (j && j.text));
+  ok(j && j.text.indexOf("[语音] 转写：") === 0, "标签和官方转写保持同一种格式：" + (j && j.text));
+  eq(rt.stats().sttOk, 1, "记了转写成功");
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[语音]", hasVoice: true, voiceRef: { path: voiceFile, file: voiceFile, url: "http://x/a.amr" }, now: 2000 });
+  await rt.tick(3000);
+  eq(sttCalls, 1, "同一段音频十分钟内只转写一次");
+  eq(rt.stats().sttCached, 1);
+});
+
 
 t("prompt: 装配顺序按缓存优先级（专属人设/画像 → 兴趣词条 → 本轮任务 → 上下文）", async function () {
   const prof = { rounds: 3, interests: ["打游戏", "做视频"], dislikes: ["政治"], habits: "短句", notes: "爱用梗", pace: "快", activeHours: "20-23", personaText: "别叫我助手" };

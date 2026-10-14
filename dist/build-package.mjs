@@ -19,6 +19,7 @@ export const WHITELIST = [
   { from: "launcher" },
   { from: "dsh-preset" },
   { from: "test/run-tests.mjs" },
+  { from: "tools/stt-server.py" },
   { from: "demo/mock-dsh-cli.mjs" },
   { from: "demo/run-onebot-mock.mjs" },
   { from: "demo/run-learning-demo.mjs" },

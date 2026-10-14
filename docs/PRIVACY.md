@@ -75,3 +75,6 @@ flowchart LR
 | 只是学习成果 | `app/dsh-data/data/` |
 | 只清某个群 | `app/dsh-data/data/profiles/g-<群号>.json` + 从 observe.jsonl 里过滤掉该 `gid` |
 | 语音/图片缓存 | `app/dsh-data/data/voice/` `app/dsh-data/data/brain/images/` |
+
+- 语音转写（可选）：音频**只在你的机器上**处理（tools/stt-server.py 只监听 127.0.0.1，ffmpeg 本地转码）；
+  只有你显式把 `runtime.stt.endpoint` 指到外部服务时音频才会外发；本程序默认不是那样。

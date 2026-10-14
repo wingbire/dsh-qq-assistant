@@ -114,6 +114,47 @@ export function createDepsProbe(opts) {
     sapiCache = isNaN(n) ? 0 : n;
     return sapiCache;
   }
+  // winget 装完只对**新开的 shell** 生效，所以 where 找不到时再按安装目录找一遍
+  function findFfmpeg() {
+    const w = which("ffmpeg");
+    if (w) return w;
+    if (o.run) return null;             // 注入了 run（测试）就只信它，别去扫真实磁盘，免得结果跟机器相关
+    try {
+      const home = env.LOCALAPPDATA || env.USERPROFILE || "";
+      const base = path.join(home, "Microsoft", "WinGet", "Packages");
+      let names = [];
+      try { names = fs.readdirSync(base); } catch (e) { return null; }
+      for (const n of names) {
+        if (!/ffmpeg/i.test(n)) continue;
+        const stack = [path.join(base, n)];
+        while (stack.length) {
+          const dir = stack.pop();
+          let subs = [];
+          try { subs = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { continue; }
+          for (const s of subs) {
+            const p = path.join(dir, s.name);
+            if (s.isDirectory()) stack.push(p);
+            else if (s.name.toLowerCase() === "ffmpeg.exe") return p;
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+  // STT 侧车在不在：直接看端口有没有人在听（netstat 是同步的，比异步探活省事）
+  function portListening(port) {
+    if (!port) return false;
+    const r = run(["netstat", "-ano"], {});
+    const out = String((r && r.stdout) || "");
+    return new RegExp("[:.]" + port + "\\s").test(out);
+  }
+  let whisperCache = null;
+  function hasWhisper() {
+    if (whisperCache != null) return whisperCache;
+    const r = run(["python", "-c", "import faster_whisper"], {});
+    whisperCache = !!(r && r.status === 0);
+    return whisperCache;
+  }
   function findQq() {
     const cands = ["E:\\qq\\QQ.exe", "D:\\qq\\QQ.exe", "C:\\Program Files\\Tencent\\QQNT\\QQ.exe"];
     if (o.qqPaths) cands.unshift.apply(cands, o.qqPaths);
@@ -128,7 +169,14 @@ export function createDepsProbe(opts) {
     const napcatState = o.onebotState ? o.onebotState() : "unknown";
     const hasKey = o.hasApiKey ? o.hasApiKey() : false;
     const qq = findQq();
-    const ff = which("ffmpeg");
+    const ff = findFfmpeg();
+    const sttPort = (function () {
+      try { const u = new URL(o.sttEndpoint || "http://127.0.0.1:8910/v1/audio/transcriptions"); return parseInt(u.port || "80", 10); }
+      catch (e) { return 8910; }
+    })();
+    const sttOn = !!o.sttEnabled;
+    const sttOk = portListening(sttPort);
+    const whisper = hasWhisper();
     const sq = o.sqliteSupported ? o.sqliteSupported() : true;
     const gv = (() => { const r = run(["git", "--version"], {}); return out(r); })();
 
@@ -152,8 +200,14 @@ export function createDepsProbe(opts) {
         detail: sapiVoices() > 0 ? "系统自带 SAPI，离线合成语音（语音功能要用）" : "没检测到可用音色",
         fix: { kind: "manual", value: "Windows 设置 → 时间和语言 → 语音 → 添加语音包", note: "装上中文语音包即可" } },
       { id: "ffmpeg", name: "ffmpeg", required: false, ok: !!ff, version: ff || null,
-        detail: ff ? "NapCat 发语音/转码时可能用到" : "没装——发语音若失败就装它",
+        detail: ff ? "语音转码（QQ 语音是 amr，转写前要先转码）" : "没装——语音转文字要用它",
         fix: { kind: "winget", value: "Gyan.FFmpeg", note: "点一下后台用 winget 装" } },
+      { id: "whisper", name: "faster-whisper（本机语音识别）", required: false, ok: whisper, version: whisper ? "已安装" : null,
+        detail: whisper ? "本机转写引擎（模型另存，首次用会下载）" : "没装：python -m pip install faster-whisper",
+        fix: { kind: "manual", value: "python -m pip install faster-whisper", note: "装完再起 STT 侧车" } },
+      { id: "sttserver", name: "语音转写服务（STT 侧车）", required: false, ok: sttOk, version: sttOk ? "127.0.0.1:" + sttPort : null,
+        detail: sttOk ? (sttOn ? "已就绪，配置里也开着" : "在跑——去配置端打开「语音转写」就生效") : (sttOn ? "配置开了，但服务没在跑" : "未启用（不影响其它功能）"),
+        fix: { kind: "manual", value: "python tools/stt-server.py --model small", note: "本机转写，音频不出本机" } },
       { id: "sqlite", name: "node:sqlite", required: false, ok: !!sq, version: sq ? "可用" : null,
         detail: sq ? "读表情包图库的索引（index.db）要用" : "不可用——图库会退回按目录名扫",
         fix: { kind: "manual", value: "升级 Node 到 22.5+", note: "随 Node 自带" } },

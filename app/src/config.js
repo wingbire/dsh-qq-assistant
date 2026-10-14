@@ -166,6 +166,14 @@ export function runtimeConfig(cfg) {
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
     maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 3,                    // N6
     uiMessageLimit: numOf(getPath(c, "runtime.uiMessageLimit"), 30),   // 配置端"收到的消息"每群保留多少条（满了丢最旧）
+    // 语音转写侧车（tools/stt-server.py，OpenAI 兼容；默认端点就是本机，音频不出本机）
+    stt: {
+      enabled: getPath(c, "runtime.stt.enabled") === true,
+      endpoint: getPath(c, "runtime.stt.endpoint") || "http://127.0.0.1:8910/v1/audio/transcriptions",
+      timeoutMs: numOf(getPath(c, "runtime.stt.timeoutMs"), 30000),
+      maxBytes: numOf(getPath(c, "runtime.stt.maxBytes"), 8 * 1024 * 1024),
+      lang: getPath(c, "runtime.stt.lang") || "zh"
+    },
     quoteReply: getPath(c, "runtime.quoteReply") || "自动",            // 引用回复：关 / 自动 / 仅标记
     poke: getPath(c, "runtime.poke") || "短答",                        // 被戳：关 / 短答
     pokeBackRate: numOf(getPath(c, "runtime.pokeBackRate"), 0.35),     // 回戳概率

@@ -13,6 +13,7 @@ import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA } from "./src/vision.js";
+import { createStt } from "./src/stt.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
 import { visionCapability } from "./src/vision.js";
 import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from "./src/paths.js";
@@ -263,15 +264,24 @@ const vision = createVision({
   }
 });
 // N18 语音：TTS 走 Windows 自带 SAPI（离线、零依赖）
+const stt = createStt({ config: rc.stt });          // 语音转写：本机 STT 侧车（tools/stt-server.py）
 const tts = createTts({ config: Object.assign({}, rc.voice, { enabled: rc.voice.enabled && voiceCap.capable }), outDir: path.join(DATA_ROOT, "voice") });
 log("识图：" + (rc.vision.enabled ? rc.vision.mode + " / " + rc.vision.model : "关闭") + "；语音：" + (rc.voice.enabled ? rc.voice.voice : "关闭"));
+if (rc.stt && rc.stt.enabled) {
+  stt.probe().then(function (p) {
+    log("听语音：本机 STT " + (p && p.ok ? "已就绪（模型 " + (p.model || "?") + " / " + (p.device || "?") + "）" : "连不上（" + ((p && p.error) || "?") + "）→ 语音会诚实说听不了"));
+  });
+} else {
+  log("听语音：未启用（NapCat 不上报 QQ 官方转写；要听懂语音就起 tools/stt-server.py 再在配置端打开）");
+}
 log("能力声明 · 看图：" + (visionCap.enabled ? (visionCap.capable ? "会写进人设（" + visionCap.source + "）" : "不写进人设（" + visionCap.source + "：" + visionCap.note + "）") : "关闭")
   + "　发音：" + (voiceCap.enabled ? (voiceCap.capable ? "会写进人设（" + voiceCap.source + "：" + voiceCap.note + "）" : "不写进人设（" + voiceCap.source + "：" + voiceCap.note + "）") : "关闭")
   + "　听语音：有 QQ 官方转写就读，没有就说听不了");
 log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入口）");
 
 const runtime = createRuntime({
-  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts,
+  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt,
+  voiceDir: path.join(BRAIN_TMP_DIR, "voice"),
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },
   sendImage: function (gid, file) { log("→图 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupImage(gid, file) : false; },

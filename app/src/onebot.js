@@ -122,6 +122,7 @@ export function normalizeEvent(raw, ctx) {
   let hasRich = false;
   let hasVoice = false;
   let voiceText = "";
+  let voiceRef = null;
   const voiceKeys = [];
   for (const s of segs) {
     if (!s || typeof s !== "object") continue;
@@ -130,6 +131,7 @@ export function normalizeEvent(raw, ctx) {
       hasRich = true; hasVoice = true;
       const d0 = s.data || {};
       for (const k of Object.keys(d0)) if (voiceKeys.indexOf(k) < 0) voiceKeys.push(k);
+      if (!voiceRef) voiceRef = { file: String(d0.file || ""), path: String(d0.path || ""), url: String(d0.url || "") };
       if (!voiceText) voiceText = decodeCqText(d0.text || d0.transcription || d0.summary || "");
     }
     else if (s.type === "video" || s.type === "face" || s.type === "file") hasRich = true;
@@ -174,8 +176,11 @@ export function normalizeEvent(raw, ctx) {
     hasImage: images.length > 0,
     hasVoice: hasVoice,
     voiceText: voiceText || null,          // QQ 官方转写（有就有，没有就是 null）
+    voiceRef: voiceRef,                    // 音频引用（file/path/url）：官方没转写时用它去本机 STT
     voiceKeys: voiceKeys,                  // 只记字段名（不落内容），用来确认 NapCat 到底给不给转写
-    voiceShape: voiceKeys.length ? maskCqShape(raw.raw_message || "") : null,   // 脱敏后的 CQ 形状
+    voiceShape: hasVoice ? maskCqShape(raw.raw_message || "") : null,           // 脱敏后的 CQ 形状（只留字段名）
+    voiceTopKeys: hasVoice ? Object.keys(raw).join(",") : null,                 // 事件顶层字段名（不含值）
+    voiceSegShape: hasVoice ? segs.map(function (s2) { return s2.type + "{" + Object.keys(s2.data || {}).join(",") + "}"; }).join("|") : null,
     now: c.now != null ? c.now : Date.now()
   };
 }

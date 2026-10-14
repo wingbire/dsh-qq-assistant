@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { localReply, createLocalReplies } from "./localreply.js";
 import { createUiMessages } from "./uimessages.js";
+import { createStt, resolveLocalAudio, downloadAudio } from "./stt.js";
 import { depthPolicy, buildTaskText } from "./brain.js";
 import { parseMeme } from "./audit.js";
 import { injectSummary } from "./search.js";
@@ -105,6 +106,8 @@ export function createRuntime(deps) {
   const sendPoke = d.sendPoke || null;        // (gid, uid) => {ok} ：回戳
   const pokeSeen = new Map();                 // "gid:uid" -> 上次反应时间（限流，内存态够用）
   const visionCache = new Map();              // 图片 file/url -> {at,text}：同一张图十分钟内只识别一次
+  const voiceCache = new Map();               // 音频 file/url -> {at,text}：同一段语音十分钟内只转写一次
+  const stt = d.stt || createStt({ config: rc.stt, fetch: d.fetch });
   const brakes = d.brakes || createBrakes({ config: cfg, now: now, file: d.brakesFile || (store && store.paths ? store.paths.brakes : null) });
   // 指令注册表要拿到真的 brakes / budget，所以必须在这两行之后建
   const commands = d.commands || createDefaultCommands({ brakes: brakes, budget: budget, now: now, stopMinutes: rc.stopMinutes || 60 });
@@ -123,7 +126,7 @@ export function createRuntime(deps) {
     });
   }
 
-  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0 };
+  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0, sttCalls: 0, sttOk: 0, sttFail: 0, sttCached: 0 };
   let busy = false;
 
   function observe(rec) {
@@ -252,6 +255,32 @@ export function createRuntime(deps) {
     const who = String(from || "").trim();
     return "[引用" + (who ? " " + who : "") + "：" + q.slice(0, 200) + "]" + (text ? " " + text : "");
   }
+  // 语音：官方转写拿不到（实测 NapCat 不上报）→ 自己送本机 STT；转写结果拼进正文，
+  // 于是它跟识图描述一样参与**本地一判**、进大脑、也进配置端消息表。
+  async function transcribeVoice(evt) {
+    if (!stt || !stt.enabled()) return { ok: false, error: "语音转写未启用" };
+    const ref = evt.voiceRef || {};
+    const key = String(ref.path || ref.file || ref.url || "");
+    if (key) {
+      const hit = voiceCache.get(key);
+      if (hit && Date.now() - hit.at < 10 * 60 * 1000) { stats.sttCached += 1; return { ok: true, text: hit.text, cached: true }; }
+    }
+    let local = await resolveLocalAudio(ref, { maxBytes: (rc.stt && rc.stt.maxBytes) || undefined });
+    if (!local.ok && local.needDownload && local.url) local = await downloadAudio(local.url, imageDir || null, { fetch: d.fetch, maxBytes: (rc.stt && rc.stt.maxBytes) || undefined });
+    if (!local.ok) { stats.sttFail += 1; observe({ kind: "stt_fail", gid: evt.gid, uid: evt.uid, error: local.error || "音频拿不到" }); return { ok: false, error: local.error }; }
+    stats.sttCalls += 1;
+    const r = await stt.transcribe(local.path);
+    if (r.ok) {
+      stats.sttOk += 1;
+      if (key) { voiceCache.set(key, { at: Date.now(), text: r.text }); if (voiceCache.size > 100) { const k = voiceCache.keys().next().value; voiceCache.delete(k); } }
+      observe({ kind: "stt_ok", gid: evt.gid, uid: evt.uid, ms: r.ms, chars: r.text.length, bytes: r.bytes });
+      return r;
+    }
+    stats.sttFail += 1;
+    observe({ kind: "stt_fail", gid: evt.gid, uid: evt.uid, error: r.error });
+    return r;
+  }
+
   function groupInterests(gid) {
     if (!store || typeof store.loadProfile !== "function") return [];
     const p = store.loadProfile(gid);
@@ -428,7 +457,11 @@ export function createRuntime(deps) {
     if (evt.hasVoice) {
       stats.voices += 1;
       if (evt.voiceText) stats.voicesTranscribed += 1;
-      observe({ kind: "voice_seen", gid: evt.gid, uid: evt.uid, hasText: !!evt.voiceText, keys: evt.voiceKeys || [], shape: evt.voiceShape || null });
+      observe({
+        kind: "voice_seen", gid: evt.gid, uid: evt.uid, hasText: !!evt.voiceText,
+        keys: evt.voiceKeys || [], shape: evt.voiceShape || null,
+        topKeys: evt.voiceTopKeys || null, segShape: evt.voiceSegShape || null
+      });
     }
     const gs = gstat(evt.gid);
     gs.messages += 1;
@@ -503,6 +536,17 @@ export function createRuntime(deps) {
         const desc = await describeImages({ gid: batch.gid, evts: [evt] });
         if (desc.length) { evt.visionText = desc.join(" / "); evt.text = injectVision(evt.text, desc); }
         else evt.visionText = null;
+      }
+      // 语音：官方没转写就用本机 STT 转一次，拼进正文（跟识图同一条路子）
+      if (evt.hasVoice && !evt.voiceText && stt && stt.enabled()) {
+        const tr = await transcribeVoice(evt);
+        if (tr && tr.ok) {
+          evt.voiceText = tr.text;
+          const base = String(evt.text || "").trim();
+          evt.text = (base === "" || base === "[语音]")
+            ? "[语音] 转写：" + tr.text
+            : base + " [语音转写：" + tr.text + "]";
+        }
       }
       const dec = await bot.handleEvent(evt);
       decisions.push(Object.assign({}, dec, { evt: evt }));

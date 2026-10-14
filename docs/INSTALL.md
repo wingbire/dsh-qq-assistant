@@ -99,3 +99,19 @@ node dist/build-package.mjs
 | 一条都回不了 | 设置页 → 依赖体检：DSH 找得到吗？Key 配了吗？ |
 | 语音发不出去 | 装 ffmpeg；或者先用 `/说 测试` 让管理员试一次 |
 | 想全部停掉 | 安装目录放一个 `STOP` 文件（三路刹车之一） |
+
+### 语音转文字（可选：听懂群里的语音）
+
+QQ 语音在 NapCat 事件里只有文件路径/URL（实测字段 `file/path/url/file_size`，**不含** QQ 官方转写），
+所以想听懂语音得在本机自己转。三步：
+
+1. 装 ffmpeg（QQ 语音是 amr，转写前要转码）
+   `winget install Gyan.FFmpeg`
+2. 装识别引擎
+   `python -m pip install faster-whisper`
+3. 起侧车（只监听 127.0.0.1，**音频不出本机**）
+   `python tools/stt-server.py --model small`
+   （首次会下模型；国内先 `set HF_ENDPOINT=https://hf-mirror.com` 和 `set HF_HUB_DISABLE_XET=1` 更顺）
+
+然后在配置端打开 **语音转写**（`runtime.stt.enabled`）。设置页 →「拓展依赖」会自动体检这三项。
+模型：`tiny` 最快最糙、`small` 默认够用、`medium/large-v3` 更准（要 GPU 得另装 cuBLAS/cuDNN；缺了会自动退回 CPU）。

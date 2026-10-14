@@ -371,6 +371,32 @@
           "说明": "0 = 不限（默认）。>0 时每群每小时最多发这么多条，超出静默丢弃（含主动搭话）"
         },
         {
+          "键": "runtime.stt.enabled",
+          "标签": "语音转写（本机 STT）",
+          "类型": "bool",
+          "默认": false,
+          "说明": "打开后会把群里的语音送本机 STT 侧车转成文字，像识图描述一样参与判定。装法见 INSTALL：ffmpeg + pip install faster-whisper + python tools/stt-server.py（音频不出本机）"
+        },
+        {
+          "键": "runtime.stt.endpoint",
+          "标签": "STT 接口地址",
+          "类型": "string",
+          "默认": "http://127.0.0.1:8910/v1/audio/transcriptions",
+          "说明": "OpenAI 兼容的 /v1/audio/transcriptions；默认就是本机侧车"
+        },
+        {
+          "键": "runtime.stt.lang",
+          "标签": "STT 语言",
+          "类型": "string",
+          "默认": "zh"
+        },
+        {
+          "键": "runtime.stt.timeoutMs",
+          "标签": "STT 超时",
+          "类型": "int",
+          "默认": 30000
+        },
+        {
           "键": "runtime.quoteReply",
           "标签": "引用回复",
           "类型": "enum",
