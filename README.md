@@ -202,7 +202,7 @@ launcher/DSHQQTray.exe
 
 | 插件 | 接哪条通道 | 不装会怎样 |
 |---|---|---|
-| [Our Free Model](https://www.npmjs.com/package/dsh-our-free-model) | **二判通道** / **大脑通道** | 二判走官方模型 |
+| [Our Free Model](https://www.npmjs.com/package/dsh-our-free-model) | **外审复核** / **大脑通道** | 外审走官方模型 |
 | [dsh-free-search](https://github.com/DDDMUC/dsh-free-search) | **搜索通道**（24 引擎可切） | 退回内置直搜（Bing/DDG，零依赖） |
 | [archify](https://github.com/tt-a1i/archify) | **图表绘制** | 不能画流程图/架构图 |
 | dsh-meme | **表情包图库** | 不配图 |

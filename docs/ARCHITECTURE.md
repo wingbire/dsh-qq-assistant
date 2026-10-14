@@ -26,7 +26,7 @@ app/main.js
   ├─ src/napcat.js        NapCat 对接：读它的 onebot11 配置，自动对齐地址与令牌（只在进程内）
   ├─ src/runtime.js       运行时：合并 → 判定 → 阶段机 → 刹车 → 预算 → 表达 → 反馈
   ├─ src/classify.js      判定中枢：六因子 → p_say
-  ├─ src/audit.js         二判通道（独立 profile）
+  ├─ src/audit.js         外审复核通道（独立 profile，是 / 短 / 否）
   ├─ src/search.js        搜索通道（可切社区插件）
   ├─ src/brain.js         大脑调用与 profile 生成
   ├─ src/webui.js+webui/  配置端（9 页，原生 HTML/CSS/JS）
