@@ -37,3 +37,6 @@ docs/diagrams/*.html
 # B站宣传视频制作说明（本地文档，不上传）
 B站宣传视频制作说明.md
 视频制作/
+
+# 与 AI 结对开发文档（本地，不上传）
+WORKING-WITH-AI.md
