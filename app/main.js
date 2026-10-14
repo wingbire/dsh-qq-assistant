@@ -142,7 +142,8 @@ log("判定阈值：开口线 " + rc.gates.bounds.lo + " / 灰区上界 " + rc.g
 const store = createStore(path.join(DATA_ROOT, "data"));
 const bot = createBot({
   dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName],
-  bounds: rc.gates.bounds, tiers: rc.gates.tiers, utilityWeights: rc.gates.weights   // 判定阈值现在真的生效
+  bounds: rc.gates.bounds, tiers: rc.gates.tiers, utilityWeights: rc.gates.weights,  // 判定阈值现在真的生效
+  rescueAsk: rc.gates.rescueAsk, blockInjected: rc.gates.blockInjected, audit: rc.audit
 });
 const cli = resolveDshCli();
 const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg) });
@@ -185,7 +186,7 @@ reconnectOnebot(cfg);
 // N11 外审通道：独立 qq-audit profile，超时 → 不确定
 // 走官方模型时 8 秒够用；走 Our Free Model 的免费池要放宽（实测约 13 秒），所以做成可配
 const auditor = createAuditor({
-  timeoutMs: rc.auditTimeoutMs || 8000,
+  timeoutMs: (rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 8000,
   rubric: loadRubric(),
   runner: async function (req) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };

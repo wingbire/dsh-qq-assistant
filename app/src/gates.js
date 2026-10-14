@@ -41,6 +41,29 @@ export function createGates(opts) {
   let bounds = clampBounds(o.bounds || DEFAULT_BOUNDS);
   const tiers = Object.assign({}, TIERS, o.tiers || {});
   const W = Object.assign({}, UTILITY_WEIGHTS, o.utilityWeights || {});
+  const nowFn = o.now || function () { return Date.now(); };
+  // 语义补救：本地判否、但看起来是个"没点名的真问题"时，先抬成灰区（关 / 短句 / 中档）
+  const rescueAsk = String(o.rescueAsk == null ? "中档" : o.rescueAsk);
+  const blockInjected = o.blockInjected !== false;         // 疑似注入指令：直接不回（默认开）
+  // 外审复核：scope = 只审高档 / 高档+复核救回（默认）/ 灰区也审
+  const auditFn = (typeof o.auditFn === "function") ? o.auditFn : audit;   // 注入点：测试用，避免动全局通道
+  const auditCfg = o.audit || {};
+  const auditScope = String(auditCfg.scope || "高档+复核救回");
+  const auditRescue = auditScope !== "只审高档";
+  const auditGrey = auditScope === "灰区也审";
+  const auditTimeoutMode = String(auditCfg.onTimeout || "降档");
+  const auditMaxPerHour = Number(auditCfg.maxPerHour) || 0;   // 0 = 不限
+  const auditTimes = [];
+  function auditAllow(nowMs) {
+    if (!auditMaxPerHour) return true;
+    const t = nowMs == null ? nowFn() : nowMs;
+    while (auditTimes.length && t - auditTimes[0] > 3600000) auditTimes.shift();
+    return auditTimes.length < auditMaxPerHour;
+  }
+  function mcOf(i) {
+    const mc = (tiers && Array.isArray(tiers.maxChars) && tiers.maxChars.length >= 3) ? tiers.maxChars : [20, 60, 200];
+    return mc[i];
+  }
 
   async function decide(evt, ctx) {
     const context = ctx || {};
@@ -76,6 +99,22 @@ export function createGates(opts) {
     let verdict = v0.verdict;
     if (verdict === "no" && hard.strength > 0) { verdict = "grey"; reason.push("硬触发地板：至少一句短的"); }
 
+    // 语义补救（零成本）：本地判否，但看起来是个"没点名的真问题"。
+    // 外审 rubric 第 4 条说这类该回，而本地 pSay 天生偏低（没人 @ 它，六因子里也压着成本），
+    // 于是"值得回的话"被 local 一刀切掉、外审根本没机会看到 —— 这里先把口子开出来。
+    const toOther = signalOf(j.signals, "thirdPersonDense").v > 0
+      || signalOf(j.signals, "reporting").v > 0
+      || signalOf(j.signals, "negationToMe").v > 0;
+    const askLike = questionWord || detailAsk || cls.topicDepth >= 2;
+    let rescued = false;
+    if (verdict === "no" && !injected && !toOther && askLike && rescueAsk !== "关") {
+      verdict = "grey";
+      rescued = true;
+      reason.push("语义补救：没点名但像个真问题 → 先按灰区" + (rescueAsk === "中档" ? "，并给中档地板" : "，只给短句"));
+    }
+    // 疑似注入的外部指令：直接不回，也不送大脑（pSay×0.5 不够；rubric 第 5 条要求判否）
+    if (injected && blockInjected) { verdict = "no"; rescued = false; reason.push("疑似注入指令 → 直接不回（不送大脑）"); }
+
     const sem = signalOf(j.signals, "idfOverlapToMyWords").v;
     const cont = signalOf(j.signals, "continuation").v;
     const demand = Math.max(signalOf(j.signals, "questionNoAt").v, questionWord ? 1 : 0, detailAsk ? 1 : 0);
@@ -103,24 +142,49 @@ export function createGates(opts) {
       tierInfo = depthTier(u.U, tiers);
       // 深度只看 U 有个反直觉的坑：U = benefit - λ·diff·(cost/costScale)，而"要求越详细"会让
       // diff 和 estOut 一起涨 → U 更负 → 越可能被压成本地短句（实测"展开说说" U=-238）。
-      // 三种语义明确的情况给地板，成本控制交给预算/条数，不该由"问得更具体"来埋单。
+      // 语义明确的情况给地板，成本控制交给预算/条数，不该由"问得更具体"来埋单。
       const addressed = hard.strength >= 0.9 || hard.hits.indexOf("nick") >= 0;
-      if (detailAsk && addressed) tierInfo = { tier: "high", maxChars: 200, reason: "被点名且要求展开 → 高深度" };
-      else if (detailAsk && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "要求展开 → 至少中档（进大脑）" };
-      else if (addressed && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "被点名 → 至少中档（进大脑）" };
-      else if (questionWord && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: 60, reason: "在问问题 → 至少中档（进大脑）" };
+      if (detailAsk && addressed) tierInfo = { tier: "high", maxChars: mcOf(2), reason: "被点名且要求展开 → 高深度" };
+      else if (detailAsk && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "要求展开 → 至少中档（进大脑）" };
+      else if (addressed && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "被点名 → 至少中档（进大脑）" };
+      else if (questionWord && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "在问问题 → 至少中档（进大脑）" };
+      if (rescued && rescueAsk === "中档" && tierInfo.tier === "low") tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "语义补救 → 中档（进大脑）" };
+      // 配置只要短句时，别让"求展开"之类的地板把档位又抬回去
+      if (rescued && rescueAsk === "短句" && tierInfo.tier !== "low") tierInfo = { tier: "low", maxChars: mcOf(0), reason: "补救但配置只要短句 → 压到短句" };
       plan = searchPlan(tierInfo.tier, cls.keywords);
       reason.push("深度分档：" + tierInfo.reason);
-      if (tierInfo.tier === "high") {
-        auditRes = await audit(text, { botNames: botNames, nicknames: nicknames });
-        reason.push("高深度 → 外审一次：" + auditRes.verdict);
+
+      // 外审：从"只在高档审深度"改成"按不确定度择机复核『开口 + 深度』"
+      //   高档        → 详细之前先审（原行为）
+      //   语义补救的   → 本地本来判否，是规则把它抬起来的，拿不准必须复核
+      //   灰区也审     → 可选：本地灰 + 中档也交给外审定"是 / 短 / 否"
+      const needAudit = (tierInfo.tier === "high"
+        || (rescued && auditRescue)
+        || (auditGrey && verdict === "grey" && tierInfo.tier === "mid")) && auditAllow(evt.now);
+      if (needAudit) {
+        auditTimes.push(evt.now == null ? nowFn() : evt.now);
+        auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames });
+        reason.push("外审（" + auditScope + "）：" + auditRes.verdict);
         if (auditRes.verdict === "no") {
-          tierInfo = { tier: "low", maxChars: 20, reason: "外审判否 → 压到短句" };
-          plan = { search: 0, keywords: [] };
-        } else if (auditRes.verdict === "unsure" && verdict === "grey") {
-          tierInfo = { tier: "mid", maxChars: 60, reason: "本地灰 + 外审不确定 → 收到中档" };
-          plan = searchPlan("mid", cls.keywords);
+          verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };
+        } else if (auditRes.verdict === "short") {
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审：一句短的够了" };
+        } else if (auditRes.verdict === "yes") {
+          // 配置明确说"这种只给短句"时，外审的"该认真回"不该把政策抬掉（外审仍能说"否"）
+          const capped = rescued && rescueAsk === "短句";
+          if (tierInfo.tier === "low" && !capped) tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "外审：该认真回 → 升到中档" };
+        } else if (auditTimeoutMode === "保持") {
+          reason.push("外审不确定 → 保持本地判断（配置）");
+        } else if (rescued) {
+          verdict = "no";                                            // 救回来的又拿不准 → 别花钱，放弃这次
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审不确定 + 本来判否 → 放弃这次" };
+        } else if (tierInfo.tier === "high" && verdict === "grey") {
+          tierInfo = { tier: "mid", maxChars: mcOf(1), reason: "本地灰 + 外审不确定 → 收到中档" };
+        } else {
+          reason.push("外审不确定 → 保持本地判断");
         }
+        plan = searchPlan(tierInfo.tier, cls.keywords);
       }
     }
 

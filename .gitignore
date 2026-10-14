@@ -30,3 +30,6 @@ vendor/
 app/dsh-home/skills/
 app/dsh-home/profiles/*/node_modules/
 app/dsh-home/profiles/*/pnpm-lock.yaml
+
+# archify 渲染出的交互 HTML（大文件，源在 docs/diagrams/*.json）
+docs/diagrams/*.html

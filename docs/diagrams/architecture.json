@@ -55,7 +55,7 @@
       "id": "gate",
       "type": "security",
       "label": "判定中枢",
-      "sublabel": "六因子 → p_say",
+      "sublabel": "p_say 管回不回 · U 管多深",
       "pos": [
         370,
         300
@@ -158,7 +158,7 @@
       "id": "audit",
       "type": "backend",
       "label": "qq-audit",
-      "sublabel": "二判 8s→不确定",
+      "sublabel": "复核 是 / 短 / 否",
       "pos": [
         960,
         240
@@ -349,7 +349,7 @@
       "id": "gate-audit",
       "from": "gate",
       "to": "audit",
-      "label": "灰区 → 二判"
+      "label": "高档 / 补救 → 复核"
     },
     {
       "id": "runtime-search",
@@ -393,7 +393,8 @@
       "title": "左边一半不花钱",
       "items": [
         "硬触发 → 合并 → 六因子 → 三阈值",
-        "低于开口线：一个字都不发"
+        "低于开口线：一个字都不发",
+        "点名 / 求详 / 问句 → 至少中档"
       ]
     },
     {
@@ -401,7 +402,7 @@
       "title": "只有确定要回才动模型",
       "items": [
         "人设常驻 personaPrefix，前缀缓存 94~96%",
-        "二判 8 秒超时 → 不确定"
+        "外审复核：是 / 短 / 否（8 秒超时 → 不确定）"
       ]
     },
     {

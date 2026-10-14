@@ -255,6 +255,7 @@ export function createRuntime(deps) {
     const segs = splitReply(clean, p.maxChars || 20, { maxSegments: 1 }).filter(Boolean);
     if (!segs.length) return null;
     for (const s of segs) send(batch.gid, s);
+    budget.countGroup(batch.gid, atMs);                         // 主动搭话也算这个群的一次发言
     stats.proactiveSpoken += 1;
     stats.replies += 1;
     observe({ kind: "proactive_sent", gid: batch.gid, reason: p.reason, keywords: p.keywords, text: segs.join("") });
@@ -486,6 +487,13 @@ export function createRuntime(deps) {
       return { gid: batch.gid, action: "semi_skip", stage: STAGE_SEMI, merged: batch.count };
     }
 
+    // 每群每小时条数上限（N23 的 groupHourlyLimit）：默认 0 = 关闭，配了才生效。
+    // 注意这两个函数以前只在 budget.js 里定义、没人调用 —— 配了也不管用。
+    if (!budget.groupAllow(batch.gid, at)) {
+      observe({ kind: "group_limit", gid: batch.gid, uid: batch.uid, limit: rc.budget.groupHourlyLimit });
+      return { gid: batch.gid, action: "group_limit", limit: rc.budget.groupHourlyLimit };
+    }
+
     let text = "";
     let usage = null;
     let searchInfo = null;
@@ -543,6 +551,7 @@ export function createRuntime(deps) {
       stats.segments += 1;
       if (i < segments.length - 1 && sendGapMs > 0) await sleep(sendGapMs);
     }
+    if (sent.length) budget.countGroup(evt.gid, at);            // 记一次"这个群这一小时发过了"
     // N18：语音（默认关闭）—— 有标记才念，念不出来不影响正文
     let voiceInfo = null;
     if (voiced.voice) {

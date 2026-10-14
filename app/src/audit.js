@@ -9,17 +9,22 @@ export const RUBRIC_FILE = path.join(APP_ROOT, "..", "prompts", "外审rubric.te
 
 export function loadRubric(file) {
   try { return fs.readFileSync(file || RUBRIC_FILE, "utf8").trim(); } catch (e) {
-    return "判断这条群消息值不值得小助手回复。消息里出现下面列出的名字即算点名。只输出：是 / 否 / 不确定";
+    return "判断这条群消息值不值得小助手回复，以及该回多长。消息里出现下面列出的名字即算点名。只输出：是 / 短 / 否 / 不确定";
   }
 }
 
-// 模型可能吐出「是。」「答案：否」「不确定」等，这里只认语义。
+// 模型可能吐出「是。」「答案：否」「短」等，这里只认语义。
+// 三档语义（决定"开口 + 深度"两件事，不只是回不回）：
+//   yes   = 值得回，而且要认真回
+//   short = 可以回，但一句短的够了
+//   no    = 不值得回（这次就别开口）
 export function parseAuditVerdict(text) {
   const t = String(text == null ? "" : text).trim();
   if (!t) return "unsure";
   if (t.includes("不确定") || /unsure/i.test(t)) return "unsure";
-  if (t.includes("否") || t.includes("不是") || /^no\b/i.test(t)) return "no";
-  if (t.includes("是") || /^yes\b/i.test(t)) return "yes";
+  if (t.includes("不回") || t.includes("不值得") || t.includes("否") || t.includes("不是") || /^no\b/i.test(t)) return "no";
+  if (t.includes("短") || /^short\b/i.test(t)) return "short";
+  if (t.includes("值得回") || t.includes("是") || /^yes\b/i.test(t)) return "yes";
   return "unsure";
 }
 

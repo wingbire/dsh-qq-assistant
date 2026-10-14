@@ -36,7 +36,9 @@ export function createBudget(opts) {
 
   function roll(nowMs) {
     const k = dayKeyOf(nowMs);
-    if (k !== day) { day = k; used = 0; groupCounters.clear(); }
+    // 只清"今日用量"；每群的小时计数由 hk 自己判过期，别在这里清
+    // （roll 会被各种时间戳调用，混合时钟会让日期来回翻 → 小时计数被反复清空、上限失效）
+    if (k !== day) { day = k; used = 0; }
   }
 
   function record(tokens, nowMs) {

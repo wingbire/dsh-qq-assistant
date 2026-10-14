@@ -127,7 +127,22 @@ export function gatesFromConfig(cfg) {
       detailedAt: numOf(getPath(c, "gates.utilityDetailedAt"), 0.65),
       maxChars: depthCharsOf(c)
     },
-    weights: Object.assign({ lambda: numOf(getPath(c, "gates.utilityLambda"), 0.5) }, weights || {})
+    weights: Object.assign({ lambda: numOf(getPath(c, "gates.utilityLambda"), 0.5) }, weights || {}),
+    // 语义补救：本地判否但像个"没点名的真问题"时怎么办（关 / 短句 / 中档）
+    rescueAsk: getPath(c, "gates.rescueAsk") || "中档",
+    // 疑似注入指令：直接不回（默认开）
+    blockInjected: getPath(c, "gates.blockInjected") !== false
+  };
+}
+
+// 外审（二判）：既复核"该不该开口"，也复核"该说多长"
+export function auditFromConfig(cfg) {
+  const c = cfg || {};
+  return {
+    timeoutMs: numOf(getPath(c, "audit.timeoutMs"), 8000),
+    scope: getPath(c, "audit.scope") || "高档+复核救回",       // 只审高档 / 高档+复核救回 / 灰区也审
+    onTimeout: getPath(c, "audit.onTimeout") || "降档",         // 降档 / 保持
+    maxPerHour: numOf(getPath(c, "audit.maxPerHour"), 30)      // 0 = 不限
   };
 }
 
@@ -144,6 +159,7 @@ export function runtimeConfig(cfg) {
     contextWindow: getPath(c, "runtime.contextWindow") != null ? getPath(c, "runtime.contextWindow") : 10, // N8
     depthChars: depthChars,
     gates: gatesFromConfig(c),
+    audit: auditFromConfig(c),
     searchPerTier: getPath(c, "runtime.searchPerTier") || [0, 1, 1],
     coalesceWindowMs: getPath(c, "runtime.coalesceWindowMs") != null ? getPath(c, "runtime.coalesceWindowMs") : 6000,  // N23
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
