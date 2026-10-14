@@ -27,7 +27,7 @@ import { createSearch, buildSummary, normalizeResults, injectSummary, cacheKeyOf
 import { DEFAULT_BOUNDS } from "../app/src/gatescore.js";
 import { createTracker, isAnnoyed, calledBot } from "../app/src/feedback.js";
 import { createLabelQueue, foldLabels, pendingOf, labeledOf, agreementStats, shortHash } from "../app/src/label.js";
-import { buildProfilePrompt } from "../app/src/profile.js";
+import { buildProfilePrompt, buildProfileFactsPrompt, buildProfileInterestsPrompt } from "../app/src/profile.js";
 import { createMemeLibrary, shouldAttachMeme, scoreRow, scanPack, resolveMemeRoots, MEME_DEFAULTS } from "../app/src/meme.js";
 import { createCommands, createDefaultCommands, permLevelOf, allow } from "../app/src/commands.js";
 import { createWebUi, summarizeObservations, summarizeCost, startOfToday, DEFAULT_PORT } from "../app/src/webui.js";
@@ -2231,6 +2231,36 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("prompt: 装配顺序按缓存优先级（专属人设/画像 → 兴趣词条 → 本轮任务 → 上下文）", async function () {
+  const prof = { rounds: 3, interests: ["打游戏", "做视频"], dislikes: ["政治"], habits: "短句", notes: "爱用梗", pace: "快", activeHours: "20-23", personaText: "别叫我助手" };
+  let captured = null;
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: { paths: {}, addObservation: function () {}, loadProfile: function () { return prof; } },
+    bot: {
+      handleEvent: async function (evt) { return { gid: evt.gid, uid: evt.uid, action: "brain", verdict: "yes", pSay: 0.9, U: 0.5, tier: "mid", maxChars: 60, search: 0, keywords: [], bucket: "question", arm: "terse", reason: ["t"], injected: false }; },
+      profileFacts: function () { return buildProfileFactsPrompt(prof); },
+      profileInterests: function () { return buildProfileInterestsPrompt(prof); }
+    },
+    askBrain: async function (o) { captured = o.promptText; return { ok: true, text: "好", usage: { totalTokens: 5 } }; },
+    send: function () {}, sendImage: function () {},
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "帮我看看这个报错", now: 0 });
+  await rt.tick(500);
+  const p = String(captured || "");
+  const iPersona = p.indexOf("本群专属人设");
+  const iFacts = p.indexOf("【本群画像】");
+  const iInt = p.indexOf("【本群兴趣词条】");
+  const iTask = p.indexOf("【本轮任务】");
+  const iCtx = p.indexOf("【群里的上下文");
+  ok(iPersona >= 0 && iFacts > 0 && iInt > 0 && iTask > 0, "四块都得在：人设 / 画像 / 兴趣词条 / 本轮任务");
+  ok(iPersona < iFacts, "本群专属人设（少变）在画像前");
+  ok(iFacts < iInt, "画像（少变）在兴趣词条（多变）前");
+  ok(iInt < iTask, "兴趣词条在本轮任务前");
+  ok(iTask < iCtx, "本轮任务在上下文前（上下文每轮必变，放最后）");
+});
 
 t("cost: 计价（空闲/高峰、缓存命中、省下的钱）", function () {
   const u = { inputTokens: 508, outputTokens: 200, cacheReadTokens: 6400, cacheWriteTokens: 0, totalTokens: 7108 };

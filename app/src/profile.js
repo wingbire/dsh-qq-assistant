@@ -24,16 +24,33 @@ export function clampParams(p, globalGates) {
   return out;
 }
 
-export function buildProfilePrompt(profile) {
+// 群档案拆成两块，按「缓存优先级」分别摆放：
+//   【本群画像】  = 概况（说话习惯 / 备注 / 节奏 / 活跃时段）—— 每 refN 次提炼才变一次，属"少变"
+//   【本群兴趣词条】= 常聊话题 / 少碰话题 —— 提炼时最容易翻，且直接影响主动搭话，属"多变"
+const NL = String.fromCharCode(10);
+
+export function buildProfileFactsPrompt(profile) {
   const p = profile || {};
   const lines = [];
   lines.push("【本群画像】");
-  if (p.interests && p.interests.length) lines.push("- 本群常聊、也容易接话的话题：" + p.interests.slice(0, 8).join("、"));
-  if (p.dislikes && p.dislikes.length) lines.push("- 本群容易冷场或反感的话题（少碰）：" + p.dislikes.slice(0, 6).join("、"));
   if (p.habits) lines.push("- 说话习惯：" + p.habits);
   if (p.notes) lines.push("- 其他注意：" + p.notes);
   lines.push("- 本群节奏：" + (p.pace || "未知") + "；活跃时段：" + (p.activeHours || "未统计"));
-  return lines.join(String.fromCharCode(10));
+  return lines.join(NL);
+}
+
+export function buildProfileInterestsPrompt(profile) {
+  const p = profile || {};
+  const lines = [];
+  if (p.interests && p.interests.length) lines.push("- 本群常聊、也容易接话的话题：" + p.interests.slice(0, 8).join("、"));
+  if (p.dislikes && p.dislikes.length) lines.push("- 本群容易冷场或反感的话题（少碰）：" + p.dislikes.slice(0, 6).join("、"));
+  if (!lines.length) return "";
+  return ["【本群兴趣词条】"].concat(lines).join(NL);
+}
+
+// 兼容旧调用（配置端展示 / 旧接口）：两块拼一起，顺序也是 概况 → 兴趣词条
+export function buildProfilePrompt(profile) {
+  return [buildProfileFactsPrompt(profile), buildProfileInterestsPrompt(profile)].filter(Boolean).join(NL + NL);
 }
 
 const FLAG_NOISE = ["帮我", "求", "教我", "写个", "给个", "推荐", "麻烦", "顺便", "详细", "解释", "原因", "原理", "文档", "步骤", "教程", "深入", "展开", "具体", "怎么", "为什么", "什么", "吗", "呢", "吧", "啊", "呀", "呢"];

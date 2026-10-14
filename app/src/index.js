@@ -2,7 +2,7 @@ import { createStore } from "./store.js";
 import { createGates } from "./gates.js";
 import { createBandit } from "./bandit.js";
 import { reward, costScaleOf, defaultScoreConfig } from "./score.js";
-import { refitProfile, buildProfilePrompt, clampParams } from "./profile.js";
+import { refitProfile, buildProfilePrompt, buildProfileFactsPrompt, buildProfileInterestsPrompt, clampParams } from "./profile.js";
 import { findMeme, shouldAttachMeme, parseMeme } from "./audit.js";
 import { adaptBounds } from "./gatescore.js";
 import { createProactive } from "./proactive.js";
@@ -97,6 +97,8 @@ export function createBot(opts) {
     setBounds: function (b) { return gates.setBounds(b); }, getBounds: function () { return gates.getBounds(); },
     feedbackCount: function () { return feedback.length; },
     profilePrompt: function (gid) { return buildProfilePrompt(store.loadProfile(gid) || {}); },
+    profileFacts: function (gid) { return buildProfileFactsPrompt(store.loadProfile(gid) || {}); },
+    profileInterests: function (gid) { return buildProfileInterestsPrompt(store.loadProfile(gid) || {}); },
     stats: function () { return { replies: replies, feedback: feedback.length, bounds: gates.getBounds(), bandit: bandit.state() }; }
   };
 }

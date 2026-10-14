@@ -247,10 +247,12 @@ export function createRuntime(deps) {
     const NL = String.fromCharCode(10);
     const policy = depthPolicy("low", { contextWindow: rc.contextWindow });
     const ctx = contextBlock(batch.gid);
-    const prompt = "【本轮任务】" + NL
+    const task = "【本轮任务】" + NL
       + "场景：没人在叫你，但话题撞上了你感兴趣的东西（" + (p.reason || "") + "）。" + NL
       + "字数上限：" + (p.maxChars || 20) + NL
-      + "直接输出你要插进群里的那一句短话，不要解释，不要问号收尾。" + NL + NL + ctx;
+      + "直接输出你要插进群里的那一句短话，不要解释，不要问号收尾。";
+    // 同样的缓存优先级：概况 → 兴趣词条 → 本轮任务 → 上下文
+    const prompt = [profileFactsBlock(batch.gid), profileInterestsBlock(batch.gid), task, ctx].filter(Boolean).join(NL + NL);
     const r = await askBrain({ promptText: prompt, tier: "low", proactive: true, evt: evtLike });
     if (!r || !r.ok || !r.text) { observe({ kind: "proactive_error", gid: batch.gid, error: r ? r.error : null }); return null; }
     const clean = parseMeme(r.text).text;
@@ -264,8 +266,9 @@ export function createRuntime(deps) {
     return { segments: segs, reason: p.reason };
   }
 
-  // N8：群档案排在「本轮任务」之后、上下文之前 —— 它每 refN 次才变一次
-  function profileBlock(gid) {
+  // N8 + 缓存优先级：群档案拆成两块 —— 少变的（概况 / 本群专属人设）在前，多变的（兴趣词条）在后。
+  // 一块里混着放的话，兴趣词条一翻就把后面的"本轮任务"也一起打散。
+  function profileFactsBlock(gid) {
     if (!store || typeof store.loadProfile !== "function") return "";
     const prof = store.loadProfile(gid);
     if (!prof) return "";
@@ -275,8 +278,17 @@ export function createRuntime(deps) {
     if (prof.personaText && String(prof.personaText).trim()) {
       lines.push("【本群专属人设（在这个群里额外要遵守的）】" + String.fromCharCode(10) + String(prof.personaText).trim());
     }
-    if (prof.rounds > 0 && bot.profilePrompt) lines.push(bot.profilePrompt(gid));
+    if (prof.rounds > 0) {
+      if (bot.profileFacts) { const t = bot.profileFacts(gid); if (t) lines.push(t); }
+      else if (bot.profilePrompt) { const t = bot.profilePrompt(gid); if (t) lines.push(t); }   // 旧接口兜底（兴趣词条会并在里面）
+    }
     return lines.join(String.fromCharCode(10, 10));
+  }
+  function profileInterestsBlock(gid) {
+    if (!bot.profileInterests || !store || typeof store.loadProfile !== "function") return "";
+    const prof = store.loadProfile(gid);
+    if (!prof || !prof.rounds) return "";
+    return bot.profileInterests(gid) || "";
   }
 
   const STAGE_OBSERVE = "observe", STAGE_SEMI = "semi", STAGE_FULL = "full";
@@ -520,11 +532,19 @@ export function createRuntime(deps) {
         stats.searches += 1;
         if (sr.cached) stats.searchCacheHits += 1;
       }
-      // N8 修订：主体顺序 = 本轮任务 → 搜到的资料 → 上下文窗口（最后）。
-      // 前面只放「本轮任务」这种小而易变的东西，人设仍在 system prompt，缓存前缀不受影响。
-      const blocks = [taskText];
-      const pb = profileBlock(evt.gid);
-      if (pb) blocks.push(pb);
+      // 缓存优先级（默认生效，无需配置）：**少变的在前，易变的在后** ——
+      //   ① 群档案概况（本群专属人设 +【本群画像】）      每 refN 次提炼才变
+      //   ② 群档案兴趣词条【本群兴趣词条】                提炼时容易翻，还影响主动搭话
+      //   ③ 本轮任务（档位 / 字数 / 搜索摘要）            每轮都变
+      //   ④ 群里的上下文                                  每轮必变
+      //   ⑤ 本轮图片描述                                  最易变
+      // 全局人设（稳定段 + 可变段）在 system prompt（personaPrefix）里，永远排最前，不受这里影响。
+      const blocks = [];
+      const pFacts = profileFactsBlock(evt.gid);
+      if (pFacts) blocks.push(pFacts);
+      const pInterests = profileInterestsBlock(evt.gid);
+      if (pInterests) blocks.push(pInterests);
+      blocks.push(taskText);
       const ctxBlock = contextBlock(evt.gid);
       if (ctxBlock) blocks.push(ctxBlock);
       if (visionTexts.length) blocks.push(injectVision("", visionTexts).trim());
