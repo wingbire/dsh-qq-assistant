@@ -7,6 +7,7 @@ import { createMemeLibrary, shouldAttachMeme } from "./meme.js";
 import { resolveLocalImage, downloadImage, injectVision } from "./vision.js";
 import { parseVoiceTag } from "./tts.js";
 import { parseIllustration, illustrationFor, parseChart } from "./dshprofile.js";
+import { resolveChartFile, cleanupChart } from "./chart.js";
 import { WORKSPACE_ROOT } from "./paths.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -498,27 +499,20 @@ export function createRuntime(deps) {
     // 图表：archify 画完把 PNG 路径写在 [图表: …] 里，程序发出去；按配置发完就删（群聊里不留图）
     let chartInfo = null;
     if (chart.wanted && (!rc.plugins || rc.plugins.archify !== false)) {
-      const abs = path.isAbsolute(chart.file) ? chart.file : path.resolve(WORKSPACE_ROOT, chart.file);
-      if (fs.existsSync(abs)) {
-        if (sendImage) sendImage(evt.gid, abs);
+      // archify 产出的是 HTML，先转成 PNG 再发（找不到浏览器就如实失败）
+      const conv = resolveChartFile(chart.file, {
+        root: WORKSPACE_ROOT,
+        outDir: path.join(WORKSPACE_ROOT, "app", "dsh-data", "charts")
+      });
+      if (conv.ok) {
+        if (sendImage) sendImage(evt.gid, conv.file);
         stats.chartsSent += 1;
         const keep = rc.plugins && rc.plugins.archifyCleanup === false;
-        let removed = false;
-        if (!keep) {
-          try {
-            // 连同它所在的 .archify/<...>/ 目录一起删掉：先删文件，目录空了就删目录
-            const dir = path.dirname(abs);
-            fs.unlinkSync(abs);
-            removed = true;
-            if (path.basename(path.dirname(dir)).toLowerCase() === ".archify") {
-              try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e2) { /* 目录里还有别的就留着 */ }
-            }
-          } catch (e) { removed = false; }
-        }
-        chartInfo = { file: path.basename(abs), removed: removed, kept: keep };
+        const cleaned = keep ? { removed: [], kept: [conv.file] } : cleanupChart(conv.file, { source: conv.source });
+        chartInfo = { file: path.basename(conv.file), converted: !!conv.converted, removed: cleaned.removed.length, kept: keep };
       } else {
         stats.chartsFailed += 1;
-        chartInfo = { error: "图表文件不存在：" + chart.file };
+        chartInfo = { error: conv.error };
       }
     }
     const memeInfo = await attachMeme(evt.gid, parsed.mood, dec.tier);

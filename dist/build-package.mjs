@@ -24,6 +24,7 @@ export const WHITELIST = [
   { from: "demo/run-learning-demo.mjs" },
   { from: "demo/run-meme-demo.mjs" },
   { from: "demo/run-voice-vision-demo.mjs" },
+  { from: "demo/run-chart-demo.mjs" },
   { from: "demo/run-brain-mock.mjs" },
   { from: "demo/run-acceptance.mjs" },
   { from: "demo/import-key.mjs" },

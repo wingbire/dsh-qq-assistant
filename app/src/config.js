@@ -143,6 +143,7 @@ export function runtimeConfig(cfg) {
       archifyCleanup: getPath(c, "plugins.archifyCleanup") !== false,
       meme: getPath(c, "plugins.meme") !== false
     },
+    auditTimeoutMs: Number(getPath(c, "audit.timeoutMs")) || 8000,
     ageStage: getPath(c, "persona.ageStage") === "幼年" ? "幼年" : "成年",
     illustrations: {
       young: getPath(c, "persona.illustrationYoung") || "角色形象图/幼年.jpg",

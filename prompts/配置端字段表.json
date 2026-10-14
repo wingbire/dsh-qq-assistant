@@ -478,7 +478,25 @@
           "标签": "二判模型 id",
           "类型": "string",
           "默认": "",
-          "说明": "留空用 ling-3.1-flash-free；也可填 mimo-v2.6-flash-free / cat-jam-free 等"
+          "说明": "留空用 nvidia/nemotron-3-ultra-550b-a55b:free（实测 3/3 判对，约 13 秒）"
+        },
+        {
+          "键": "plugins.ourFreeModelBrainId",
+          "标签": "大脑模型 id",
+          "类型": "string",
+          "默认": "",
+          "说明": "留空用 nvidia/nemotron-3-ultra-550b-a55b:free（实测约 7.8 秒出稿）"
+        },
+        {
+          "键": "audit.timeoutMs",
+          "标签": "二判超时（毫秒）",
+          "类型": "int",
+          "默认": 8000,
+          "范围": [
+            2000,
+            60000
+          ],
+          "说明": "官方模型 8000 够；走 Our Free Model 要放宽到 20000，否则会一直判「不确定」"
         },
         {
           "键": "plugins.ourFreeModelBrain",
@@ -487,13 +505,7 @@
           "默认": false,
           "说明": "开了之后回复用免费模型池，不再花你的 DeepSeek 额度；三档 effort 会被去掉（免费池多数不认这个字段）"
         },
-        {
-          "键": "plugins.ourFreeModelBrainId",
-          "标签": "大脑模型 id",
-          "类型": "string",
-          "默认": "",
-          "说明": "留空用 ling-3.1-flash-free"
-        },
+
         {
           "键": "plugins.freeSearch",
           "标签": "搜索走 dsh-free-search",

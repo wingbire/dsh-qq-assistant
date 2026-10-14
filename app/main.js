@@ -82,9 +82,10 @@ function reconnectOnebot(c) {
 }
 reconnectOnebot(cfg);
 
-// N11 外审通道：独立 qq-audit profile，8 秒超时 → 不确定
+// N11 外审通道：独立 qq-audit profile，超时 → 不确定
+// 走官方模型时 8 秒够用；走 Our Free Model 的免费池要放宽（实测约 13 秒），所以做成可配
 const auditor = createAuditor({
-  timeoutMs: 8000,
+  timeoutMs: rc.auditTimeoutMs || 8000,
   rubric: loadRubric(),
   runner: async function (req) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
@@ -185,7 +186,8 @@ async function listGroups() {
 
 // API 通道：大脑与二判都可以选择走社区插件 Our Free Model（provider 固定为 our-free-model）
 const OFM_PROVIDER = "our-free-model";
-const OFM_FALLBACK_MODEL = "ling-3.1-flash-free";
+// 实测可用的免费车道（OpenCode 那条车道会指纹识别客户端，不能用；sealIds 那条要登录）
+const OFM_FALLBACK_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 function channelModel(kind, c) {
   const conf = (c || (webui ? webui.getConfig() : cfg)) || {};
   const p = conf.plugins || {};

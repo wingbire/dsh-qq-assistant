@@ -24,6 +24,7 @@ const plan = [
   { label: "学习闭环演示", args: ["demo/run-learning-demo.mjs"], expect: { re: /通过 \d+ \/ \d+/ } },
   { label: "图库 / 指令 / 主动搭话", args: ["demo/run-meme-demo.mjs"], expect: { re: /通过 \d+ \/ \d+/ } },
   { label: "识图 / 语音（真 TTS）", args: ["demo/run-voice-vision-demo.mjs"], expect: { re: /通过 \d+ \/ \d+/ } },
+  { label: "图表管线（真无头浏览器）", args: ["demo/run-chart-demo.mjs"], expect: { re: /通过 \d+ \/ \d+/ } },
   { label: "程序自检（含配置端）", args: ["app/main.js", "--selftest"], expect: { re: /配置端自检：http:\/\/127\.0\.0\.1:\d+  \/api\/status ok=true/ } }
 ];
 if (REAL) {

@@ -66,7 +66,12 @@ export function resolveDshCli(env) {
   const local = e.LOCALAPPDATA ? path.join(e.LOCALAPPDATA, "Programs") : null;
   if (local) cands.push(path.join(local, "DeepSeekHarness", "resources", "runtime", "cli", "bin", "dsh.cmd"));
   if (e.ProgramFiles) cands.push(path.join(e.ProgramFiles, "DeepSeek Harness", "resources", "runtime", "cli", "bin", "dsh.cmd"));
-  // 装到别的盘（D:\E:\ 之类）时，用 DSHQQ_DSH_CLI 或 PATH 指定即可，别写死机器路径
+  // 装到别的盘根目录（例如 E:\DeepseekHarness）是常见的自定义安装位置。
+  // 扫一遍盘根是通用做法（不写死任何一台机器的路径）；也可以直接用 brain.dshCliPath 指定。
+  for (const drive of ["C:", "D:", "E:", "F:", "G:"]) {
+    cands.push(drive + path.sep + "DeepseekHarness" + path.sep + "resources" + path.sep + "runtime" + path.sep + "cli" + path.sep + "bin" + path.sep + "dsh.cmd");
+    cands.push(drive + path.sep + "DeepSeekHarness" + path.sep + "resources" + path.sep + "runtime" + path.sep + "cli" + path.sep + "bin" + path.sep + "dsh.cmd");
+  }
   for (const c of cands) {
     try { if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return c; } catch (err) {}
   }

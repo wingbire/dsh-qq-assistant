@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-qq-assistant · 系统架构",
+    "output": "architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "QQ 群",
+      "sublabel": "群成员",
+      "pos": [
+        30,
+        300
+      ],
+      "size": [
+        110,
+        60
+      ]
+    },
+    {
+      "id": "napcat",
+      "type": "external",
+      "label": "NapCat",
+      "sublabel": "OneBot v11",
+      "pos": [
+        190,
+        300
+      ],
+      "size": [
+        120,
+        60
+      ],
+      "tag": "ws://127.0.0.1:3001"
+    },
+    {
+      "id": "onebot",
+      "type": "backend",
+      "label": "接入层",
+      "sublabel": "OneBot 客户端",
+      "pos": [
+        370,
+        110
+      ],
+      "size": [
+        120,
+        60
+      ],
+      "tag": "去重 · 归一化"
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "判定中枢",
+      "sublabel": "六因子 → p_say",
+      "pos": [
+        370,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "tag": "本地 · 零成本"
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "运行时",
+      "sublabel": "合并/阶段机/刹车",
+      "pos": [
+        560,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "tag": "预算熔断"
+    },
+    {
+      "id": "express",
+      "type": "backend",
+      "label": "表达层",
+      "sublabel": "配图/语音/立绘/图表",
+      "pos": [
+        750,
+        300
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "learn",
+      "type": "database",
+      "label": "学习层",
+      "sublabel": "反馈归因 · bandit",
+      "pos": [
+        750,
+        450
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "tag": "逐群调阈值"
+    },
+    {
+      "id": "ui",
+      "type": "cloud",
+      "label": "配置端",
+      "sublabel": "localhost:8799",
+      "pos": [
+        560,
+        110
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "tag": "9 页 · 零依赖"
+    },
+    {
+      "id": "data",
+      "type": "database",
+      "label": "app/dsh-data",
+      "sublabel": "原文不落盘",
+      "pos": [
+        560,
+        450
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "brain",
+      "type": "backend",
+      "label": "qq-brain",
+      "sublabel": "回复本体",
+      "pos": [
+        960,
+        110
+      ],
+      "size": [
+        120,
+        56
+      ],
+      "tag": "personaPrefix 常驻"
+    },
+    {
+      "id": "audit",
+      "type": "backend",
+      "label": "qq-audit",
+      "sublabel": "二判 8s→不确定",
+      "pos": [
+        960,
+        240
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "searchp",
+      "type": "backend",
+      "label": "qq-search",
+      "sublabel": "搜索摘要员",
+      "pos": [
+        960,
+        370
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "vision",
+      "type": "backend",
+      "label": "qq-vision",
+      "sublabel": "识图",
+      "pos": [
+        960,
+        500
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "dshhome",
+      "type": "database",
+      "label": "app/dsh-home",
+      "sublabel": "工作区自带 DSH_HOME",
+      "pos": [
+        940,
+        620
+      ],
+      "size": [
+        160,
+        56
+      ],
+      "tag": "零写入 ~/.dsh"
+    },
+    {
+      "id": "ofm",
+      "type": "external",
+      "label": "Our Free Model",
+      "sublabel": "可选 · 免费模型池",
+      "pos": [
+        1180,
+        110
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "fs",
+      "type": "external",
+      "label": "dsh-free-search",
+      "sublabel": "可选 · 24 引擎",
+      "pos": [
+        1180,
+        370
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "archify",
+      "type": "external",
+      "label": "archify",
+      "sublabel": "可选 · 画结构图",
+      "pos": [
+        1180,
+        240
+      ],
+      "size": [
+        140,
+        50
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "本机进程（零 npm 依赖）",
+      "wraps": [
+        "onebot",
+        "gate",
+        "runtime",
+        "express",
+        "learn",
+        "ui",
+        "data"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "只看 127.0.0.1",
+      "wraps": [
+        "ui",
+        "data"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "工作区内的 DSH profiles",
+      "wraps": [
+        "brain",
+        "audit",
+        "searchp",
+        "vision",
+        "dshhome"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "qq-napcat",
+      "from": "users",
+      "to": "napcat",
+      "label": "群消息",
+      "variant": "emphasis"
+    },
+    {
+      "id": "napcat-onebot",
+      "from": "napcat",
+      "to": "onebot",
+      "label": "WebSocket"
+    },
+    {
+      "id": "onebot-gate",
+      "from": "onebot",
+      "to": "gate"
+    },
+    {
+      "id": "gate-runtime",
+      "from": "gate",
+      "to": "runtime",
+      "label": "p_say"
+    },
+    {
+      "id": "runtime-express",
+      "from": "runtime",
+      "to": "express",
+      "label": "要回才动"
+    },
+    {
+      "id": "runtime-learn",
+      "from": "runtime",
+      "to": "learn",
+      "variant": "dashed",
+      "label": "登记反馈"
+    },
+    {
+      "id": "runtime-data",
+      "from": "runtime",
+      "to": "data",
+      "variant": "dashed"
+    },
+    {
+      "id": "ui-runtime",
+      "from": "ui",
+      "to": "runtime",
+      "variant": "dashed",
+      "label": "改配置/看状态"
+    },
+    {
+      "id": "gate-brain",
+      "from": "gate",
+      "to": "brain",
+      "label": "确定要回 → 送大脑"
+    },
+    {
+      "id": "gate-audit",
+      "from": "gate",
+      "to": "audit",
+      "label": "灰区 → 二判"
+    },
+    {
+      "id": "runtime-search",
+      "from": "runtime",
+      "to": "searchp",
+      "label": "要查资料",
+      "variant": "dashed"
+    },
+    {
+      "id": "express-archify",
+      "from": "express",
+      "to": "archify",
+      "label": "[图表: png]",
+      "variant": "dashed"
+    },
+    {
+      "id": "audit-ofm",
+      "from": "audit",
+      "to": "ofm",
+      "label": "可切",
+      "variant": "dashed"
+    },
+    {
+      "id": "runtime-fs",
+      "from": "runtime",
+      "to": "fs",
+      "label": "搜索引擎",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "brain-dshhome",
+      "from": "brain",
+      "to": "dshhome"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "左边一半不花钱",
+      "items": [
+        "硬触发 → 合并 → 六因子 → 三阈值",
+        "低于开口线：一个字都不发"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "只有确定要回才动模型",
+      "items": [
+        "人设常驻 personaPrefix，前缀缓存 94~96%",
+        "二判 8 秒超时 → 不确定"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "社区插件可插可拔",
+      "items": [
+        "不打包，只做兼容与降级",
+        "关掉的功能连人设里都不写"
+      ]
+    }
+  ]
+}

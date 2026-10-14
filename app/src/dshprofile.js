@@ -71,7 +71,7 @@ export const OVERFLOW_TEXT = {
 };
 export const MEME_FREQ_TEXT = { "关": "不配图", "少": "只在情绪明确时配一张，正式解释不配图", "中": "情绪到位就配一张，一条最多 1 张" };
 
-// 从大脑输出里摘出图表标记：[图表: <png 绝对路径>]（archify 画完后由程序发出去）
+// 从大脑输出里摘出图表标记：[图表: <文件绝对路径>]（archify 画完给 HTML，程序转 PNG 发出去）
 export function parseChart(text) {
   const s = String(text == null ? "" : text);
   const m = s.match(/\[图表\s*[:：]\s*([^\]]+)\]/);
@@ -164,8 +164,8 @@ export function buildPersonaText(persona, cfg) {
   }
   if (p.archifyEnabled) {
     L.push("【画图】");
-    L.push("- 有人要「画个流程图/架构图/时序图」，或一段话用图讲更清楚时，用 architect 技能（archify）：把结构写成 JSON 再渲染成 PNG。");
-    L.push("- 画完在正文末尾写标记：[图表: PNG 的绝对路径]。系统会把图发进群。一条消息最多一张。");
+    L.push("- 有人要「画个流程图/架构图/时序图」，或一段话用图讲更清楚时，用 archify 技能：写 candidate.json，再用它的 CLI 渲染成 HTML。");
+    L.push("- 画完在正文末尾写标记：[图表: 那个 HTML 的绝对路径]。系统会自己转成图片发进群，并清理本地文件。一条消息最多一张。");
     L.push("");
   }
   if (p.visionEnabled) {

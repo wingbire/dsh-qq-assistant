@@ -166,19 +166,23 @@ export function installPlugin(id, opts) {
   }
 
   if (id === "ourFreeModel") {
-    const profileDir = path.join(dshHome, "profiles", "qq-audit");
-    if (!npm(profileDir, ["dsh-our-free-model"])) return { ok: false, error: "npm 安装失败", output: log.join(String.fromCharCode(10)) };
-    // 挂进 profile 的 bundles，不然 DSH 不会加载它
-    const pkgFile = path.join(profileDir, "package.json");
-    const pkg = readJson(pkgFile) || {};
-    pkg.dependencies = Object.assign({}, pkg.dependencies, { "dsh-our-free-model": "*" });
-    const prof = ((pkg.dsh || {}).profile) || {};
-    const bundles = prof.bundles || ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless"];
-    if (bundles.indexOf("dsh-our-free-model") < 0) bundles.push("dsh-our-free-model");
-    pkg.dsh = Object.assign({}, pkg.dsh, { profile: Object.assign({}, prof, { bundles: bundles }) });
-    fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + String.fromCharCode(10), "utf8");
-    log.push("已把 dsh-our-free-model 挂进 qq-audit 的 bundles");
-    return { ok: true, output: log.join(String.fromCharCode(10)), note: "外审下一轮调用就会走它" };
+    // 两个 profile 都要装：二判走 qq-audit，大脑走 qq-brain（只装一个会出现
+    // "no adapter registered for provider our-free-model"）
+    const profiles = ["qq-audit", "qq-brain"];
+    for (const name of profiles) {
+      const profileDir = path.join(dshHome, "profiles", name);
+      if (!npm(profileDir, ["dsh-our-free-model"])) return { ok: false, error: "npm 安装失败（" + name + "）", output: log.join(String.fromCharCode(10)) };
+      const pkgFile = path.join(profileDir, "package.json");
+      const pkg = readJson(pkgFile) || {};
+      pkg.dependencies = Object.assign({}, pkg.dependencies, { "dsh-our-free-model": "*" });
+      const prof = ((pkg.dsh || {}).profile) || {};
+      const bundles = prof.bundles || ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless"];
+      if (bundles.indexOf("dsh-our-free-model") < 0) bundles.push("dsh-our-free-model");
+      pkg.dsh = Object.assign({}, pkg.dsh, { profile: Object.assign({}, prof, { bundles: bundles }) });
+      fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + String.fromCharCode(10), "utf8");
+      log.push("已把 dsh-our-free-model 挂进 " + name + " 的 bundles");
+    }
+    return { ok: true, output: log.join(String.fromCharCode(10)), note: "二判与大脑都能走它了（改完开关下一轮生效）" };
   }
 
   if (id === "freeSearch") {
