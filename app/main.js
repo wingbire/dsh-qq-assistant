@@ -267,7 +267,7 @@ const tts = createTts({ config: Object.assign({}, rc.voice, { enabled: rc.voice.
 log("识图：" + (rc.vision.enabled ? rc.vision.mode + " / " + rc.vision.model : "关闭") + "；语音：" + (rc.voice.enabled ? rc.voice.voice : "关闭"));
 log("能力声明 · 看图：" + (visionCap.enabled ? (visionCap.capable ? "会写进人设（" + visionCap.source + "）" : "不写进人设（" + visionCap.source + "：" + visionCap.note + "）") : "关闭")
   + "　发音：" + (voiceCap.enabled ? (voiceCap.capable ? "会写进人设（" + voiceCap.source + "：" + voiceCap.note + "）" : "不写进人设（" + voiceCap.source + "：" + voiceCap.note + "）") : "关闭")
-  + "　听语音：不做转写（人设写死「听不到内容」）");
+  + "　听语音：有 QQ 官方转写就读，没有就说听不了");
 log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入口）");
 
 const runtime = createRuntime({
