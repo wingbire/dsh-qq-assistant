@@ -3,7 +3,7 @@ import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
-import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL } from "../app/src/localreply.js";
+import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
 import { engagementOf, reward, costOf } from "../app/src/score.js";
 import { createProactive } from "../app/src/proactive.js";
 import { createStore } from "../app/src/store.js";
@@ -2220,6 +2220,41 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
     if (r.status !== 0) bad.push(f + " :: " + String(r.stderr || "").split(String.fromCharCode(10)).filter(Boolean).slice(-3).join(" / "));
   }
   eq(bad, [], "这些文件语法不过：" + bad.join(" | "));
+});
+
+function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("localreply: 场景分池（图片 / 语音不再拿「嗯？」糊弄）", function () {
+  const scene = function (dec, text) { return poolFor(dec, { text: text }).scene; };
+  eq(scene({ bucket: "general" }, "[图片]"), "image");
+  eq(scene({ bucket: "general" }, "[语音]"), "voice");
+  eq(scene({ bucket: "general", reason: ["深度分档：情绪宣泄、没点名 → 本地短答，不送大脑"] }, "算了"), "vent");
+  eq(scene({ bucket: "daily" }, "小肥鱼在吗"), "greet");
+  eq(scene({ bucket: "general", hardHits: ["at"], hardStrength: 1 }, "怎么说"), "addressed:general");
+  eq(scene({ bucket: "banter" }, "哈哈哈哈"), "banter");
+  const img = localReply({ bucket: "general" }, { text: "[图片]", rng: function () { return 0; } });
+  ok(/看不到|没看到|识别不了|没看出来/.test(img), "图片场景要说人话：" + img);
+  const voice = localReply({ bucket: "general" }, { text: "[语音]", rng: function () { return 0; } });
+  ok(/听不了|听不到|没转写/.test(voice), "语音场景要直说听不了：" + voice);
+});
+
+t("localreply: 同一群连说不重复，并且活过重启", function () {
+  const r = createLocalReplies({ maxRecent: 6, rng: seedRng(7) });
+  const seen = [];
+  for (let i = 0; i < 6; i++) seen.push(r.reply({ bucket: "general" }, { text: "哈哈哈", gid: "G1" }));
+  eq(new Set(seen).size, 6, "连着 6 条不能重复：" + seen.join(" / "));
+  const other = r.reply({ bucket: "general" }, { text: "哈哈哈", gid: "G2" });
+  ok(typeof other === "string" && other.length > 0, "别的群互不影响");
+
+  const tmp = path.join(os.tmpdir(), "dshqq-localreplies-test.json");
+  try { fs.unlinkSync(tmp); } catch (e) {}
+  const r2 = createLocalReplies({ file: tmp, rng: seedRng(3) });
+  const a = r2.reply({ bucket: "general" }, { text: "哈哈哈", gid: "G9" });
+  r2.flush();
+  const r3 = createLocalReplies({ file: tmp, rng: seedRng(9) });
+  ok(r3.recent("G9").indexOf(a) >= 0, "重启后还记得这个群说过什么");
+  ok(r3.reply({ bucket: "general" }, { text: "哈哈哈", gid: "G9" }) !== a, "重启后不会立刻重复同一句");
+  try { fs.unlinkSync(tmp); } catch (e) {}
 });
 
 t("vision: 模型视觉能力识别（自动 / 有 / 无）", function () {

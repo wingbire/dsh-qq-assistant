@@ -11,7 +11,7 @@ import { resolveChartFile, cleanupChart } from "./chart.js";
 import { WORKSPACE_ROOT } from "./paths.js";
 import fs from "node:fs";
 import path from "node:path";
-import { localReply } from "./localreply.js";
+import { localReply, createLocalReplies } from "./localreply.js";
 import { depthPolicy, buildTaskText } from "./brain.js";
 import { parseMeme } from "./audit.js";
 import { injectSummary } from "./search.js";
@@ -89,6 +89,8 @@ export function createRuntime(deps) {
   const labels = d.labels || (store ? createLabelQueue({ store: store, minSamples: rc.labelMinSamples || 30 }) : null);
   const coalescer = createCoalescer({ windowMs: rc.coalesceWindowMs, maxBatch: rc.coalesceMaxBatch });
   const budget = d.budget || createBudget({ limits: rc.budget, now: now, file: d.budgetFile || (store && store.paths ? store.paths.budget : null) });
+  // 本地短答"记住自己说过什么"：同一群最近 6 条不重复，且活过重启
+  const localReplies = d.localReplies || createLocalReplies({ rng: rng, file: d.localFile || (store && store.paths ? store.paths.localreplies : null) });
   const brakes = d.brakes || createBrakes({ config: cfg, now: now, file: d.brakesFile || (store && store.paths ? store.paths.brakes : null) });
   // 指令注册表要拿到真的 brakes / budget，所以必须在这两行之后建
   const commands = d.commands || createDefaultCommands({ brakes: brakes, budget: budget, now: now, stopMinutes: rc.stopMinutes || 60 });
@@ -503,7 +505,7 @@ export function createRuntime(deps) {
     let usage = null;
     let searchInfo = null;
     if (dec.action === "local_short") {
-      text = localReply(dec, { rng: rng, text: evt.text });
+      text = localReplies.reply(dec, { rng: rng, text: evt.text, gid: evt.gid });
     } else if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
       const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [20, 60, 200];
@@ -646,7 +648,7 @@ export function createRuntime(deps) {
 
   return {
     onEvent: onEvent, tick: tick, status: status,
-    coalescer: coalescer, budget: budget, brakes: brakes,
+    coalescer: coalescer, budget: budget, brakes: brakes, localReplies: localReplies,
     members: function (gid) { const m = members.get(String(gid)); return m ? Object.fromEntries(m) : {}; },
     history: function (gid) { return (history.get(String(gid)) || []).slice(); },
     stage: function (gid) { return Object.assign({}, stageOf(gid, now())); },
