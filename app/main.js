@@ -426,6 +426,7 @@ process.on("SIGINT", function () {
   log("收到 SIGINT，收尾中…");
   try { runtime.budget.flush(); } catch (e) {}          // 用量平时就攒着写，这里只是最后一次
   try { runtime.localReplies.flush(); } catch (e) {}    // "这个群最近说过哪几句"同理
+  try { runtime.uiMessages.flush(); } catch (e) {}      // 配置端那张消息表也是攒着写
   try { bot.saveState(); } catch (e) {}                // 学习权重同理
   if (link.ob) link.ob.close();
   clearInterval(timer);

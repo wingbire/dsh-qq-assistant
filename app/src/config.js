@@ -165,6 +165,7 @@ export function runtimeConfig(cfg) {
     coalesceWindowMs: getPath(c, "runtime.coalesceWindowMs") != null ? getPath(c, "runtime.coalesceWindowMs") : 6000,  // N23
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
     maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 3,                    // N6
+    uiMessageLimit: numOf(getPath(c, "runtime.uiMessageLimit"), 30),   // 配置端"收到的消息"每群保留多少条（满了丢最旧）
     budget: {
       dailyTokens: getPath(c, "runtime.budget.dailyTokens") != null ? getPath(c, "runtime.budget.dailyTokens") : 5000000, // N23
       softRatio: 0.8,

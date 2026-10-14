@@ -33,7 +33,7 @@ app/main.js
   └─ src/store.js         落盘（原文不落）
 ```
 
-所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 200 项测试能跑得又快又稳的原因。
+所有外部副作用（`send` / `askBrain` / `now` / `rng` / `store`）**都可注入** —— 这是 203 项测试能跑得又快又稳的原因。
 
 ## 判定链路
 
@@ -177,13 +177,13 @@ U        = benefit − costTerm
 
 开一个开关只让"尾巴"变化，前面的前缀照样命中缓存 —— 这就是把"会变的东西"全放最后的唯一原因。
 
-### 三档深浅（`depthChars` 默认 `[20, 60, 200]`）
+### 三档深浅（`depthChars` 默认 `[20, 60, 203]`）
 
 | 档位 | 调大脑 | 模型发力 | 搜索 | 字数上限 | 上下文 |
 |---|---|---|---|---|---|
 | low | 否（本地短句池） | — | 0 | 20 | 0 |
 | mid | 是 | `reasoningEffort=low` | ≤1 次（有关键词才搜） | 60 | 10 条 |
-| high | 是 | `reasoningEffort=high` | 1 次 | 200 | 10 条 |
+| high | 是 | `reasoningEffort=high` | 1 次 | 203 | 10 条 |
 
 详细档**一律不配图**。三档字数由 `gates.depthChars` 一处配置，分档流水与大脑提示词共用同一份。
 
@@ -330,10 +330,16 @@ dsh --profile qq-brain --patch tier-mid.patch.yml headless --json "<本轮任务
 
 | 文件 | 内容 | 上限 / 策略 |
 |---|---|---|
-| `config/app.json` | 全部配置（59 个字段） | 明文，可手改 |
-| `config/secrets.json` | API Key | **gitignored**，永不回给前端 |
+| `config/app.json` | 全部配置（**72 个字段**） | 明文，可手改 |
+| `config/secrets.json` | API Key | **gitignored**，永不回给前端；只经环境变量传给子进程 |
 | `logs/bot.log` | 运行日志 | 滚动 |
-| `data/observe.jsonl` | 判定记录（**只存关键词与统计，不存原文**） | 按天分片 |
+| `data/observe.jsonl` | 判定记录（**只存关键词与统计，不存原文**） | 满 5000 行滚动 |
+| `data/stages.json` | 分群阶段（含"手动跳过观察期"） | 改动即时落盘 |
+| `data/budget.json` | 今日已用 token | 攒 1.5s 写；重启后日熔断照样有效 |
+| `data/brakes.json` | 按群暂停（含配置端"关掉本群"） | 立即落盘 |
+| `data/bandit-state.json` | 话风臂与学习状态 | 攒着写 |
+| `data/localreplies.json` | 每群最近说过的本地短答 | **每群 6 条**，池子没说完不重复（防"嗯？啥事"复读） |
+| `data/ui-messages.json` | 配置端「收到的消息与判定过程」 | **每群 30 条**（`runtime.uiMessageLimit` 可改），满了按时间丢最旧；最多 30 个群；卡片默认折叠 |
 | `data/profiles/g-<群号>.json` | 群档案 | 每群一份 |
 | `data/labels.jsonl` | 标注队列（≤40 字摘要） | 满 30 条回流 |
 | `data/voice/` `data/brain/images/` | 语音 wav / 下载的图片 | 可随时清空 |

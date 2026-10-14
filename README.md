@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-200%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-203%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)
@@ -155,7 +155,7 @@ git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
 
 # 1. 自检（不需要 QQ、不需要 key）
-node test/run-tests.mjs         # 200 项
+node test/run-tests.mjs         # 203 项
 node demo/run-acceptance.mjs    # 全量验收记分卡
 
 # 2. 起程序（默认「新群先观察」，一个字都不发）
@@ -210,7 +210,7 @@ launcher/DSHQQTray.exe
 > **关于 Our Free Model（已实测）**：`nvidia/nemotron-3-ultra-550b-a55b:free` 两条通道都能用
 > —— 大脑约 **7.8 秒**出稿、二判 **3/3 判对**（约 13 秒）。但 `*-free` 那批走的是 OpenCode 免费池，
 > 会指纹识别客户端直接拒绝；免费池也**不享前缀缓存**。所以两路开关仍**默认关闭**，你要权衡"省钱 vs 慢+没缓存"再开。
-> 走 OFM 时记得把二判超时放宽到 20000。
+> 走 OFM 时记得把二判超时放宽到 20300。
 
 ## 隐私：数据都去哪了
 
@@ -268,13 +268,13 @@ flowchart LR
 ## 测试与证据
 
 ```
-node test/run-tests.mjs        →  通过 200 项，失败 0 项
+node test/run-tests.mjs        →  通过 203 项，失败 0 项
 node demo/run-acceptance.mjs   →  通过 9 / 9
 ```
 
 | 验收项 | 结果 |
 |---|---|
-| 骨架回归测试 | **200 项全过** |
+| 骨架回归测试 | **203 项全过** |
 | 判定中枢演示 | 判决分布符合预期 |
 | 大脑通道（mock CLI） | ok |
 | 接入端到端（mock OneBot） | **11 / 11** |
@@ -310,7 +310,7 @@ app/
 prompts/             人设 群档案 二判 rubric 字段表
 launcher/            Windows 托盘启动器（C# 源码 + 已编译 exe + 图标）
 demo/                8 个演示（含自写 mock OneBot / mock DSH CLI）
-test/                200 项回归测试
+test/                203 项回归测试
 dist/                分发版打包（白名单 + 双闸门自检）
 ```
 

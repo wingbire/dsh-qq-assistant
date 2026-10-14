@@ -8,7 +8,8 @@
     table: null, values: null, runtime: null, defaults: null,
     dirty: false, page: "status",
     gid: null, groups: [], onebot: null, status: null, labels: null, memes: null,
-    napcatInfo: null, napcatLoading: false, napcatToken: null
+    napcatInfo: null, napcatLoading: false, napcatToken: null,
+    uiMsgOpen: (function () { try { return localStorage.getItem("dshqq-msg-open") === "1"; } catch (e) { return false; } })()
   };
 
   var PAGES = [
@@ -287,10 +288,19 @@
         '<td>' + esc(m.tier || "-") + '</td>' +
         '<td class="muted" style="max-width:280px">' + esc(shortText(reason, 60)) + '</td></tr>';
     }).join("");
-    var msgCard = '<div class="card"><div class="head">收到的消息与判定过程' +
-      '<span class="muted" style="font-size:12px">最近 ' + (st.messages || []).length + ' 条（内存缓冲，重启即清）</span></div><div class="body">' +
+    // 消息量大时这张卡片会很长 → 做成可折叠的（默认折叠，点开状态记在本机，刷新不丢）
+    var msgInfo = st.messagesInfo || {};
+    var perGroup = msgInfo.perGroup || 30;
+    var msgCount = (st.messages || []).length;
+    var msgCard = '<details class="card" id="msg-card"' + (S.uiMsgOpen ? " open" : "") + '>' +
+      '<summary class="head" style="cursor:pointer">收到的消息与判定过程' +
+      '<span class="muted" style="font-size:12px">' + (S.uiMsgOpen ? "点标题折叠" : "点标题展开") +
+      '　最近 ' + msgCount + ' 条 · 每群留 ' + perGroup + ' 条，满了丢最旧</span></summary>' +
+      '<div class="body">' +
       '<table><thead><tr><th>时间</th><th>谁</th><th>消息</th><th>判定</th><th>动作</th><th>p_say</th><th>档位</th><th>依据</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="8" class="muted">还没有收到消息</td></tr>') + '</tbody></table></div></div>';
+      (rows || '<tr><td colspan="8" class="muted">还没有收到消息</td></tr>') + '</tbody></table>' +
+      '<div class="hint">判定表落盘在 <code>app/dsh-data/data/data/ui-messages.json</code>，每群最多保留 ' + perGroup + ' 条（可在「调整」页改），超出按时间丢最旧的。</div>' +
+      '</div></details>';
 
     var groupCard = S.gid ? ('<div class="card"><div class="head">本群累计（本次运行）</div><div class="body">' +
       '<div class="grid">' +
@@ -723,6 +733,13 @@
 
   /* ---------- 事件 ---------- */
   function bind() {
+    // 折叠状态：<details> 的 toggle 不冒泡，所以用捕获阶段收；顺便记到本机，刷新后保持
+    document.addEventListener("toggle", function (e) {
+      if (e.target && e.target.id === "msg-card") {
+        S.uiMsgOpen = !!e.target.open;
+        try { localStorage.setItem("dshqq-msg-open", e.target.open ? "1" : "0"); } catch (err) {}
+      }
+    }, true);
     document.addEventListener("click", function (e) {
       var nav = e.target.closest("[data-page]");
       if (nav) {

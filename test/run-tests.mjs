@@ -4,6 +4,7 @@ import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/s
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
+import { createUiMessages, trimRecords, UIMSG_DEFAULT } from "../app/src/uimessages.js";
 import { engagementOf, reward, costOf } from "../app/src/score.js";
 import { createProactive } from "../app/src/proactive.js";
 import { createStore } from "../app/src/store.js";
@@ -2223,6 +2224,49 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("uimessages: 每群有上限，满了丢最旧；群太多也按时间淘汰", function () {
+  const u = createUiMessages({ perGroup: 3, maxGroups: 2 });
+  for (let i = 0; i < 6; i++) u.add("G1", { at: i, speaker: "甲", text: "m" + i });
+  const g1 = u.list("G1", 10);
+  eq(g1.length, 3, "每群只留 3 条");
+  eq(g1.map(function (x) { return x.text; }), ["m3", "m4", "m5"], "留下的必须是最新三条");
+  eq(u.stats().evictedInGroup, 3, "丢掉的记一笔");
+  u.add("G2", { at: 100, text: "g2" });
+  u.add("G3", { at: 200, text: "g3" });
+  eq(u.groups().indexOf("G1") < 0, true, "最久没消息的群先被丢");
+  eq(trimRecords([{ at: 5 }, { at: 1 }, { at: 3 }], 2).map(function (x) { return x.at; }), [3, 5], "乱序也要按时间留最新的");
+});
+
+t("uimessages: 落盘后重启还记得，判定回填能改到那条", function () {
+  const tmp = path.join(os.tmpdir(), "dshqq-uimsg-test.json");
+  try { fs.unlinkSync(tmp); } catch (e) {}
+  const u = createUiMessages({ file: tmp, perGroup: 5 });
+  u.add("G1", { at: 1, speaker: "甲", text: "帮我看看" });
+  ok(u.update("G1", function (r) { return !r.verdict; }, { verdict: "yes", action: "brain", tier: "mid" }), "判定要能回填到那条消息上");
+  u.flush();
+  const u2 = createUiMessages({ file: tmp, perGroup: 5 });
+  const list = u2.list("G1", 5);
+  eq(list.length, 1, "重启后还在");
+  eq(list[0].verdict, "yes", "连同判定一起留下");
+  try { fs.unlinkSync(tmp); } catch (e) {}
+});
+
+t("runtime: 配置端消息表最新在上、每群有条数上限", async function () {
+  const store = fakeStore();
+  const rt = createRuntime({
+    config: {}, runtime: { observe: true, coalesceWindowMs: 100, coalesceMaxBatch: 5, uiMessageLimit: 3 },
+    store: store, bot: fakeBot({}), send: function () {},
+    askBrain: async function () { return { ok: true, text: "好", usage: { totalTokens: 5 } }; },
+    now: function () { return 0; }, sleep: async function () {}
+  });
+  for (let i = 0; i < 5; i++) await rt.onEvent({ gid: "G", uid: "u1", speaker: "甲", text: "消息" + i, now: i * 1000 });
+  await rt.tick(9000);
+  const msgs = rt.recentMessages("G", 10);
+  eq(msgs.length, 3, "每群只留 3 条（上限来自 runtime.uiMessageLimit）");
+  ok((msgs[0].at || 0) >= (msgs[msgs.length - 1].at || 0), "最新在最上面");
+  eq(rt.uiMessages.perGroup, 3);
+});
 
 t("localreply: 场景分池（图片 / 语音不再拿「嗯？」糊弄）", function () {
   const scene = function (dec, text) { return poolFor(dec, { text: text }).scene; };

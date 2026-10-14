@@ -33,6 +33,7 @@ export function createStore(root, limits) {
     budget: path.join(dataDir, "budget.json"),        // 今日已用 token —— 不落盘的话日熔断重启即失效
     brakes: path.join(dataDir, "brakes.json"),        // 按群暂停（含配置端"关掉本群"）—— 重启后还得停着
     localreplies: path.join(dataDir, "localreplies.json"),  // 每群最近说过的本地短答 —— 重启后别又从头"嗯？啥事"
+    uimessages: path.join(dataDir, "ui-messages.json"),      // 配置端"收到的消息"缓冲 —— 每群上限 30 条，满了丢最旧
     schema: path.join(dataDir, "schema.json"),
     observe: path.join(dataDir, "observation.jsonl"),
     brain: brainDir

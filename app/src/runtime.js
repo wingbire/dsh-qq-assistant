@@ -12,6 +12,7 @@ import { WORKSPACE_ROOT } from "./paths.js";
 import fs from "node:fs";
 import path from "node:path";
 import { localReply, createLocalReplies } from "./localreply.js";
+import { createUiMessages } from "./uimessages.js";
 import { depthPolicy, buildTaskText } from "./brain.js";
 import { parseMeme } from "./audit.js";
 import { injectSummary } from "./search.js";
@@ -83,7 +84,8 @@ export function createRuntime(deps) {
   // 配置端「状态」页要用的：分群计数 + 最近收到的消息（内存环形缓冲，重启即空；
   // 需要跨重启看判定过程时配置端会回落到 observation.jsonl）
   const perGroup = new Map();                   // gid -> { messages, replies, tokens, brainCalls, searches, memes, voice, lastAt }
-  const recentByGroup = new Map();              // gid -> [{ at, speaker, text, action, verdict, pSay, tier, reason }]
+  // 配置端"收到的消息"缓冲区：落盘 + 每群上限（默认 200）+ 满了按时间丢最旧
+  // （以前是内存里 80 条、重启即清 —— 消息一密就没人管得住）
   // P3：反馈归因（按被回复人是否继续跟我聊）+ 人工标注队列
   const tracker = d.tracker || createTracker({ windowMs: rc.feedbackWindowMs != null ? rc.feedbackWindowMs : 90000 });
   const labels = d.labels || (store ? createLabelQueue({ store: store, minSamples: rc.labelMinSamples || 30 }) : null);
@@ -125,13 +127,11 @@ export function createRuntime(deps) {
     if (!s) { s = { gid: k, messages: 0, replies: 0, tokens: 0, brainCalls: 0, searches: 0, memes: 0, voice: 0, lastAt: 0 }; perGroup.set(k, s); }
     return s;
   }
-  function pushRecent(gid, rec) {
-    const k = String(gid);
-    const arr = recentByGroup.get(k) || [];
-    arr.push(rec);
-    while (arr.length > 80) arr.shift();
-    recentByGroup.set(k, arr);
-  }
+  const uiMessages = d.uiMessages || createUiMessages({
+    perGroup: rc.uiMessageLimit,
+    file: d.uiMsgFile || (store && store.paths ? store.paths.uimessages : null)
+  });
+  function pushRecent(gid, rec) { return uiMessages.add(gid, rec); }
   // 控制接口（配置端的快捷按钮）
   function setGroupEnabled(gid, on) {
     if (on) brakes.resumeGroup(gid); else brakes.stopGroup(gid, 999999, now());   // 999999 分钟 = 一直停
@@ -417,14 +417,11 @@ export function createRuntime(deps) {
       const evt = Object.assign({}, evtDefaults, lastBot.get(String(rawEvt.gid)) || {}, rawEvt);
       const dec = await bot.handleEvent(evt);
       decisions.push(Object.assign({}, dec, { evt: evt }));
-      const arr = recentByGroup.get(String(batch.gid)) || [];
-      for (let i = arr.length - 1; i >= 0; i--) {
-        if (!arr[i].verdict && arr[i].text === (rawEvt.text || (rawEvt.hasImage ? "[图片]" : ""))) {
-          arr[i].verdict = dec.verdict; arr[i].action = dec.action; arr[i].pSay = dec.pSay;
-          arr[i].tier = dec.tier; arr[i].reason = (dec.reason || []).slice(0, 3);
-          break;
-        }
-      }
+      const wantText = rawEvt.text || (rawEvt.hasImage ? "[图片]" : "");
+      uiMessages.update(batch.gid, function (r) { return !r.verdict && r.text === wantText; }, {
+        verdict: dec.verdict, action: dec.action, pSay: dec.pSay,
+        tier: dec.tier, reason: (dec.reason || []).slice(0, 3)
+      });
       observe({
         kind: "decision", gid: batch.gid, uid: batch.uid, speaker: evt.speaker,
         text: evt.text, atBot: !!evt.atBot, replyToBot: !!evt.replyToBot,
@@ -656,13 +653,10 @@ export function createRuntime(deps) {
     tracker: tracker, labels: labels,
     groups: function () { return Array.from(perGroup.values()).sort(function (a, b) { return b.lastAt - a.lastAt; }); },
     groupStats: function (gid) { return Object.assign({}, gstat(gid)); },
-    recentMessages: function (gid, limit) { const a = (recentByGroup.get(String(gid)) || []).slice(); return limit ? a.slice(-limit) : a; },
-    allRecent: function (limit) {
-      const out = [];
-      for (const [gid, arr] of recentByGroup) for (const r of arr) out.push(Object.assign({ gid: gid }, r));
-      out.sort(function (a, b) { return b.at - a.at; });
-      return limit ? out.slice(0, limit) : out;
-    },
+    // 注意：这两个都给"最新在上"（配置端盯着看，最新的那行该在最上面）
+    recentMessages: function (gid, limit) { return uiMessages.list(gid, limit).reverse(); },
+    allRecent: function (limit) { return uiMessages.all(limit).reverse(); },
+    uiMessages: uiMessages,
     setGroupEnabled: setGroupEnabled, groupEnabled: groupEnabled,
     setGlobalPaused: setGlobalPaused, globalPaused: function () { return !!brakes.info().configPaused; },
     pendingFeedback: function () { return tracker.pendingCount(); },

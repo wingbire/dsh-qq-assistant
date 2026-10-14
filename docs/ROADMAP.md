@@ -21,7 +21,7 @@
 | `deepseek-ai/deepseek-v4.1-flash` 等 sealIds | ❌ 空文本 | ❌ | 那条车道要登录 |
 
 **代价**：免费池**不享前缀缓存**（实测 `cacheReadTokens: 0`），而官方模型命中率 94~96%。
-所以「省下来的钱」和「慢 + 没缓存」要自己权衡。走 OFM 时二判超时记得放宽到 20000，否则会一直判「不确定」。
+所以「省下来的钱」和「慢 + 没缓存」要自己权衡。走 OFM 时二判超时记得放宽到 20300，否则会一直判「不确定」。
 | **语音依赖 Windows SAPI** | 只有 Windows 能合成 | 非 Windows 可关掉语音，其余功能不受影响 |
 | **识图需要外部多模态** | `http` 后端要你自己提供 OpenAI 兼容接口 | 默认关闭 |
 | **只支持 OneBot v11** | NapCat / go-cqhttp 等 | 够用，但要接别的协议得写适配 |
@@ -68,4 +68,4 @@
 - **非 Windows 的语音后端** —— 现在只有 SAPI
 
 改之前建议先读 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [DESIGN.md](DESIGN.md)；
-跑 `node test/run-tests.mjs` 应当是 **200 项全过**，加了功能记得补测试。
+跑 `node test/run-tests.mjs` 应当是 **203 项全过**，加了功能记得补测试。

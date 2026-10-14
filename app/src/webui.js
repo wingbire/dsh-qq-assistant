@@ -158,6 +158,11 @@ export function createWebUi(deps) {
       group: (gid && runtime && runtime.groupStats) ? runtime.groupStats(gid) : null,
       allGroups: live,
       messages: (gid && runtime && runtime.recentMessages) ? runtime.recentMessages(gid, limit) : (runtime && runtime.allRecent ? runtime.allRecent(limit) : []),
+      messagesInfo: {
+        shown: 0,
+        perGroup: (runtime && runtime.uiMessages && runtime.uiMessages.perGroup) || null,
+        groups: (runtime && runtime.uiMessages) ? runtime.uiMessages.groups().length : 0
+      },
       labels: labels ? labels.status() : null,
       memes: memes && memes.ready ? { rows: memes.rows.length, tags: memes.tags().length, pack: path.basename(memes.packDir || "") } : null
     };
