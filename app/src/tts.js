@@ -29,6 +29,40 @@ export function buildSapiScript(text, outFile, cfg) {
   ].filter(Boolean).join("; ");
 }
 
+// 本机可用音色（只在启用语音时探一次，spawn 一次 PowerShell）
+export function listSapiVoices(opts) {
+  const o = opts || {};
+  const run = o.run || function (script) {
+    return spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  };
+  try {
+    const r = run("Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }");
+    if (!r || r.status !== 0) return null;
+    return String(r.stdout || "").split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+  } catch (e) { return null; }
+}
+
+// runtime.voice 段 → { enabled, capable, voice, voices, source, note }
+// 和人设的关系：写进人设的【语音】要跟"这台机器到底念不念得出来"一致。
+export function voiceCapability(cfg, opts) {
+  const c = Object.assign({}, TTS_DEFAULTS, cfg || {});
+  const out = { enabled: !!c.enabled, capable: false, voice: c.voice, voices: null, source: "", note: "" };
+  if (!out.enabled) { out.source = "关闭"; out.note = "语音未启用"; return out; }
+  if (process.platform !== "win32") { out.source = "平台"; out.note = "TTS 走 Windows 自带 SAPI，非 Windows 上发不出语音"; return out; }
+  const o = opts || {};
+  const voices = o.voices !== undefined ? o.voices : listSapiVoices(o);
+  out.voices = voices;
+  if (voices && voices.length === 0) { out.source = "本机音色"; out.note = "本机没有任何 SAPI 音色"; return out; }
+  out.capable = true;
+  out.source = "SAPI";
+  if (voices && c.voice && voices.indexOf(c.voice) < 0) {
+    out.note = "配置的音色「" + c.voice + "」不在本机列表里 → 会退回默认音色（可用：" + voices.slice(0, 5).join(" / ") + "）";
+  } else {
+    out.note = "音色 " + (c.voice || "默认") + " 可用";
+  }
+  return out;
+}
+
 export function createTts(opts) {
   const o = opts || {};
   const cfg = Object.assign({}, TTS_DEFAULTS, o.config || {});

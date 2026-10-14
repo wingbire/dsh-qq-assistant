@@ -91,14 +91,23 @@ export function normalizeEvent(raw, ctx) {
   // 图片 / 语音 / 视频也算「有内容」—— 纯图片消息不能因为没文字就被丢掉（N18 识图要用）
   const images = [];
   let hasRich = false;
+  let hasVoice = false;
   for (const s of segs) {
     if (!s || typeof s !== "object") continue;
     if (s.type === "image") { hasRich = true; images.push({ file: String((s.data || {}).file || ""), url: String((s.data || {}).url || "") }); }
-    else if (s.type === "record" || s.type === "video" || s.type === "face" || s.type === "file") hasRich = true;
+    else if (s.type === "record") { hasRich = true; hasVoice = true; }
+    else if (s.type === "video" || s.type === "face" || s.type === "file") hasRich = true;
   }
   let text = texts.join("").trim();
   if (!text && typeof raw.raw_message === "string") text = raw.raw_message.replace(/\[CQ:(at|image|record|face),[^\]]*\]/g, "").trim();
   if (!text && !hasRich) return null;
+  // 纯媒体消息给个标记：模型看到的不是"一条空消息"。
+  // 图片有识图时会换成画面描述；语音本程序不做转写，人设里也写了"听不到内容"。
+  if (!text) {
+    if (images.length) text = "[图片]";
+    else if (hasVoice) text = "[语音]";
+    else text = "[多媒体]";
+  }
 
   const sender = raw.sender || {};
   const speaker = normalizeName(sender.card || sender.nickname || uid);
@@ -118,6 +127,7 @@ export function normalizeEvent(raw, ctx) {
     segments: segs,
     images: images,
     hasImage: images.length > 0,
+    hasVoice: hasVoice,
     now: c.now != null ? c.now : Date.now()
   };
 }

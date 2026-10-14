@@ -32,8 +32,8 @@ import { createWebUi, summarizeObservations, summarizeCost, startOfToday, DEFAUL
 import { gitInfo, checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "../app/src/update.js";
 import { personaFromConfig } from "../app/src/dshprofile.js";
 import { createMockOneBotServer } from "../app/src/mock-onebot-server.js";
-import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, VISION_DEFAULTS, VISION_PROFILE_ID } from "../app/src/vision.js";
-import { createTts, parseVoiceTag, buildSapiScript, TTS_DEFAULTS } from "../app/src/tts.js";
+import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, modelHasVision, visionCapability, VISION_DEFAULTS, VISION_PROFILE_ID } from "../app/src/vision.js";
+import { createTts, parseVoiceTag, buildSapiScript, voiceCapability, listSapiVoices, TTS_DEFAULTS } from "../app/src/tts.js";
 import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1437,7 +1437,7 @@ t("vision: 纯图片消息不再被归一化丢掉", function () {
   const raw = { post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 5, sender: { nickname: "甲" }, message: [{ type: "image", data: { file: "C:/a.jpg", url: "http://x/a.jpg" } }] };
   const e = normalizeEvent(raw, { selfId: "9", now: 0 });
   ok(e, "纯图片消息必须保留");
-  eq(e.text, "");
+  eq(e.text, "[图片]", "给个标记：模型不该收到一条空消息（有识图时会换成画面描述）");
   eq(e.hasImage, true);
   eq(e.images.length, 1);
   eq(e.atBot, false);
@@ -2199,6 +2199,66 @@ t("runtime: 每群每小时上限（groupHourlyLimit）真的会拦", async func
   const r2 = await rt.tick(1200);
   eq(r2.results.some(function (x) { return x.action === "group_limit"; }), true, "超上限就该静默丢弃");
   eq(sent.length, 1, "第二条不再发");
+});
+
+t("vision: 模型视觉能力识别（自动 / 有 / 无）", function () {
+  eq(modelHasVision("qwen-vl-max"), true);
+  eq(modelHasVision("gpt-4o"), true);
+  eq(modelHasVision("mimo-v2.6-flash-free"), true, "项目自带的识图模型按有视觉处理");
+  eq(modelHasVision("deepseek-chat"), false);
+  eq(modelHasVision("qwen-max"), false);
+  eq(modelHasVision("某个没听说过的模型"), null, "认不出来就是 null");
+
+  eq(visionCapability({ enabled: false, mode: "dsh", model: "mimo-v2.6-flash-free" }).capable, false);
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "mimo-v2.6-flash-free" }).capable, true);
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "deepseek-chat" }).capable, false, "纯文本模型不给声明");
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "神秘模型-x" }).capable, false, "认不出就保守：不声明也不调用");
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "神秘模型-x", capable: "有" }).capable, true, "配置可强制");
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "mimo-v2.6-flash-free", capable: "无" }).capable, false, "配置可否认");
+  eq(visionCapability({ enabled: true, mode: "http", model: "随便" }).capable, true, "http 后端由用户自配，按有视觉处理");
+});
+
+t("tts: 语音输出能力跟着平台与音色走", function () {
+  eq(voiceCapability({ enabled: false }).capable, false);
+  eq(voiceCapability({ enabled: true, voice: "Microsoft Huihui" }, { voices: [] }).capable, false, "本机没音色就别声明");
+  eq(voiceCapability({ enabled: true, voice: "Microsoft Huihui" }, { voices: ["Microsoft Huihui", "Microsoft Yaoyao"] }).capable, true);
+  const wrong = voiceCapability({ enabled: true, voice: "不存在的音色" }, { voices: ["Microsoft Huihui"] });
+  eq(wrong.capable, true, "音色写错还能退回默认音色，能力仍算有");
+  ok(wrong.note.indexOf("退回默认音色") >= 0);
+});
+
+t("persona: 可变段放最后 —— 开关只动尾巴，前面照样命中前缀缓存", function () {
+  const table = loadFieldTable();
+  const cfgA = deepMerge(defaultsFromTable(table), { runtime: { vision: { enabled: false } }, plugins: { meme: true } });
+  const cfgB = deepMerge(defaultsFromTable(table), { runtime: { vision: { enabled: true, mode: "dsh", model: "mimo-v2.6-flash-free" } }, plugins: { meme: false } });
+  const a = buildPersonaText(personaFromConfig(cfgA, { ttsVoices: [] }), cfgA);
+  const b = buildPersonaText(personaFromConfig(cfgB, { ttsVoices: [] }), cfgB);
+  ok(a.indexOf("【看图】") < 0, "关掉识图（或模型没视觉）就不写看图段");
+  ok(b.indexOf("【看图】") >= 0, "有视觉能力才写");
+  const tailMark = a.indexOf("【当前形态】");
+  ok(tailMark > 0, "可变段从「当前形态」开始");
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  ok(i >= tailMark, "稳定核心（前 " + tailMark + " 字节）必须逐字节一致，实际共同前缀 " + i);
+  ok(b.indexOf("【看图】") > b.indexOf("【安全底线】"), "可变段排在稳定段之后");
+  ok(a.indexOf("【听不到语音】") > 0, "不做转写这件事要写进人设（常量，放稳定段）");
+  ok(a.indexOf("【看不到图】") > 0, "没视觉能力时也要诚实（不猜图）");
+  ok(b.indexOf("【看不到图】") < 0, "有视觉能力就不该写「看不到图」");
+
+  const cfgC = deepMerge(defaultsFromTable(table), { runtime: { voice: { enabled: true } } });
+  ok(buildPersonaText(personaFromConfig(cfgC, { ttsVoices: [] }), cfgC).indexOf("【语音】") < 0, "本机没音色 → 不声明语音");
+  ok(buildPersonaText(personaFromConfig(cfgC, { ttsVoices: ["Microsoft Huihui"] }), cfgC).indexOf("【语音】") >= 0, "有音色 → 声明语音");
+});
+
+t("onebot: 纯语音 / 纯图片消息带标记（不做转写，但也别让模型收到空消息）", function () {
+  const e1 = normalizeEvent({ post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 5, sender: { nickname: "甲" }, message: [{ type: "record", data: { file: "a.amr" } }] }, { selfId: "9", now: 0 });
+  ok(e1, "语音消息不能被丢掉");
+  eq(e1.text, "[语音]");
+  eq(e1.hasVoice, true);
+  eq(e1.hasImage, false);
+  const e2 = normalizeEvent({ post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 6, sender: { nickname: "甲" }, message: [{ type: "image", data: { file: "C:/a.jpg" } }] }, { selfId: "9", now: 0 });
+  eq(e2.text, "[图片]");
+  eq(e2.hasVoice, false);
 });
 
 t("gates: 24 条模拟情景里踩过的坑（指代不明 / 人称混用 / 长短悬殊）", async function () {

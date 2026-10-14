@@ -19,6 +19,41 @@ export const VISION_DEFAULTS = {
 
 export const IMAGE_EXT = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"];
 
+// 视觉能力：从模型名猜"这个模型看不看得懂图"。
+// 目的只有一个：别在人设里写"你看得到图"，而模型其实看不到 —— 那会让它对着空气聊图片。
+// 猜不准时一律**保守**（当作没有视觉），要强制就在配置里选「有」。
+export const VISION_MODEL_HINTS = [
+  /[-_.](vl|vision|omni|multimodal)([-_.]|$)/i, /gpt-4o/i, /gpt-4\.1/i, /gemini/i, /claude-(3|4)/i,
+  /glm-4v/i, /internvl/i, /llava/i, /pixtral/i, /qwen.{0,8}vl/i, /step-1v/i, /ernie.{0,6}vl/i, /mimo/i
+];
+const TEXT_ONLY_HINTS = /^(deepseek-(chat|coder|reasoner)|qwen-(max|plus|turbo)|glm-4(-|$)|gpt-3\.5|moonshot-v1)/i;
+
+export function modelHasVision(model) {
+  const m = String(model || "").trim();
+  if (!m) return null;
+  for (const re of VISION_MODEL_HINTS) if (re.test(m)) return true;
+  if (TEXT_ONLY_HINTS.test(m)) return false;
+  return null;                                  // 认不出来 → null（调用方按保守处理）
+}
+
+// runtime.vision 段 → { enabled, capable, model, source, note }
+export function visionCapability(cfg) {
+  const c = Object.assign({}, VISION_DEFAULTS, cfg || {});
+  const enabled = c.enabled === true && (c.mode === "http" || c.mode === "dsh");
+  const out = { enabled: enabled, capable: false, model: c.model, mode: c.mode, source: "", note: "" };
+  if (!enabled) { out.source = "关闭"; out.note = "识图未启用"; return out; }
+  const forced = String(c.capable || "自动");
+  if (forced === "有") { out.capable = true; out.source = "配置指定"; out.note = "按配置声明有视觉能力"; return out; }
+  if (forced === "无") { out.source = "配置指定"; out.note = "按配置声明没有视觉能力（不写看图人设）"; return out; }
+  if (c.mode === "http") { out.capable = true; out.source = "http 接口"; out.note = "http 后端由你自己配，按有视觉处理"; return out; }
+  const known = modelHasVision(c.model);
+  if (known === true) { out.capable = true; out.source = "模型名识别"; out.note = "模型名看起来支持图片"; return out; }
+  if (known === false) { out.source = "模型名识别"; out.note = "模型名看着是纯文本模型 → 不写看图人设，也不调用"; return out; }
+  out.source = "拿不准";
+  out.note = "认不出这个模型有没有视觉 → 保守处理（不声明、不调用）；确认支持就把「识图视觉能力」改成「有」";
+  return out;
+}
+
 // dsh 后端用的 profile 与人设（和群小助手人设分开，避免污染 chat 的 personaPrefix 缓存）
 export const VISION_PROFILE_ID = "qq-vision";
 export const VISION_PERSONA = [

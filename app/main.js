@@ -13,7 +13,8 @@ import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA } from "./src/vision.js";
-import { createTts } from "./src/tts.js";
+import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
+import { visionCapability } from "./src/vision.js";
 import { CONFIG_FILE, DATA_ROOT, BRAIN_TMP_DIR, WORKSPACE_ROOT, DSH_HOME } from "./src/paths.js";
 import { pickApiKey } from "./src/secrets.js";
 import { checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "./src/update.js";
@@ -125,7 +126,12 @@ const napcatBoot = syncNapCatOnBoot();
 log("NapCat 对接：" + (napcatBoot.plan.note || napcatBoot.plan.warn[0] || "没有可对齐的信息") + (napcatBoot.changed.length ? "（已写入配置：" + napcatBoot.changed.join(" ") + "）" : ""));
 for (const w of napcatBoot.plan.warn) log("NapCat 提醒：" + w);
 const rc = runtimeConfig(cfg);
-const persona = personaFromConfig(cfg);
+// 能力声明：写进人设的"我看得到图 / 我能发语音"必须和这台机器真做得到的事一致。
+// 音色只在开了语音时探一次（spawn 一次 PowerShell）。
+const ttsVoices = rc.voice.enabled ? listSapiVoices() : null;
+const voiceCap = voiceCapability(rc.voice, { voices: ttsVoices });
+const visionCap = visionCapability(rc.vision);
+const persona = personaFromConfig(cfg, { ttsVoices: ttsVoices });
 
 log("模式：" + (rc.stageMode === "auto" ? "auto（新群观察 " + rc.observeUntilMessages + " 条 → 半自动 " + rc.semiAutoDays + " 天 → 全自动）" : rc.stageMode === "observe" ? "强制观察" : "直接实际发送"));
 log("数据根：" + DATA_ROOT);
@@ -216,16 +222,23 @@ log("图库：" + (memes.ready ? memes.rows.length + " 张 / " + memes.tags().le
 
 // N18 识图：独立一次多模态调用（http 直连 / dsh 跑 Our Free Model）
 const vision = createVision({
-  config: rc.vision,
+  // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
+  config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
   runner: async function (req) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
+    // 配置端改完立刻生效（人设是保存时就重写的，通道也别等到重启）
+    const live = visionCapability(runtimeConfig(liveCfg).vision);
+    if (!live.capable) return { ok: false, error: "当前识图模型没有视觉能力（" + live.source + "）" };
     ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA });
     return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
   }
 });
 // N18 语音：TTS 走 Windows 自带 SAPI（离线、零依赖）
-const tts = createTts({ config: rc.voice, outDir: path.join(DATA_ROOT, "voice") });
+const tts = createTts({ config: Object.assign({}, rc.voice, { enabled: rc.voice.enabled && voiceCap.capable }), outDir: path.join(DATA_ROOT, "voice") });
 log("识图：" + (rc.vision.enabled ? rc.vision.mode + " / " + rc.vision.model : "关闭") + "；语音：" + (rc.voice.enabled ? rc.voice.voice : "关闭"));
+log("能力声明 · 看图：" + (visionCap.enabled ? (visionCap.capable ? "会写进人设（" + visionCap.source + "）" : "不写进人设（" + visionCap.source + "：" + visionCap.note + "）") : "关闭")
+  + "　发音：" + (voiceCap.enabled ? (voiceCap.capable ? "会写进人设（" + voiceCap.source + "：" + voiceCap.note + "）" : "不写进人设（" + voiceCap.source + "：" + voiceCap.note + "）") : "关闭")
+  + "　听语音：不做转写（人设写死"听不到内容"）");
 log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入口）");
 
 const runtime = createRuntime({

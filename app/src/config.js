@@ -193,6 +193,7 @@ export function runtimeConfig(cfg) {
       endpoint: getPath(c, "runtime.vision.endpoint") || "",
       apiKey: getPath(c, "runtime.vision.apiKey") || "",
       model: getPath(c, "runtime.vision.model") || "mimo-v2.6-flash-free",
+      capable: getPath(c, "runtime.vision.capable") || "自动",     // 自动 / 有 / 无：模型有没有视觉能力
       profile: getPath(c, "runtime.vision.profile") || "qq-vision",
       timeoutMs: getPath(c, "runtime.vision.timeoutMs") || 20000,
       maxChars: getPath(c, "runtime.vision.maxChars") || 300
