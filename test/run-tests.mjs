@@ -2367,7 +2367,7 @@ t("onebot: 纯语音 / 纯图片消息带标记（不做转写，但也别让模
 
 t("gates: 24 条模拟情景里踩过的坑（指代不明 / 人称混用 / 长短悬殊）", async function () {
   const g = createGates({ auditFn: async function () { return { verdict: "yes" }; } });
-  const base = { gid: "255452871", uid: "1351846399", now: 0, botNames: ["小肥鱼"], nicknames: [] };
+  const base = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [] };
   const act = async function (text, extra) { const d = await g.decide(Object.assign({}, base, { text: text }, extra || {}), {}); return d.action; };
 
   // 1) 灌水/单符号别再放行
@@ -2377,7 +2377,7 @@ t("gates: 24 条模拟情景里踩过的坑（指代不明 / 人称混用 / 长�
   eq(await act("他妈的这游戏怎么又崩了"), "local_short");
   eq(await act("你俩别吵了，说点别的"), "local_short");
   // 「你」到底指谁，本地规则分不清 → 交给外审（这正是 auditUnaddressed 的用武之处）
-  const c22 = { gid: "255452871", uid: "1351846399", now: 0, botNames: ["小肥鱼"], nicknames: [], text: "你这周有空吗，陪我去看个电影" };
+  const c22 = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [], text: "你这周有空吗，陪我去看个电影" };
   eq((await createGates({ auditFn: async function () { return { verdict: "short" }; } }).decide(Object.assign({}, c22), {})).action, "local_short", "外审说「短」→ 只回一句");
   eq((await createGates({ auditFn: async function () { return { verdict: "no" }; } }).decide(Object.assign({}, c22), {})).action, "ignore", "外审说「否」→ 干脆不说");
   // 3) 点名寒暄 → 本地应答型短答（口气对、零成本）；点名问真事 → 进大脑
