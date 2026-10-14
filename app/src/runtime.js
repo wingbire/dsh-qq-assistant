@@ -123,7 +123,7 @@ export function createRuntime(deps) {
     });
   }
 
-  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0 };
+  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0 };
   let busy = false;
 
   function observe(rec) {
@@ -424,6 +424,12 @@ export function createRuntime(deps) {
   async function onEvent(evt) {
     if (evt && evt.kind === "poke") return onPoke(evt);
     stats.events += 1;
+    // 语音消息：只记"有没有转写 + record 段带了哪些字段名"（不落内容），方便确认 NapCat 给不给官方转写
+    if (evt.hasVoice) {
+      stats.voices += 1;
+      if (evt.voiceText) stats.voicesTranscribed += 1;
+      observe({ kind: "voice_seen", gid: evt.gid, uid: evt.uid, hasText: !!evt.voiceText, keys: evt.voiceKeys || [] });
+    }
     const gs = gstat(evt.gid);
     gs.messages += 1;
     gs.lastAt = evt.now || now();

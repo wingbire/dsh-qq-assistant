@@ -10,7 +10,7 @@
 再决定**说不说 / 说多深 / 要不要先搜 / 配不配图**；只有真需要时才动大脑。
 然后它会看着群里的反应慢慢**自学习**，越来越像这个群的人。
 
-[![tests](https://img.shields.io/badge/tests-213%20passing-brightgreen)](#测试与证据)
+[![tests](https://img.shields.io/badge/tests-215%20passing-brightgreen)](#测试与证据)
 [![acceptance](https://img.shields.io/badge/acceptance-9%2F9-brightgreen)](#测试与证据)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-blue)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/npm%20dependencies-0-orange)](#零依赖)
@@ -155,7 +155,7 @@ git clone https://github.com/wingbire/dsh-qq-assistant.git
 cd dsh-qq-assistant
 
 # 1. 自检（不需要 QQ、不需要 key）
-node test/run-tests.mjs         # 213 项
+node test/run-tests.mjs         # 215 项
 node demo/run-acceptance.mjs    # 全量验收记分卡
 
 # 2. 起程序（默认「新群先观察」，一个字都不发）
@@ -272,13 +272,13 @@ flowchart LR
 ## 测试与证据
 
 ```
-node test/run-tests.mjs        →  通过 213 项，失败 0 项
+node test/run-tests.mjs        →  通过 215 项，失败 0 项
 node demo/run-acceptance.mjs   →  通过 9 / 9
 ```
 
 | 验收项 | 结果 |
 |---|---|
-| 骨架回归测试 | **213 项全过** |
+| 骨架回归测试 | **215 项全过** |
 | 判定中枢演示 | 判决分布符合预期 |
 | 大脑通道（mock CLI） | ok |
 | 接入端到端（mock OneBot） | **11 / 11** |
@@ -314,7 +314,7 @@ app/
 prompts/             人设 群档案 二判 rubric 字段表
 launcher/            Windows 托盘启动器（C# 源码 + 已编译 exe + 图标）
 demo/                8 个演示（含自写 mock OneBot / mock DSH CLI）
-test/                213 项回归测试
+test/                215 项回归测试
 dist/                分发版打包（白名单 + 双闸门自检）
 ```
 

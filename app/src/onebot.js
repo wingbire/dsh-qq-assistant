@@ -58,6 +58,23 @@ export function withToken(url, token) {
   return u + (u.includes("?") ? "&" : "?") + "access_token=" + encodeURIComponent(String(token));
 }
 
+// QQ 官方"语音转文字"的文本可能落在这几个地方（取决于 NapCat 版本）：
+//   message[].data.text / transcription / summary，或 raw_message 的 [CQ:record,text=...]。
+// 内容是明文 / URL 编码 / base64 三种都可能，这里都试一遍；解不出来就当没有（绝不编）。
+export function decodeCqText(v) {
+  let s = String(v == null ? "" : v).trim();
+  if (!s) return "";
+  const hasHan = function (t) { return /[\u4e00-\u9fa5]/.test(t); };
+  try { const u = decodeURIComponent(s); if (u !== s && hasHan(u)) return u.slice(0, 300); } catch (e) {}
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length >= 8) {
+    try {
+      const t = Buffer.from(s, "base64").toString("utf8");
+      if (hasHan(t) && t.indexOf("\uFFFD") < 0) return t.slice(0, 300);
+    } catch (e) {}
+  }
+  return hasHan(s) ? s.slice(0, 300) : "";
+}
+
 // OneBot v11 原始事件 → 内部事件。返回 null 表示「不该处理的」。
 export function normalizeEvent(raw, ctx) {
   const c = ctx || {};
@@ -96,21 +113,35 @@ export function normalizeEvent(raw, ctx) {
   const images = [];
   let hasRich = false;
   let hasVoice = false;
+  let voiceText = "";
+  const voiceKeys = [];
   for (const s of segs) {
     if (!s || typeof s !== "object") continue;
     if (s.type === "image") { hasRich = true; images.push({ file: String((s.data || {}).file || ""), url: String((s.data || {}).url || "") }); }
-    else if (s.type === "record") { hasRich = true; hasVoice = true; }
+    else if (s.type === "record") {
+      hasRich = true; hasVoice = true;
+      const d0 = s.data || {};
+      for (const k of Object.keys(d0)) if (voiceKeys.indexOf(k) < 0) voiceKeys.push(k);
+      if (!voiceText) voiceText = decodeCqText(d0.text || d0.transcription || d0.summary || "");
+    }
     else if (s.type === "video" || s.type === "face" || s.type === "file") hasRich = true;
   }
   let text = texts.join("").trim();
+  if (!voiceText && typeof raw.raw_message === "string" && /\[CQ:record/.test(raw.raw_message)) {
+    const m = raw.raw_message.match(/\[CQ:record[^\]]*text=([^,\]]+)/);
+    if (m) voiceText = decodeCqText(m[1]);
+  }
   if (!text && typeof raw.raw_message === "string") text = raw.raw_message.replace(/\[CQ:(at|image|record|face),[^\]]*\]/g, "").trim();
   if (!text && !hasRich) return null;
   // 纯媒体消息给个标记：模型看到的不是"一条空消息"。
   // 图片有识图时会换成画面描述；语音本程序不做转写，人设里也写了"听不到内容"。
   if (!text) {
     if (images.length) text = "[图片]";
-    else if (hasVoice) text = "[语音]";
+    else if (hasVoice) text = voiceText ? ("[语音] 转写：" + voiceText) : "[语音]";
     else text = "[多媒体]";
+  } else if (hasVoice && voiceText) {
+    // 语音 + 文字混着发：转写像识图描述一样打标签拼在后面，跟其它输入方式一样参与判定
+    text = text + " [语音转写：" + voiceText + "]";
   }
 
   const sender = raw.sender || {};
@@ -134,6 +165,8 @@ export function normalizeEvent(raw, ctx) {
     images: images,
     hasImage: images.length > 0,
     hasVoice: hasVoice,
+    voiceText: voiceText || null,          // QQ 官方转写（有就有，没有就是 null）
+    voiceKeys: voiceKeys,                  // 只记字段名（不落内容），用来确认 NapCat 到底给不给转写
     now: c.now != null ? c.now : Date.now()
   };
 }

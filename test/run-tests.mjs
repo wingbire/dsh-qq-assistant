@@ -18,7 +18,7 @@ import { splitReply, splitSentences, cutAtSentence } from "../app/src/split.js";
 import { createCoalescer, mergeBucket, pickAnchor } from "../app/src/coalesce.js";
 import { createBudget, dayKeyOf } from "../app/src/budget.js";
 import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
-import { createOneBot, normalizeEvent, normalizeNotice, withToken, errorText, probePort } from "../app/src/onebot.js";
+import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
@@ -2231,6 +2231,45 @@ t("语法：所有源码都要过 node --check（防呆：别再提交一个启�
 });
 
 function seedRng(seed) { let s = seed || 1; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
+
+t("onebot: 语音转写（明文 / base64 / CQ 原文 / 没给）都打标签", function () {
+  eq(decodeCqText("你好呀"), "你好呀", "明文直接用");
+  eq(decodeCqText(encodeURIComponent("明天几点开黑")), "明天几点开黑", "URL 编码要解");
+  eq(decodeCqText(Buffer.from("这个报错怎么解", "utf8").toString("base64")), "这个报错怎么解", "base64 要解");
+  eq(decodeCqText(""), "");
+  eq(decodeCqText("abc"), "", "解不出中文就当没有（别编）");
+
+  const mk = function (seg, extra) {
+    return Object.assign({ post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 5, sender: { nickname: "甲" }, message: [seg] }, extra || {});
+  };
+  const a = normalizeEvent(mk({ type: "record", data: { file: "a.amr", text: "明天几点开黑" } }), { selfId: "9", now: 0 });
+  eq(a.text, "[语音] 转写：明天几点开黑", "有转写就按和其它输入一样的标签格式");
+  eq(a.voiceText, "明天几点开黑");
+  const b = normalizeEvent(mk({ type: "record", data: { file: "a.amr" } }), { selfId: "9", now: 0 });
+  eq(b.text, "[语音]", "没转写就只说[语音]");
+  eq(b.voiceText, null);
+  const c = normalizeEvent(mk({ type: "record", data: { file: "a.amr" } }, { raw_message: "[CQ:record,file=a.amr,text=5piO5aSp5Yeg54K55byA6buR]" }), { selfId: "9", now: 0 });
+  eq(c.text, "[语音] 转写：明天几点开黑", "从 CQ 原文里也能捞出来");
+  ok(Array.isArray(c.voiceKeys), "记下 record 段的字段名（不落内容）");
+});
+
+t("runtime: 只发语音（大脑只写 [语音: …]）→ 不发文字，只发语音", async function () {
+  const sent = []; const voiced = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    send: function (g, t) { sent.push(t); }, sendImage: function () {},
+    tts: { enabled: function () { return true; }, synthesizeAsync: async function () { return { ok: true, chars: 4, bytes: 2000 }; } },
+    askBrain: async function () { return { ok: true, text: "[语音: 我在呢]", usage: { totalTokens: 3 } }; },
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0,
+    sendRecord: function (g, f) { voiced.push(f); return true; }
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你在吗", now: 0 });
+  await rt.tick(500);
+  eq(sent.length, 0, "只发语音时不发文字");
+  eq(rt.stats().voiceSent, 1, "语音发出去了");
+});
 
 t("onebot: 引用段与戳一戳事件的解析", function () {
   const raw = { post_type: "message", message_type: "group", group_id: 1, user_id: 2, self_id: 9, message_id: 11, sender: { nickname: "甲" }, message: [{ type: "reply", data: { id: 77, text: "被引用的原文" } }, { type: "text", data: { text: "对" } }] };
