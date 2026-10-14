@@ -71,7 +71,7 @@
 - **非 Windows 的语音后端** —— 现在只有 SAPI
 
 改之前建议先读 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [DESIGN.md](DESIGN.md)；
-跑 `node test/run-tests.mjs` 应当是 **215 项全过**，加了功能记得补测试。
+跑 `node test/run-tests.mjs` 应当是 **220 项全过**，加了功能记得补测试。
 
 ## 配置端：免费模型检测与下拉（2026-10-14 加）
 
