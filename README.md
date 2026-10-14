@@ -378,6 +378,7 @@ Token 真的不对时状态会明确显示**被服务端拒绝**并带上 NapCat
 | [docs/PRIVACY.md](docs/PRIVACY.md) | 数据分类 · 会外发的三样东西 · 凭据 · 上线前必做 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 已知限制（含**没验过的部分**）与计划 |
 | [docs/COST.md](docs/COST.md) | **成本实测**：一条回复多少钱（中位数 / 均值 / 长尾）、prompt 构成、预算阈值怎么设（可复算） |
+| [docs/WORKING-WITH-AI.md](docs/WORKING-WITH-AI.md) | **与 AI 结对开发的技巧与坑**：怎么描述需求、怎么验收、12 个真实翻车场景（本项目实例） |
 
 ## 许可
 
