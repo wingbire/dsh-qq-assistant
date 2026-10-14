@@ -387,7 +387,7 @@
             "dsh"
           ],
           "默认": "off",
-          "说明": "http=任何 OpenAI 兼容多模态接口；dsh=在 profile 里跑 DSH（需装 Our Free Model）"
+          "说明": "http=任何 OpenAI 兼容多模态接口；dsh=在 profile 里跑 DSH（默认走这条，配合「同大脑」= 跟大脑同一个模型）"
         },
         {
           "键": "runtime.vision.endpoint",
@@ -415,11 +415,18 @@
           "说明": "自动 = 按模型名判断（认不出就当没有，宁可不说也不让它对着空气聊图）；有 / 无 = 你说了算。判定结果决定人设里写不写「你看得到图」"
         },
         {
+          "键": "runtime.vision.provider",
+          "标签": "识图模型 provider",
+          "类型": "text",
+          "默认": "",
+          "说明": "只有把识图模型填成具体 id 时才需要；留空则跟随大脑的 provider"
+        },
+        {
           "键": "runtime.vision.model",
           "标签": "识图模型",
           "类型": "string",
-          "默认": "mimo-v2.6-flash-free",
-          "说明": "dsh 模式默认用 Our Free Model 的 MiMo V2.6 Flash"
+          "默认": "同大脑",
+          "说明": "默认「同大脑」= 与大脑用同一个模型（DSH 默认模型，实测 7 秒出画面描述）。填具体 id 才另起一个模型，那时要填 provider"
         },
         {
           "键": "runtime.voice.enabled",

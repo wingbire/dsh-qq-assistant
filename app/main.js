@@ -227,9 +227,10 @@ const vision = createVision({
   runner: async function (req) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
     // 配置端改完立刻生效（人设是保存时就重写的，通道也别等到重启）
-    const live = visionCapability(runtimeConfig(liveCfg).vision);
+    const liveCfgNow = runtimeConfig(liveCfg);
+    const live = visionCapability(liveCfgNow.vision);
     if (!live.capable) return { ok: false, error: "当前识图模型没有视觉能力（" + live.source + "）" };
-    ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA });
+    ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA, model: visionModelOf(liveCfgNow) });
     return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
   }
 });
@@ -296,6 +297,17 @@ async function listGroups() {
   return r.data.map(function (g) {
     return { group_id: String(g.group_id), group_name: g.group_name || "", member_count: g.member_count, max_member_count: g.max_member_count };
   });
+}
+
+// 识图用哪个模型："同大脑"（默认）= 跟大脑完全同一套解析（OFM 插件或 DSH 默认模型）；
+// 填了具体 id 才走一个独立模型（需要 provider，默认用大脑的 provider）。
+function visionModelOf(c) {
+  const conf = c || (webui ? webui.getConfig() : cfg) || {};
+  const v = (conf.runtime && conf.runtime.vision) || {};
+  const id = String(v.model || "").trim();
+  if (!id || id === "同大脑") return channelModel("brain", conf);
+  const brainCh = channelModel("brain", conf);
+  return { provider: String(v.provider || "").trim() || (brainCh && brainCh.provider) || "deepseek", model: id };
 }
 
 // API 通道：大脑与二判都可以选择走社区插件 Our Free Model（provider 固定为 our-free-model）

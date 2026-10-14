@@ -434,7 +434,12 @@ export function createRuntime(deps) {
     // N23：整批当成一轮来判定 —— 这样这一串里任何一条带 @/回复的硬触发都能生效；
     // 锚点仍取「最近一条单独判定过得去的」，用于把这次回复归属到具体那个人/那条消息。
     const visionTexts = await describeImages(batch);
-    const baseText = batch.plainText || batch.text;
+    let baseText = batch.plainText || batch.text;
+    // 有图但一条描述都没拿到（识图没开 / 模型没视觉 / 调用失败）→ 在正文里说清楚，
+    // 否则人设写着"你看得到图"、正文只有一个 [图片]，模型会顺着编。
+    if (!visionTexts.length && (batch.evts || []).some(function (e) { return e && e.hasImage; })) {
+      baseText = (baseText ? baseText + " " : "") + "（这条里的图片没拿到内容：识图没开或识别失败，不要假装看到了，直接说看不到、让对方描述）";
+    }
     const mergedEvt = Object.assign({}, evtDefaults, lastBot.get(String(batch.gid)) || {}, {
       gid: batch.gid, uid: batch.uid,
       speaker: (batch.evts[batch.evts.length - 1] || {}).speaker || "",

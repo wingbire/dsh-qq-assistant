@@ -7,7 +7,9 @@ import path from "node:path";
 //   dsh  = 在指定 profile 里跑一次 DSH（profile 需装好 dsh-our-free-model）
 export const VISION_DEFAULTS = {
   mode: "off",                 // off | http | dsh
-  model: "mimo-v2.6-flash-free",
+  // 默认「同大脑」：识图跟大脑用同一个模型（DSH 默认模型），不用另配一个
+  model: "同大脑",
+  provider: "",                // 只有填了具体模型 id 时才需要（否则跟随大脑）
   profile: "qq-vision",
   endpoint: "",                // http 模式：https://.../v1/chat/completions
   apiKey: "",
@@ -46,6 +48,8 @@ export function visionCapability(cfg) {
   if (forced === "有") { out.capable = true; out.source = "配置指定"; out.note = "按配置声明有视觉能力"; return out; }
   if (forced === "无") { out.source = "配置指定"; out.note = "按配置声明没有视觉能力（不写看图人设）"; return out; }
   if (c.mode === "http") { out.capable = true; out.source = "http 接口"; out.note = "http 后端由你自己配，按有视觉处理"; return out; }
+  const same = !c.model || String(c.model).trim() === "同大脑";
+  if (same) { out.capable = true; out.source = "跟随大脑模型"; out.note = "识图与大脑同一个模型（你显式选的，按有视觉处理）"; return out; }
   const known = modelHasVision(c.model);
   if (known === true) { out.capable = true; out.source = "模型名识别"; out.note = "模型名看起来支持图片"; return out; }
   if (known === false) { out.source = "模型名识别"; out.note = "模型名看着是纯文本模型 → 不写看图人设，也不调用"; return out; }

@@ -2237,6 +2237,10 @@ t("vision: 模型视觉能力识别（自动 / 有 / 无）", function () {
   eq(visionCapability({ enabled: true, mode: "dsh", model: "神秘模型-x", capable: "有" }).capable, true, "配置可强制");
   eq(visionCapability({ enabled: true, mode: "dsh", model: "mimo-v2.6-flash-free", capable: "无" }).capable, false, "配置可否认");
   eq(visionCapability({ enabled: true, mode: "http", model: "随便" }).capable, true, "http 后端由用户自配，按有视觉处理");
+  const same = visionCapability({ enabled: true, mode: "dsh", model: "同大脑" });
+  eq(same.capable, true, "默认「同大脑」= 显式选择用大脑模型，按有视觉处理");
+  eq(same.source, "跟随大脑模型");
+  eq(visionCapability({ enabled: true, mode: "dsh", model: "" }).capable, true, "空也按同大脑");
 });
 
 t("tts: 语音输出能力跟着平台与音色走", function () {
