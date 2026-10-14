@@ -624,7 +624,13 @@
   function bind() {
     document.addEventListener("click", function (e) {
       var nav = e.target.closest("[data-page]");
-      if (nav) { e.preventDefault(); S.page = nav.getAttribute("data-page"); render(); return; }
+      if (nav) {
+        e.preventDefault();
+        S.page = nav.getAttribute("data-page");
+        try { location.hash = S.page === "status" ? "" : S.page; } catch (err) {}
+        render();
+        return;
+      }
 
       if (e.target.closest("#pill-napcat") || e.target.closest("#btn-napcat")) { openNapcat(); return; }
       if (e.target.closest("#btn-reconnect")) {
@@ -813,6 +819,9 @@
       document.documentElement.setAttribute("data-theme", saved === "dark" ? "dark" : "light");
       var g = localStorage.getItem("dshqq-gid");
       if (g) S.gid = g;
+      // 支持 #状态 这种深链（分享某一页用）
+      var h = String(location.hash || "").replace(/^#\/?/, "");
+      if (h && PAGES.some(function (p) { return p.id === h; })) S.page = h;
     } catch (e) {}
     bind();
     api("/api/config").then(function (c) {
