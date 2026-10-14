@@ -414,6 +414,37 @@
   function linesOf(v) {
     return String(v || "").split(/[\n,，、;；]/).map(function (x) { return x.trim(); }).filter(Boolean);
   }
+  // 话题词条的生命周期视图：固化的、观察中的、以及最近一次提炼干了什么
+  function lifeHtml(d) {
+    var st = d.stats || {};
+    var watch = d.watch || [];
+    var log = d.log || null;
+    var rows = (d.interests || []).map(function (t) {
+      var s = st[t] || {};
+      var pin = s.pinned ? ' <span class="tag ok">手写·钉住</span>' : "";
+      return '<tr><td><b>' + esc(t) + '</b>' + pin + '</td><td class="muted">固化</td>' +
+        '<td class="muted">' + (s.hits != null ? s.hits + " 次" : "—") + '</td>' +
+        '<td class="muted">' + (s.days ? s.days.length + " 天" : "—") + '</td></tr>';
+    }).join("");
+    var wrows = watch.map(function (t) {
+      var s = st[t] || {};
+      return '<tr><td>' + esc(t) + '</td><td class="muted">观察中</td>' +
+        '<td class="muted">' + (s.hits != null ? s.hits + " 次" : "—") + '</td>' +
+        '<td class="muted">' + (s.days ? s.days.length + " 天" : "—") + '</td></tr>';
+    }).join("");
+    var gone = log && log.dropped && log.dropped.length
+      ? '<div class="hint" style="margin-top:6px">最近清掉的临时话题：' + esc(log.dropped.join("、")) + '</div>' : "";
+    var pro = log && log.promoted && log.promoted.length
+      ? '<div class="hint" style="margin-top:2px">最近固化的：' + esc(log.promoted.join("、")) + '</div>' : "";
+    return '<details class="card"><summary>话题词条的生命周期<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' +
+      '固化的会写进提示词，观察中的还要再出现几次</span></summary><div class="body">' +
+      '<div class="hint">规则：累计命中 ≥ 配置里的次数 <b>且</b> 跨够天数 → 固化；没固化的放在观察区，几天没再聊就自动清掉；' +
+      '固化后长期沉寂先降级回观察区（不直接删）。你在上面手写的话题一律钉住，永不淘汰。</div>' +
+      '<table style="margin-top:8px"><thead><tr><th>话题</th><th>状态</th><th>命中</th><th>跨天</th></tr></thead><tbody>' +
+      (rows + wrows) + '</tbody></table>' + pro + gone +
+      '</div></details>';
+  }
+
   function pageProfile() {
     if (!S.gid) return Promise.resolve('<div class="card"><div class="body"><div class="muted">先在右上角选一个群，才能看它的群档案。</div></div></div>');
     return api("/api/profile?gid=" + encodeURIComponent(S.gid)).then(function (d) {
@@ -436,6 +467,7 @@
         '<div class="field"><div class="label">活跃时段</div><div class="ctrl"><input type="text" id="pf-active" value="' + esc(p.activeHours || "") + '"></div></div>' +
         '<div class="ctl-row"><button class="btn-sm good" id="btn-save-profile">保存群档案</button>' +
         '<button class="btn-sm bad" id="btn-clear-profile">清空（让大脑重新提炼）</button></div>' +
+        lifeHtml(d) +
         '</div></div>' +
         '<details class="card"><summary>这一份档案实际拼进 prompt 的样子</summary><div class="body"><pre class="pre">' + esc(d.prompt || "（空）") + '</pre></div></details>';
     });
