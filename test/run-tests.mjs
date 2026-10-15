@@ -22,7 +22,7 @@ import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken,
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
 import { guardReply, softFlags } from "../app/src/guard.js";
-import { buildSelectOptions, providerIdsOf } from "../app/src/options.js";
+import { buildSelectOptions, providerIdsOf, resolveSelect } from "../app/src/options.js";
 import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
@@ -345,9 +345,11 @@ t("options: 可下拉字段的候选（provider / 音色 / 模型 / 语言）", 
     "噪音目录（隐藏文件 / channel-pack / attachments）不能当成 provider");
   const o = buildSelectOptions({ providers: ["deepseek-official", "our-free-model"], ofmIds: ["kilo-auto/free"], voices: ["Microsoft Huihui"] });
   eq(o["brain.provider"].length, 2);
-  ok(o["runtime.vision.provider"].indexOf("") >= 0, "识图 provider 允许留空（http 模式不用填）");
-  ok(o["brain.model"].indexOf("deepseek-v4-flash") >= 0 && o["brain.model"].indexOf("kilo-auto/free") >= 0, "模型候选 = DSH 的 v4 命名 + 免费池目录（实测 DSH 里是 deepseek-v4-*，不是旧的 deepseek-flash）");
-  ok(o["audit.model"] && o["audit.model"].indexOf("deepseek-v4-flash") >= 0 && o["audit.model"].length > 3, "外审模型候选同时含 DSH 与免费池两类");
+  eq(resolveSelect(o["runtime.vision.provider"], { "runtime.vision.mode": "http" }).join(","), "", "http 模式的识图 provider 只给「留空」这一项");
+  ok(resolveSelect(o["runtime.vision.provider"], { "runtime.vision.mode": "dsh" }).indexOf("deepseek-official") >= 0, "dsh 模式才列真实 provider");
+  ok(resolveSelect(o["brain.model"], { "brain.provider": "deepseek-official" }).indexOf("deepseek-v4-flash") >= 0, "大脑走 deepseek 时列 v4 命名（实测 DSH 里是 deepseek-v4-*，不是旧的 deepseek-flash）");
+  ok(resolveSelect(o["audit.model"], { "audit.channel": "DSH 默认" }).indexOf("deepseek-v4-flash") >= 0, "外审走 DSH 时列 v4");
+  ok(resolveSelect(o["audit.model"], { "audit.channel": "免费池" }).length > 0, "外审走免费池时列 OFM");
   eq(o["runtime.voice.voice"][0], "Microsoft Huihui");
   ok(o["runtime.stt.lang"].indexOf("zh") >= 0, "转写语言有候选");
   eq(buildSelectOptions({}).constructor, Object, "没有任何候选时不报错");
@@ -456,6 +458,27 @@ t("自学习：判定的外审结论会被带出来（auditFlipRate 才有数据
   const g2 = createGates({ auditFn: async function () { throw new Error("不该被调用"); } });
   const d2 = await g2.decide(Object.assign({}, base, { text: "哈哈哈哈哈哈" }), {});
   eq(d2.auditInfo, null, "没走外审就不该有结论（否则学习回路会被噪声污染）");
+});
+
+
+t("options: 依赖式候选（外审模型看通道、大脑模型看 provider）", function () {
+  const ofm = ["kilo-auto/free", "dots-studio/dots-3-note-preview:free"];
+  const o = buildSelectOptions({ providers: ["deepseek-official", "our-free-model"], ofmIds: ofm, voices: ["Microsoft Huihui"] });
+  // 外审：选免费池只给 OFM，选 DSH 只给 deepseek-v4-*
+  eq(resolveSelect(o["audit.model"], { "audit.channel": "免费池" }).join(","), ofm.join(","), "免费池通道只列 OFM 模型");
+  const dsh = resolveSelect(o["audit.model"], { "audit.channel": "DSH 默认" });
+  ok(dsh.indexOf("deepseek-v4-flash") >= 0 && dsh.indexOf("kilo-auto/free") < 0, "DSH 通道只列 deepseek-v4-*，不混 OFM：" + dsh.join(","));
+  // 大脑：跟着 provider
+  eq(resolveSelect(o["brain.model"], { "brain.provider": "our-free-model" }).join(","), ofm.join(","), "大脑走免费池时列 OFM");
+  ok(resolveSelect(o["brain.model"], { "brain.provider": "deepseek-official" }).indexOf("deepseek-v4-flash") >= 0, "大脑走 deepseek 时列 v4");
+  // 识图：dsh 只能选「同大脑」，http 不给通用下拉（交给多模态自检卡）
+  eq(resolveSelect(o["runtime.vision.model"], { "runtime.vision.mode": "dsh" }).join(","), "同大脑");
+  eq(resolveSelect(o["runtime.vision.model"], { "runtime.vision.mode": "http" }).length, 0, "http 模式不出通用下拉");
+  // 无依赖字段保持老结构
+  ok(Array.isArray(o["runtime.stt.lang"]) && o["runtime.stt.lang"].indexOf("zh") >= 0, "无依赖字段还是数组");
+  eq(resolveSelect(o["runtime.stt.lang"], {}).indexOf("zh") >= 0, true);
+  // 控制字段为空时要能回落到 fallback，别让下拉空掉
+  ok(resolveSelect(o["audit.model"], {}).length > 0, "控制字段没值也要有回落候选");
 });
 
 

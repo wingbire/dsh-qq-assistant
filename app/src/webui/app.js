@@ -249,7 +249,19 @@
       ctrl = '<input type="text" data-key="' + key + '" value="' + esc(value == null ? "" : value) + '">';
     }
     // 能列出候选的字段（音色 / provider / 模型 / 转写语言）在控件上方加一个下拉：选中即生效，不用再点保存。
-    var optList = (S.opts && S.opts[key]) || null;
+    // 依赖式候选：候选取决于另一个字段时（如外审模型看外审通道、大脑模型看 provider），
+    // 按「控制字段的当前值」挑列表；控制字段改动后会整页重渲染，列表自动跟着变。
+    // （与 app/src/options.js 的 resolveSelect 同一套规则，浏览器端不能 import 服务端模块，所以这份是镜像实现）
+    var rawOpts = (S.opts && S.opts[key]) || null;
+    var optList = null;
+    if (Array.isArray(rawOpts)) {
+      optList = rawOpts;
+    } else if (rawOpts && rawOpts.by) {
+      var controlling = document.querySelector('[data-key="' + rawOpts.by + '"]');
+      var cv = (controlling && controlling.value) || getPath(S.values, rawOpts.by);
+      var ck = cv == null ? "" : String(cv);
+      optList = (rawOpts.when && rawOpts.when[ck]) || rawOpts.fallback || [];
+    }
     if (optList && optList.length) {
       var cur = String(value == null ? "" : value);
       var has = optList.indexOf(cur) >= 0;
