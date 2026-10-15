@@ -548,7 +548,9 @@ t("配置合并：表单提交的字符串会按字段表扳回类型（踩过 b
   const m3 = mergeConfigSafe(cur, { gates: { bounds: { lo: "0.55" } } }, table);
   eq(m3.gates.bounds.lo, 0.55, "数字字符串要变成数字");
   const m4 = mergeConfigSafe(cur, { runtime: { voice: { enabled: "" } } }, table);
-  eq(typeof m4.runtime.voice.enabled, "boolean", "空串不该变成 true");
+  eq(m4.runtime.voice.enabled, true, "空串＝表单没给值 → 保留原值 true");
+  const m5 = mergeConfigSafe({ runtime: { voice: { enabled: false } } }, { runtime: { voice: { enabled: "" } } }, table);
+  eq(m5.runtime.voice.enabled, false, "原值 false 时空串也保持 false");
 });
 
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
