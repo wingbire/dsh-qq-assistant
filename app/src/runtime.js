@@ -714,7 +714,7 @@ export function createRuntime(deps) {
     // 只有两种例外仍用本地语料：大脑挂了（下面 fallback）、以及被戳一戳。
     if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
-      const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [20, 60, 200];
+      const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [30, 100, 250];
       const policy = depthPolicy(dec.tier, {
         contextWindow: rc.contextWindow,
         depthPolicy: { low: { maxChars: dc[0] }, mid: { maxChars: dc[1] }, high: { maxChars: dc[2] } }   // 配置里的"三档字数"真的生效

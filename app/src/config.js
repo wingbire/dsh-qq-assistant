@@ -128,7 +128,7 @@ export function depthCharsOf(cfg) {
     const a = v.slice(0, 3).map(function (x) { return numOf(x, 0); });
     if (a.every(function (n) { return n > 0; })) return a;
   }
-  return [20, 60, 200];
+  return [30, 100, 250];
 }
 
 // 判定阈值（开口线/三档线/灰区/六因子权重）。

@@ -815,9 +815,9 @@ t("brain: brainEnv 注入 DSH_HOME 与密钥", function () {
 
 t("brain: 默认 profile 名与实际 profile 一致", function () { eq(PROFILE_DEFAULT, PROFILE_ID); eq(PROFILE_DEFAULT, "qq-brain"); });
 
-t("brain: N8 决策——进 prompt 的上下文窗口为 10", function () {
-  eq(DEPTH_POLICY_DEFAULT.mid.contextWindow, 10);
-  eq(DEPTH_POLICY_DEFAULT.high.contextWindow, 10);
+t("brain: N8 决策——进 prompt 的上下文窗口为 20", function () {
+  eq(DEPTH_POLICY_DEFAULT.mid.contextWindow, 20);
+  eq(DEPTH_POLICY_DEFAULT.high.contextWindow, 20);
 });
 
 t("dshprofile: 人设文本逐字节稳定", function () {
@@ -1084,14 +1084,14 @@ t("config: runtimeConfig 落实 N6/N8/N23 决策", function () {
   const table = loadFieldTable();
   const cfg = deepMerge(defaultsFromTable(table), {});
   const rc = runtimeConfig(cfg);
-  eq(rc.contextWindow, 10, "N8：进 prompt 的历史 10 条");
+  eq(rc.contextWindow, 20, "N8：进 prompt 的历史 20 条（默认已按用户调法改成 20）");
   eq(rc.stageMode, "auto", "N9 修订：默认走分群阶段机");
   eq(rc.observeUntilMessages, 80, "N9 修订：新群攒满 80 条即转半自动");
   eq(rc.semiAutoDays, 3, "N9 修订：半自动默认 3 天后转全自动");
   eq(rc.maxSegments, 3, "N6：最多分 3 条");
   eq(rc.budget.groupHourlyLimit, 0, "N23：取消每群每小时上限");
   eq(rc.budget.dailyTokens, 5000000);
-  eq(rc.depthChars[2], 200);
+  eq(rc.depthChars[2], 250);
 });
 
 function fakeBot(overrides) {
@@ -3305,7 +3305,7 @@ t("config: 三档字数（depthChars）真的会进提示词（原来硬编码 2
   eq(pol.maxChars, 30, "大脑提示词里的字数上限也跟着走");
   eq(pol.callBrain, true, "按档深合并：不能把中档的 callBrain/search 冲掉");
   eq(pol.search, 0, "N22：中档默认不再建议搜索（搜不搜由搜索闸门按信号决定）");
-  eq(depthPolicy("mid", { contextWindow: 10 }).maxChars, 60, "没配就用默认");
+  eq(depthPolicy("mid", { contextWindow: 20 }).maxChars, 100, "没配就用默认 100");
 });
 
 t("localreply: 被点名和打招呼不再回「啥事」", function () {
