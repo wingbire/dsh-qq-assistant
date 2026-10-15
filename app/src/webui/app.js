@@ -367,14 +367,19 @@
       '<span class="hint" style="margin:0">超 80% 关主动，超 100% 只回被点名的</span></div>';
 
     // 消息 + 判定过程
+    var winSec = Math.round((getPath(S.values, "runtime.coalesceWindowMs") || 6000) / 1000);
     var rows = (st.messages || []).map(function (m) {
-      var v = m.verdict || "?";
-      var cls = v === "yes" ? "yes" : v === "no" ? "no" : "grey";
+      // 判定是"合并窗口结束后"才写上去的：新消息会先出现在表里、暂时没有判定。
+      // 以前这里显示 "?"，看着像出错了；改成明说「判定中」，并把窗口秒数写进依据列。
+      var pending = !m.verdict;
+      var v = m.verdict || "判定中";
+      var cls2 = pending ? "grey" : (v === "yes" ? "yes" : v === "no" ? "no" : "grey");
       var reason = Array.isArray(m.reason) ? m.reason.join("；") : "";
+      if (pending) reason = "已收到，等合并窗口（" + winSec + " 秒）结束就出判定";
       return '<tr><td style="white-space:nowrap">' + hhmmss(m.at) + '</td>' +
         '<td style="white-space:nowrap">' + esc(m.speaker || m.uid || "") + '</td>' +
         '<td>' + esc(shortText(m.text, 70)) + (m.hasImage ? ' <span class="tag">图×' + (m.images || 1) + '</span>' : '') + '</td>' +
-        '<td><span class="tag ' + cls + '">' + esc(v) + '</span></td>' +
+        '<td><span class="tag ' + cls2 + '">' + esc(v) + '</span></td>' +
         '<td>' + esc(m.action || "-") + (m.quote ? ' <span class="tag ok">引用</span>' : "") + '</td>' +
         '<td>' + (m.pSay == null ? "-" : Number(m.pSay).toFixed(2)) + '</td>' +
         '<td>' + esc(m.tier || "-") + '</td>' +
@@ -389,7 +394,8 @@
       "最近 " + msgCount + " 条 · 每群留 " + perGroup + " 条，满了丢最旧",
       '<table><thead><tr><th>时间</th><th>谁</th><th>消息</th><th>判定</th><th>动作</th><th>p_say</th><th>档位</th><th>依据</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="8" class="muted">还没有收到消息</td></tr>') + '</tbody></table>' +
-      '<div class="hint">判定表落盘在 <code>app/dsh-data/data/data/ui-messages.json</code>，每群最多保留 ' + perGroup + ' 条（可在「调整」页改），超出按时间丢最旧的。</div>',
+      '<div class="hint">判定表落盘在 <code>app/dsh-data/data/data/ui-messages.json</code>，每群最多保留 ' + perGroup + ' 条（可在「调整」页改），超出按时间丢最旧的。' +
+        '<br><b>看到消息却没有判定？</b>那是合并窗口在起作用：同一个人连发几条会合成一轮（当前 ' + winSec + ' 秒），窗口结束才写判定；本页每 5 秒刷新一次，所以判定最晚会晚十几秒出现。觉得慢可在「调整 → 节流与合并」把窗口调小。</div>',
       false);   // 默认折叠；开合状态由 dshqq-fold-msg-card 记住
 
     var groupCard = S.gid ? cardHtml("group-card", "本群累计（本次运行）", esc(S.gid), '<div class="grid">' +
