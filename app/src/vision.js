@@ -149,6 +149,84 @@ export function buildHttpBody(model, prompt, b64, mime, maxTokens) {
   };
 }
 
+// ---------- 多模态接口：地址归一化 + 自动列模型（用户只要填 key，其余自动）----------
+// 为什么需要：http 模式下 model 是**原样发出去**的，默认的「同大脑」在 http 模式没有意义；
+// 让人手抄模型 id 太容易错，所以给一个「检测可用模型」：拿 key 问 /models，挑一个能看图的填进去。
+const KNOWN_VISION_ENDPOINTS = [
+  { host: "generativelanguage.googleapis.com", path: "/v1beta/openai/chat/completions", hint: "Google Gemini（OpenAI 兼容层）" },
+  { host: "api.openai.com", path: "/v1/chat/completions", hint: "OpenAI" },
+  { host: "open.bigmodel.cn", path: "/api/paas/v4/chat/completions", hint: "智谱 GLM" },
+  { host: "dashscope.aliyuncs.com", path: "/compatible-mode/v1/chat/completions", hint: "阿里通义" }
+];
+
+// 允许用户只粘一个 base（甚至只有域名），归一成真正的 chat/completions 地址
+export function normalizeVisionEndpoint(raw) {
+  let u = String(raw || "").trim();
+  if (!u) return { ok: false, error: "地址为空" };
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u.replace(/^\/+/, "");
+  u = u.replace(/\/+$/, "");
+  const m = u.match(/^https?:\/\/([^\/]+)(\/.*)?$/i);
+  if (!m) return { ok: false, error: "地址格式不对" };
+  const host = m[1].toLowerCase();
+  let p = m[2] || "";
+  if (/\/chat\/completions$/i.test(p)) return { ok: true, url: u, hint: "已指向 chat/completions" };
+  const known = KNOWN_VISION_ENDPOINTS.filter(function (k) { return host.indexOf(k.host) >= 0; })[0];
+  if (known && (!p || /^\/v1(beta)?\/openai\/?$/i.test(p) || p === "/" || /^\/v1\/?$/i.test(p))) {
+    return { ok: true, url: "https://" + host + known.path, hint: "按 " + known.hint + " 补全" };
+  }
+  if (/\/v1(beta)?\/openai$/i.test(p) || /\/v1$/i.test(p) || /\/compatible-mode\/v1$/i.test(p) || /\/api\/paas\/v4$/i.test(p)) {
+    return { ok: true, url: u + "/chat/completions", hint: "补上 /chat/completions" };
+  }
+  return { ok: true, url: u + "/v1/chat/completions", hint: "没认出来，按 OpenAI 兼容的 /v1/chat/completions 试" };
+}
+
+export function modelsUrlOf(endpoint) {
+  const u = String(endpoint || "").replace(/\/+$/, "").replace(/\/chat\/completions$/i, "");
+  return u + "/models";
+}
+
+// 挑一个最可能"能看图"的：先按模型名提示，再偏好 flash / 便宜的小模型
+export function pickVisionModel(ids) {
+  const list = (ids || []).filter(Boolean);
+  if (!list.length) return null;
+  const vision = list.filter(function (id) { return modelHasVision(id) === true; });
+  const pool = vision.length ? vision : list;
+  const rank = function (id) {
+    const s = String(id);
+    let r = 50;
+    if (/flash/i.test(s)) r -= 12;          // flash / 小模型：识图够用且便宜
+    if (/gemini-2\.5-pro|gpt-4o$|opus|ultra/i.test(s)) r += 25;   // 贵的大模型不优先
+    if (/embedding|tts|whisper|image|dall|aqa|moderation/i.test(s)) r += 400;
+    if (/latest/i.test(s)) r -= 6;
+    return r;
+  };
+  return pool.slice().sort(function (a, b) { return rank(a) - rank(b); })[0];
+}
+
+// 拿 key 问 /models（OpenAI 兼容的 {data:[{id}]} 与 Gemini 原生 {models:[{name}]} 都认）
+export async function listVisionModels(o) {
+  const op = o || {};
+  const f = op.fetch || (typeof fetch === "function" ? fetch : null);
+  if (!f) return { ok: false, error: "运行时不带 fetch" };
+  const norm = normalizeVisionEndpoint(op.endpoint);
+  if (!norm.ok) return { ok: false, error: norm.error };
+  const url = modelsUrlOf(norm.url);
+  const headers = {};
+  if (op.apiKey) headers.authorization = "Bearer " + op.apiKey;
+  let res = null;
+  try {
+    res = await f(url, { method: "GET", headers: headers });
+  } catch (e) {
+    return { ok: false, error: "连不上：" + String(e && e.message), url: norm.url, listUrl: url };
+  }
+  if (!res || !res.ok) return { ok: false, error: "HTTP " + (res && res.status), url: norm.url, listUrl: url };
+  let json = null;
+  try { json = await res.json(); } catch (e) { return { ok: false, error: "返回的不是 JSON", url: norm.url, listUrl: url }; }
+  const raw = (json && json.data) || (json && json.models) || [];
+  const ids = raw.map(function (x) { return String((x && (x.id || x.name)) || "").replace(/^models\//, ""); }).filter(Boolean);
+  const models = ids.map(function (id) { return { id: id, vision: modelHasVision(id) === true }; });
+  return { ok: true, url: norm.url, listUrl: url, hint: norm.hint, count: ids.length, models: models, picked: pickVisionModel(ids) };
+}
 export function parseHttpAnswer(json) {
   try {
     const c = json && json.choices && json.choices[0];
@@ -179,6 +257,10 @@ export function createVision(opts) {
       let text = "", usage = null, channel = cfg.mode;
       if (cfg.mode === "http") {
         if (!cfg.endpoint) throw new Error("没有配置多模态接口地址（runtime.vision.endpoint）");
+        // http 模式是把 model 原样发出去的：默认的「同大脑」在这里没意义，早点说清比让接口报 400 强
+        if (!cfg.model || String(cfg.model).trim() === "同大脑") {
+          throw new Error("http 模式要填具体模型 id（点下面的「检测可用模型」会自动填）");
+        }
         if (!doFetch) throw new Error("运行时不带 fetch");
         const b64 = fs.readFileSync(local.path).toString("base64");
         const body = buildHttpBody(cfg.model, prompt, b64, local.mime, cfg.maxTokens || 300);

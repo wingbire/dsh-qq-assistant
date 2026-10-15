@@ -150,6 +150,7 @@ export function createWebUi(deps) {
   const keyStatusFn = d.keyStatus || null;        // async () => ({ set, masked, source, ofm }) 当前 key 打哪来
   const onSecrets = d.onSecrets || null;          // async (patch) => 把真密钥写进工作区的 secrets.json
   const capsFn = d.caps || null;                  // async () => ({ brain, rows }) 能力总览（模型能力 ↔ 人设声明）
+  const visionProbeFn = d.visionProbe || null;    // async ({endpoint, apiKey}) => ({ ok, models, picked }) 多模态接口自检
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
@@ -334,6 +335,31 @@ export function createWebUi(deps) {
       return sendJson(res, 200, pluginInstallFn ? await pluginInstallFn(String(b.id)) : { ok: false, error: "没有接插件安装服务" });
     }
 
+    // 多模态接口自检：填了地址 + Key 就能列出可用模型，并把能确定的配置一次性写好
+    if (p === "/api/vision/probe" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { b = null; }
+      const table = loadFieldTable();
+      const cur = runtimeConfig(cfg).vision || {};
+      const endpoint = String((b && b.endpoint) || cur.endpoint || "").trim();
+      const apiKey = String((b && b.apiKey) || cur.apiKey || "").trim();
+      if (!endpoint) return sendJson(res, 200, { ok: false, error: "先填「多模态接口地址」" });
+      if (!apiKey) return sendJson(res, 200, { ok: false, error: "先填「多模态接口 Key」" });
+      if (!visionProbeFn) return sendJson(res, 200, { ok: false, error: "没有接检测服务" });
+      const r = await visionProbeFn({ endpoint: endpoint, apiKey: apiKey });
+      if (r && r.ok && (!b || b.save !== false)) {
+        setPath(cfg, "runtime.vision.enabled", true);
+        setPath(cfg, "runtime.vision.mode", "http");
+        setPath(cfg, "runtime.vision.endpoint", r.url);          // 归一化后的完整地址
+        setPath(cfg, "runtime.vision.apiKey", apiKey);
+        setPath(cfg, "runtime.vision.provider", "");             // http 模式用不到 provider
+        if (r.picked) setPath(cfg, "runtime.vision.model", r.picked);
+        if (configFile) { try { saveConfig(cfg, configFile); } catch (e) { /* 下面照样回结果 */ } }
+        if (onConfigSaved) { try { await onConfigSaved(cfg); } catch (e) { /* ignore */ } }
+      }
+      return sendJson(res, 200, Object.assign({}, r, { values: redactConfig(cfg, table) }));
+    }
     // 能力总览：模型能力 ↔ 人设声明 对不对得上（"模型接入"页顶部那张卡）
     if (p === "/api/caps" && req.method === "GET") {
       return sendJson(res, 200, capsFn ? await capsFn() : { ok: false, error: "没有接能力总览服务" });

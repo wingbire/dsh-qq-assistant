@@ -38,7 +38,7 @@ import { createWebUi, summarizeObservations, summarizeCost, startOfToday, DEFAUL
 import { gitInfo, checkUpdate, applyUpdate, createDepsProbe, runDepFix } from "../app/src/update.js";
 import { personaFromConfig } from "../app/src/dshprofile.js";
 import { createMockOneBotServer } from "../app/src/mock-onebot-server.js";
-import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, modelHasVision, visionCapability, VISION_DEFAULTS, VISION_PROFILE_ID } from "../app/src/vision.js";
+import { createVision, isImageSegment, imageSegmentsOf, mimeOf, resolveLocalImage, buildHttpBody, parseHttpAnswer, injectVision, modelHasVision, visionCapability, VISION_DEFAULTS, VISION_PROFILE_ID, normalizeVisionEndpoint, modelsUrlOf, pickVisionModel, listVisionModels } from "../app/src/vision.js";
 import { createTts, parseVoiceTag, buildSapiScript, voiceCapability, listSapiVoices, TTS_DEFAULTS } from "../app/src/tts.js";
 import { maskCqShape } from "../app/src/onebot.js";
 import fs from "node:fs";
@@ -304,6 +304,35 @@ t("webui: 渲染分发里每个 job 都必须是 Promise（防「页面切了但
     if (!okPromise) bad.push(expr);
   }
   eq(bad.length, 0, "这些 job 赋值可能不是 Promise（要用 Promise.resolve 包一下，或让它返回 Promise）：" + bad.join(" | "));
+});
+
+
+t("vision: 多模态地址归一化 + 自动挑模型（用户只填 key）", async function () {
+  eq(normalizeVisionEndpoint("https://generativelanguage.googleapis.com/v1beta/openai/").url,
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  eq(normalizeVisionEndpoint("generativelanguage.googleapis.com").url,
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  eq(normalizeVisionEndpoint("api.openai.com/v1").url, "https://api.openai.com/v1/chat/completions");
+  eq(normalizeVisionEndpoint("https://x.test/v1/chat/completions").url, "https://x.test/v1/chat/completions");
+  eq(normalizeVisionEndpoint("").ok, false);
+  eq(modelsUrlOf("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
+    "https://generativelanguage.googleapis.com/v1beta/openai/models");
+  eq(pickVisionModel(["text-embedding-3", "gemini-2.5-pro", "gemini-2.5-flash", "deepseek-chat"]), "gemini-2.5-flash");
+  const seen = [];
+  const r = await listVisionModels({
+    endpoint: "https://generativelanguage.googleapis.com", apiKey: "K",
+    fetch: async function (url, o) { seen.push(url + "|" + ((o.headers || {}).authorization || "")); return { ok: true, status: 200, json: async function () { return { data: [{ id: "gemini-2.5-flash" }, { id: "text-embedding-004" }] }; } }; }
+  });
+  eq(r.ok, true);
+  eq(r.count, 2);
+  eq(r.picked, "gemini-2.5-flash", "自动挑能看图的 flash");
+  ok(seen[0].indexOf("/v1beta/openai/models") >= 0, "要问对列表地址：" + seen[0]);
+  ok(seen[0].indexOf("Bearer K") >= 0, "要带 key");
+  const r2 = await listVisionModels({
+    endpoint: "https://x.test/v1/chat/completions", apiKey: "K",
+    fetch: async function () { return { ok: true, status: 200, json: async function () { return { models: [{ name: "models/gemini-2.0-flash" }] }; } }; }
+  });
+  eq(r2.models[0].id, "gemini-2.0-flash", "Gemini 原生形状也认，去掉 models/ 前缀");
 });
 
 
@@ -1780,7 +1809,7 @@ t("vision: http 后端拿到描述并按上限截断", async function () {
 });
 
 t("vision: 失败不抛异常，返回 ok:false", async function () {
-  const v = createVision({ config: { mode: "http", endpoint: "https://api.test/x" }, fetch: async function () { return { ok: false, status: 500 }; } });
+  const v = createVision({ config: { mode: "http", endpoint: "https://api.test/x", model: "m" }, fetch: async function () { return { ok: false, status: 500 }; } });
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "app", "dsh-data", "_test", "vis3-" + Date.now());
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, "a.jpg");

@@ -422,11 +422,20 @@
     ];
     var secs = groups.map(function (g) {
       var meta = ((S.table && S.table.分组) || []).filter(function (x) { return x.名 === g.名; })[0] || {};
+      // 「大脑模型」段尾部挂一张多模态接口自检卡：填好地址与 Key，点一下就能列出可用模型并自动填配置
+      var probe = g.名 === "大脑模型"
+        ? '<div class="hint" style="margin:10px 0 6px">多模态接口自检（切到「独立接口 http」时用）：地址填 base 或完整 chat/completions 都行，' +
+          'Gemini 会自动补成 /v1beta/openai/chat/completions；「识图模型 provider」在 http 模式<b>不用填</b>（那是 dsh 模式选通道用的）；' +
+          '「识图模型」由检测自动填。<div style="margin-top:6px">' +
+          '<button class="btn-sm good" id="btn-vision-probe">检测可用模型并自动填好</button>' +
+          '<span id="vision-probe-msg" class="muted" style="margin-left:8px"></span></div>' +
+          '<div id="vision-probe-list" style="margin-top:8px"></div></div>'
+        : "";
       return '<details class="card" open><summary>' + esc(g.图标 + " " + g.名) +
         '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' + esc(g.副) + '</span></summary>' +
         '<div class="body">' +
         (meta.说明 ? '<div class="hint" style="margin:-2px 0 8px">' + esc(meta.说明) + '</div>' : "") +
-        renderGroupFields(g.名) + '</div></details>';
+        renderGroupFields(g.名) + probe + '</div></details>';
     }).join("");
     return card + secs;
   }
@@ -901,6 +910,39 @@
         return;
       }
 
+      // 多模态接口自检：地址+Key → 列模型 → 顺手把模式/地址/Key/模型全写好（用户不用再动手）
+      if (e.target.closest("#btn-vision-probe")) {
+        var msg = $("#vision-probe-msg");
+        var inpEp = document.querySelector('[data-key="runtime.vision.endpoint"]');
+        var inpAk = document.querySelector('[data-key="runtime.vision.apiKey"]');
+        var ep = (inpEp && inpEp.value) || getPath(S.values, "runtime.vision.endpoint") || "";
+        var ak = (inpAk && inpAk.value) || "";
+        if (msg) msg.textContent = "正在问接口…";
+        api("/api/vision/probe", { endpoint: ep, apiKey: ak, save: true }).then(function (r) {
+          if (!r || !r.ok) { if (msg) msg.textContent = "失败：" + ((r && r.error) || "未知原因"); return; }
+          if (r.values) S.values = r.values;
+          if (msg) msg.textContent = "可用 " + r.count + " 个模型" + (r.picked ? "，已自动选 " + r.picked : "");
+          var box = $("#vision-probe-list");
+          if (box) {
+            box.innerHTML = '<select id="vision-model-pick">' + (r.models || []).map(function (m) {
+              return '<option value="' + esc(m.id) + '"' + (m.id === r.picked ? " selected" : "") + '>' + esc(m.id) + (m.vision ? "（可看图）" : "") + '</option>';
+            }).join("") + '</select> <button class="btn-sm good" id="btn-vision-apply">换成这个模型</button>';
+          }
+          S.caps = null;
+        });
+        return;
+      }
+      if (e.target.closest("#btn-vision-apply")) {
+        var sel = $("#vision-model-pick");
+        if (!sel) return;
+        api("/api/config", { patch: { runtime: { vision: { model: sel.value, enabled: true, mode: "http" } } } }).then(function (r) {
+          if (r && r.values) S.values = r.values;
+          S.caps = null;
+          toast("识图模型已设为 " + sel.value);
+          render();
+        });
+        return;
+      }
       if (e.target.closest("#pill-napcat") || e.target.closest("#btn-napcat")) { openNapcat(); return; }
       if (e.target.closest("#btn-napcat-fill")) { doNapcatAdopt("napcat"); return; }
       if (e.target.closest("#btn-napcat-clear")) { doNapcatAdopt("clear"); return; }

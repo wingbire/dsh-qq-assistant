@@ -13,7 +13,7 @@ import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
-import { createVision, VISION_PERSONA, modelHasVision } from "./src/vision.js";
+import { createVision, VISION_PERSONA, modelHasVision, listVisionModels } from "./src/vision.js";
 import { createStt } from "./src/stt.js";
 import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, writeProbe as writeOfmProbe, probeModels as probeOfmModels, OFM_DEFAULT_CANDIDATES } from "./src/ofm.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
@@ -487,6 +487,11 @@ const webui = createWebUi({
     return k ? { llm: { deepseekApiKey: maskKey(k) } } : null;
   },
   // 能力总览：每项"这台机器到底会不会"，以及它对应人设里的哪个块（换模型后这里跟着变）
+  // 多模态接口自检：拿 key 问 /models，把能看图的挑出来（配置端"检测"按钮用）
+  visionProbe: async function (o) {
+    const req2 = o || {};
+    return listVisionModels({ endpoint: req2.endpoint, apiKey: req2.apiKey });
+  },
   caps: async function () {
     const conf = webui ? webui.getConfig() : cfg;
     const rt = runtimeConfig(conf);
