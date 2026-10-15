@@ -339,7 +339,9 @@ t("vision: 多模态地址归一化 + 自动挑模型（用户只填 key）", as
 
 t("options: 可下拉字段的候选（provider / 音色 / 模型 / 语言）", function () {
   eq(providerIdsOf(["attachments", "llm-deepseek", "openai-gateway", "our-free-model", "profiles", "sessions"]).join(","),
-    "deepseek-official,openai-gateway,our-free-model", "目录名映射成 provider 名，并滤掉非 provider 目录");
+    "deepseek-official,our-free-model,openai-gateway", "目录名映射成 provider 名，并滤掉非 provider 目录");
+  eq(providerIdsOf(["attachments", ".credentials.yaml", "channel-pack", "profiles"]).length, 0,
+    "噪音目录（隐藏文件 / channel-pack / attachments）不能当成 provider");
   const o = buildSelectOptions({ providers: ["deepseek-official", "our-free-model"], ofmIds: ["kilo-auto/free"], voices: ["Microsoft Huihui"] });
   eq(o["brain.provider"].length, 2);
   ok(o["runtime.vision.provider"].indexOf("") >= 0, "识图 provider 允许留空（http 模式不用填）");

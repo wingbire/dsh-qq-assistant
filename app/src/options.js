@@ -12,14 +12,14 @@ export const PROVIDER_DIR_MAP = {
 // 常见但不保证：只在"列不出真实清单"时当提示，标注为「常见」，用户仍可手填别的
 export const COMMON_MODELS = ["deepseek-flash", "deepseek-chat", "deepseek-reasoner"];
 
+// 只认已知 provider（目录里还有 .credentials.yaml、channel-pack、attachments 这类噪音，
+// 靠"猜目录名"会把它们一起列进来）。未知 provider 请直接手填 —— 不编造候选。
 export function providerIdsOf(dirs) {
+  const have = {};
+  for (const d of (dirs || [])) have[String(d || "").trim()] = true;
   const out = [];
-  for (const d of (dirs || [])) {
-    const name = String(d || "").trim();
-    if (!name) continue;
-    if (["attachments", "profiles", "sessions", "skills", "storages", "profiles"].indexOf(name) >= 0) continue;
-    const id = PROVIDER_DIR_MAP[name] || name;
-    if (out.indexOf(id) < 0) out.push(id);
+  for (const name of Object.keys(PROVIDER_DIR_MAP)) {
+    if (have[name]) out.push(PROVIDER_DIR_MAP[name]);
   }
   return out;
 }
