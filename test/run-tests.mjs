@@ -352,6 +352,55 @@ t("options: 可下拉字段的候选（provider / 音色 / 模型 / 语言）", 
 });
 
 
+t("衔接性：页面引用的 key 必须在字段表里，表里的字段必须有人能改", function () {
+  const table = JSON.parse(fs.readFileSync("prompts/配置端字段表.json", "utf8"));
+  const allKeys = table.分组.flatMap(function (g) { return g.字段.map(function (f) { return f.键; }); });
+  const app = fs.readFileSync("app/src/webui/app.js", "utf8");
+  // ① 页面里硬编码的 key（keys: [...] 与 master: "x"）都必须存在
+  const used = [];
+  let m;
+  const reK = /keys: \[([^\]]*)\]/g;
+  while ((m = reK.exec(app))) for (const raw of m[1].split(",")) { const k = raw.trim().replace(/^"|"$/g, ""); if (k && k.indexOf(".") > 0) used.push(k); }
+  const reM = /master: "([^"]+)"/g;
+  while ((m = reM.exec(app))) used.push(m[1]);
+  const ghosts = used.filter(function (k) { return allKeys.indexOf(k) < 0; });
+  eq(ghosts.length, 0, "页面引用了表里不存在的字段（就是这次的 coalesceMaxBatch 那类漏项）：" + ghosts.join(","));
+  // ② 每个字段要么在某个页面的 key 清单里，要么属于有归宿的分组
+  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道"];
+  const homeless = [];
+  for (const g of table.分组) {
+    if (pageGroups.indexOf(g.名) < 0) homeless.push(g.名 + "(整个分组没人渲染)");
+    for (const f of g.字段) if (used.indexOf(f.键) < 0 && ["本地工具", "大脑模型"].indexOf(g.名) < 0 && g.名 === "其它") homeless.push(f.键);
+  }
+  eq(homeless.length, 0, "这些字段/分组没有归宿：" + homeless.join(","));
+});
+
+t("衔接性：人设的能力声明跟着配置开关走", function () {
+  const base = { persona: { botName: "小肥鱼" }, plugins: {}, runtime: {} };
+  const on = JSON.parse(JSON.stringify(base));
+  on.runtime.vision = { enabled: true, mode: "dsh", model: "同大脑", capable: "自动" };
+  on.runtime.voice = { enabled: true, voice: "Microsoft Huihui" };
+  on.runtime.stt = { enabled: true };
+  on.plugins = { meme: true, illustration: true, archify: true };
+  const t1 = buildPersonaText(personaFromConfig(on), on);
+  ok(t1.indexOf("【看图】") >= 0, "识图开着 → 人设要写【看图】");
+  ok(t1.indexOf("【语音】") >= 0, "语音开着 → 人设要写【语音】");
+  ok(t1.indexOf("【表情包】") >= 0 && t1.indexOf("【立绘（图片）】") >= 0 && t1.indexOf("【画图】") >= 0, "表达层开关开着 → 人设要写对应块");
+  ok(t1.indexOf("【引用回复】") >= 0, "引用回复块在");
+  ok(t1.indexOf("【我可以】") >= 0 && t1.indexOf("【绝不】") >= 0 && t1.indexOf("【语气样板】") >= 0, "陪伴三段结构在");
+
+  const off = JSON.parse(JSON.stringify(on));
+  off.runtime.vision = { enabled: false, mode: "off" };
+  off.runtime.voice = { enabled: false, voice: "Microsoft Huihui" };
+  off.runtime.stt = { enabled: false };
+  off.plugins = { meme: false, illustration: false, archify: false };
+  const t2 = buildPersonaText(personaFromConfig(off), off);
+  ok(t2.indexOf("【看图】") < 0, "识图关着 → 不能写【看图】");
+  ok(t2.indexOf("【表情包】") < 0 && t2.indexOf("【立绘（图片）】") < 0 && t2.indexOf("【画图】") < 0, "表达层关着 → 不能写对应块");
+  ok(t2.indexOf("听不了") >= 0 || t2.indexOf("【语音消息】") >= 0, "转写关着 → 要么说听不了，要么不提");
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");
