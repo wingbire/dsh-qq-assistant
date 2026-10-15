@@ -42,6 +42,9 @@ export const POKE_POOL = ["干嘛～", "别戳了", "戳我干嘛", "哎，在�
 // 引用场景：这回是在答复某条具体消息（我自己或别人），指向明确的短答比"嗯？"自然
 export const QUOTE_POOL = ["嗯，就是我说的那个", "对，上一条", "就那个意思", "你往上翻翻", "我说的是那个", "嗯，那条"];
 
+// 话题降温：同一个话题被反复提起、她已经回过好几次 → 别再自证，轻认一句翻篇
+export const COOLDOWN_POOL = ["行行行，这事翻篇，换个话题", "知道了知道了，我这次不解释了", "好嘛，那先放一放", "得得得，算我嘴硬，聊别的聊别的", "哎哎，不纠结这个了，还有别的没"];
+
 // 大脑没用上时（没装 DSH / 超时 / key 不对）被点名也不能一声不吭：说句实在话，别装懂
 export const DOWN_POOL = ["在的，我这会儿脑子有点卡，等我一下", "欸，我在——刚脑子空了一下", "听见了听见了，我缓一会儿再说", "我在，不过这会儿转不动，你等我一下", "在呢，刚那下没接上，你再说一遍？"];
 
@@ -71,6 +74,7 @@ export function poolFor(decision, opts) {
   const text = String(o.text != null ? o.text : (d.text || ""));
   const bucket = bucketOf(d);
   const reasonText = (Array.isArray(d.reason) ? d.reason : []).join(" ");
+  if (o.cooling) return { scene: "cooldown", pool: COOLDOWN_POOL };  // 话题被反复提 → 翻篇优先
   if (o.brainDown) return { scene: "down", pool: DOWN_POOL };      // 大脑挂了 → 兜底这句优先
   if (o.poke || reasonText.indexOf("被戳") >= 0) return { scene: "poke", pool: POKE_POOL };
   if (text.indexOf("[图片]") >= 0) return { scene: "image", pool: MEDIA_POOL.image };

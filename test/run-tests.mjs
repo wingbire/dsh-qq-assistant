@@ -21,6 +21,7 @@ import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
 import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
+import { guardReply } from "../app/src/guard.js";
 import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
@@ -212,6 +213,60 @@ t("runtime: 引用回复——她指向别人的某条才用（@她 不算）", 
   const s6 = await mk({ text: "在吗", messageId: "82" }, "仅标记", "[引用]行");
   eq(s6[0].o && s6[0].o.replyTo, "82", "仅标记：她写了才引用");
 });
+
+t("guard: 生成后兜底能认出会议纪要 / 替人背书 / 客服腔", function () {
+  const bad1 = "刚聊的：5050本子双十一加国补五千上下，浅羽说联想溢价高，不如攒台式配轻薄本远程";
+  const bad2 = "浅羽，刚刚黑鸟wingbire说了，支持gemini的api，放心用吧～";
+  const bad3 = "有什么可以帮您的吗？";
+  for (const b of [bad1, bad2, bad3]) {
+    const r = guardReply(b);
+    eq(r.ok, false, "该拦：" + b.slice(0, 20));
+    ok(String(r.hint).length > 4, "要给出怎么改：" + r.hint);
+  }
+  for (const g of ["dsh 是 DeepSeek Harness 的缩写，就是跑模型的壳", "这委屈小猫哈哈哈哈，随时来问就行~", "行行行，这事翻篇"]) {
+    eq(guardReply(g).ok, true, "不该拦：" + g.slice(0, 16));
+  }
+  eq(guardReply("").ok, true);
+});
+
+t("runtime: 话题降温——同一话题被反复提起时改口风（别再自证）", async function () {
+  const prompts = []; const seen = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, coolWindowMs: 600000 },
+    store: { paths: {}, addObservation: function (r) { seen.push(r); } },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "行", usage: { totalTokens: 3 } }; },
+    send: function () {}, sendImage: function () {}, now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  for (let i = 0; i < 4; i++) {
+    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你的搜索怎么这么慢", now: t0 + i * 1000 });
+    await rt.tick(t0 + i * 1000 + 500);
+  }
+  const cooled = prompts.filter(function (p) { return String(p).indexOf("【别再解释】") >= 0; });
+  ok(cooled.length >= 1, "反复提起后提示词里要出现【别再解释】（出现 " + cooled.length + " 次）");
+  ok(seen.some(function (x) { return x.kind === "topic_cooling"; }), "降温要记进观测，便于排查");
+  ok(rt.stats().coolingHits >= 1, "统计里有 coolingHits");
+});
+
+t("runtime: 生成后兜底——会议纪要式回复会被打回重写一次", async function () {
+  let call = 0; const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function () { call += 1; return { ok: true, text: call === 1 ? "刚聊的：浅羽说联想溢价高，不如攒台式" : "行啊，那就攒台式呗", usage: { totalTokens: 3 } }; },
+    send: function (g, t) { sent.push(t); }, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你觉得买哪个", now: 0 });
+  await rt.tick(500);
+  eq(sent.length, 1);
+  ok(String(sent[0]).indexOf("刚聊的") < 0, "会议纪要那条被打回了，实际发出：" + sent[0]);
+  eq(rt.stats().guardHits, 1);
+  eq(rt.stats().guardFixed, 1);
+  eq(call, 2, "只重写一次，不陷循环");
+});
+
 
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
