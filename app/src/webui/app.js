@@ -315,7 +315,7 @@
         '<td style="white-space:nowrap">' + esc(m.speaker || m.uid || "") + '</td>' +
         '<td>' + esc(shortText(m.text, 70)) + (m.hasImage ? ' <span class="tag">图×' + (m.images || 1) + '</span>' : '') + '</td>' +
         '<td><span class="tag ' + cls + '">' + esc(v) + '</span></td>' +
-        '<td>' + esc(m.action || "-") + '</td>' +
+        '<td>' + esc(m.action || "-") + (m.quote ? ' <span class="tag ok">引用</span>' : "") + '</td>' +
         '<td>' + (m.pSay == null ? "-" : Number(m.pSay).toFixed(2)) + '</td>' +
         '<td>' + esc(m.tier || "-") + '</td>' +
         '<td class="muted" style="max-width:280px">' + esc(shortText(reason, 60)) +

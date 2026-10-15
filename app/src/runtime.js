@@ -710,10 +710,16 @@ export function createRuntime(deps) {
 
     const quoted2 = parseQuoteMarker(text || "");    // [引用] → 这条做成引用回复
     text = quoted2.text;
-    // 什么时候引用（不定死）：模型主动写 [引用]，或对方这条本来就是用引用发来的（在接某条线）。
-    // "自动"= 这两种情况；"仅标记"= 只听模型的；"关"= 从不引用。高档长回答不引用（像客服）。
-    const useQuoteReply = !!evt.messageId && dec.tier !== "high" &&
-      (quoted2.wanted || (rc.quoteReply === "自动" && !!evt.replyId));
+    // 引用不引用只看一件事：**这条是不是在明确回某个人/某一条**（跟回答长短无关）。
+    //   ① 对方本来就是用引用发来的（在接某条线）        → 引用回去
+    //   ② 她这条是被 @ 触发的（@ 就是最明确的指向）      → 引用触发她的那条
+    //   ③ 大脑主动写了 [引用]（想针对更早的某条）        → 引用它正在回的那条
+    // 其余情况（自己陈述、闲聊接话、跟大家讨论）→ 直接发言，别每条都引用（像客服）。
+    // 开关：关 = 从不引用；自动 = ①②③；仅标记 = 只听模型的（③）。
+    const quoteMode = rc.quoteReply || "自动";
+    const targeted = !!(evt.replyId || evt.atBot || evt.atAll);
+    const wantQuote = quoteMode === "仅标记" ? quoted2.wanted : (quoted2.wanted || (quoteMode === "自动" && targeted));
+    const useQuoteReply = !!evt.messageId && quoteMode !== "关" && wantQuote;
     const voiced = parseVoiceTag(text || "");        // N18：先摘 [语音: 文本]
     const drawn = parseIllustration(voiced.text);    // 再摘 [立绘] / [立绘: 幼年]
     const chart = parseChart(drawn.text);            // 再摘 [图表: 路径]（archify 画的图）
@@ -726,6 +732,10 @@ export function createRuntime(deps) {
       sent.push(segments[i]);
       stats.segments += 1;
       if (i < segments.length - 1 && sendGapMs > 0) await sleep(sendGapMs);
+    }
+    if (sent.length && evt.messageId) {
+      // 后台消息表标一下"这条是引用回复" —— 不然没法核对它到底有没有用起来
+      uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); }, { quote: !!useQuoteReply });
     }
     if (sent.length) budget.countGroup(evt.gid, at);            // 记一次"这个群这一小时发过了"
     // N18：语音（默认关闭）—— 有标记才念，念不出来不影响正文

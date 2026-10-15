@@ -175,6 +175,36 @@ t("runtime: 大脑挂了但被点名/判是 → 不能一声不吭（发本地�
 });
 
 
+t("runtime: 引用回复按「是否明确指向」用（@她→引用，闲聊→直接发言）", async function () {
+  const mk = async function (evt, mode) {
+    const sent = [];
+    const rt = createRuntime({
+      config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, quoteReply: mode || "自动" },
+      store: { paths: {}, addObservation: function () {} },
+      bot: fakeBot({ action: "brain", tier: "mid" }),
+      send: function (g, t, o) { sent.push({ t: t, o: o || null }); }, sendImage: function () {},
+      askBrain: async function () { return { ok: true, text: "行", usage: { totalTokens: 3 } }; },
+      now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+    });
+    await rt.onEvent(Object.assign({ gid: "G1", uid: "u2", speaker: "乙", now: 0 }, evt));
+    await rt.tick(500);
+    return sent;
+  };
+  const s1 = await mk({ text: "@小肥鱼 摸摸鱼头", atBot: true, messageId: "77" });
+  eq(s1.length, 1);
+  eq(s1[0].o && s1[0].o.replyTo, "77", "@ 她 = 明确指向某人 → 引用回复");
+  const s2 = await mk({ text: "这游戏真好玩", messageId: "78" });
+  eq(s2.length, 1);
+  eq(s2[0].o, null, "普通陈述/闲聊 → 直接发言，不引用");
+  const s3 = await mk({ text: "对", replyId: "55", messageId: "79" });
+  eq(s3[0].o && s3[0].o.replyTo, "79", "对方用引用接话 → 引用回去");
+  const s4 = await mk({ text: "@小肥鱼 在吗", atBot: true, messageId: "80" }, "关");
+  eq(s4[0].o, null, "开关=关 → 从不引用");
+  const s5 = await mk({ text: "@小肥鱼 在吗", atBot: true, messageId: "81" }, "仅标记");
+  eq(s5[0].o, null, "仅标记：模型没写 [引用] 就不引用");
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");
