@@ -23,7 +23,7 @@ import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
 import { guardReply, softFlags } from "../app/src/guard.js";
 import { buildSelectOptions, providerIdsOf, resolveSelect } from "../app/src/options.js";
-import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
+import { apiKeyInfo, pickApiKey as pickKeyForTest, saveSecrets as saveSecretsT, loadSecrets as loadSecretsT, looksMasked } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
@@ -370,7 +370,7 @@ t("衔接性：页面引用的 key 必须在字段表里，表里的字段必须
   const ghosts = used.filter(function (k) { return allKeys.indexOf(k) < 0; });
   eq(ghosts.length, 0, "页面引用了表里不存在的字段（就是这次的 coalesceMaxBatch 那类漏项）：" + ghosts.join(","));
   // ② 每个字段要么在某个页面的 key 清单里，要么属于有归宿的分组
-  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道"];
+  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道", "外审"];
   const homeless = [];
   for (const g of table.分组) {
     if (pageGroups.indexOf(g.名) < 0) homeless.push(g.名 + "(整个分组没人渲染)");
@@ -479,6 +479,23 @@ t("options: 依赖式候选（外审模型看通道、大脑模型看 provider�
   eq(resolveSelect(o["runtime.stt.lang"], {}).indexOf("zh") >= 0, true);
   // 控制字段为空时要能回落到 fallback，别让下拉空掉
   ok(resolveSelect(o["audit.model"], {}).length > 0, "控制字段没值也要有回落候选");
+});
+
+
+t("密钥护栏：掩码绝不能被当成新 key 写进去（一次真实事故）", function () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dshqq-skey-"));
+  const f = path.join(dir, "secrets.json");
+  saveSecretsT({ deepseekApiKey: "FIXTURE-not-a-real-key-aaaaaaaaaaaa" }, f);
+  const real = loadSecretsT(f).deepseekApiKey;
+  ok(real.length > 20, "夹具长度只用于验证写入");
+  // 配置端回传的遮蔽值：必须被拒
+  saveSecretsT({ deepseekApiKey: "FIXTURE-not-a-real...aaaa" }, f);
+  eq(loadSecretsT(f).deepseekApiKey, real, "掩码不能覆盖真 key");
+  ok(looksMasked("sk-dab...5714") && looksMasked("<已配置>") && !looksMasked("FIXTURE-key-without-dots-0123456789"), "掩码识别");
+  // 配置合并同理：secret 收到掩码形状要保留原值
+  const cur = { llm: { deepseekApiKey: "sk-realkey" }, napcat: { token: "T" } };
+  const merged = mergeConfigSafe(cur, { llm: { deepseekApiKey: "sk-dab...5714" } }, loadFieldTable());
+  eq(merged.llm.deepseekApiKey, "sk-realkey", "掩码形状也要当没改");
 });
 
 
@@ -1844,11 +1861,11 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     eq(info.port > 0 && info.port !== DEFAULT_PORT, true, "端口 0 应挑一个临时端口");
     const j1 = await (await fetch(info.url + "/api/config")).json();
     eq(j1.ok, true);
-    eq(j1.table.分组.length, 12, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道");
+    eq(j1.table.分组.length, 13, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道 + 外审");
     const pageKeys = ["本地工具", "大脑模型"];
     for (const need of pageKeys.concat(["识图接口", "本地语音", "插件通道"])) ok(j1.table.分组.some(function (g) { return g.名 === need; }), "要有「" + need + "」这一分类");
     const names1 = j1.table.分组.map(function (g) { return g.名; });
-    ok(names1.length === 12, "分组数应为 12");
+    ok(names1.length === 13, "分组数应为 13");
     const localKeys = j1.table.分组.filter(function (g) { return g.名 === "本地工具"; })[0].字段.map(function (f) { return f.键; });
     ok(localKeys.indexOf("brain.dshCliPath") >= 0, "本地工具里要有 DSH 启动器路径");
     const brainKeys = j1.table.分组.filter(function (g) { return g.名 === "大脑模型"; })[0].字段.map(function (f) { return f.键; });
@@ -1857,7 +1874,9 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     const vKeys = j1.table.分组.filter(function (g) { return g.名 === "识图接口"; })[0].字段.map(function (f) { return f.键; });
     ok(vKeys.indexOf("runtime.vision.capable") >= 0 && vKeys.indexOf("runtime.vision.provider") >= 0, "识图接口要含 capable 与 provider（额外功能的识图卡已补上这两格）");
     ok(plugKeys.indexOf("runtime.search.mode") >= 0 && plugKeys.indexOf("llm.search.apiKey") >= 0, "插件通道要含搜索模式与搜索 Key（额外功能的搜索卡已补上）");
-    ok(plugKeys.indexOf("plugins.ourFreeModelId") >= 0 && plugKeys.indexOf("plugins.freeSearchEngine") >= 0, "插件模型里要有免费池与免费搜索");
+    ok(plugKeys.indexOf("plugins.freeSearchEngine") >= 0, "插件通道里要有免费搜索的引擎");
+    const audKeys1 = j1.table.分组.filter(function (g) { return g.名 === "外审"; })[0].字段.map(function (f) { return f.键; });
+    ok(audKeys1.indexOf("plugins.ourFreeModelId") >= 0 && audKeys1.indexOf("audit.channel") >= 0, "免费池的旧字段与新通道设置都归到「外审」组（模型接入页那张折叠卡）");
     const allKeys1 = j1.table.分组.flatMap(function (g) { return g.字段.map(function (f) { return f.键; }); });
     const dupKeys1 = allKeys1.filter(function (k, i) { return allKeys1.indexOf(k) !== i; });
     eq(dupKeys1.length, 0, "同一字段不能出现在两个分组（以前 ourFreeModel 就重复）：" + dupKeys1.join(","));

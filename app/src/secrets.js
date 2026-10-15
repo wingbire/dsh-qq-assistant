@@ -18,9 +18,24 @@ export function loadSecrets(file) {
   } catch (e) { return {}; }
 }
 
+// 掩码/占位符不是密钥：真实 key 里不会出现 "..." 或 "…"。
+// 事故背景：配置端"选中即生效"的下拉会把整棵配置回传，其中 secret 字段是遮蔽值
+// （如 sk-dab...5714）—— 结果它被当成新 key 写进 secrets.json，大脑与识图全被 401 拒绝。
+export function looksMasked(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (!s) return false;
+  return s.indexOf("...") >= 0 || s.indexOf("…") >= 0 || s === "<已配置>";
+}
+
 export function saveSecrets(patch, file) {
   const p = file || SECRETS_FILE;
-  const next = Object.assign({}, loadSecrets(p), patch || {});
+  const incoming = patch || {};
+  const clean = {};
+  for (const k of Object.keys(incoming)) {
+    if (looksMasked(incoming[k])) continue;      // 掩码一律不落盘（宁可不动，也不能写坏）
+    clean[k] = incoming[k];
+  }
+  const next = Object.assign({}, loadSecrets(p), clean);
   ensureDir(path.dirname(p));
   const tmp = p + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2), "utf8");

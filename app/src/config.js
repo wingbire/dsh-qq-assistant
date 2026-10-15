@@ -91,7 +91,9 @@ export function mergeConfigSafe(cur, patch, table) {
   for (const f of fieldEntries(table || loadFieldTable())) {
     if (f.类型 !== "secret" || !f.键) continue;
     const v = getPath(next, f.键);
-    if (v === undefined || v === null || v === "" || v === REDACTED) {
+    // 遮蔽值（"<已配置>"，或 sk-abc...1234 这种掩码）都算"没改" —— 掩码不是密钥。
+    const masked = typeof v === "string" && (v.indexOf("...") >= 0 || v.indexOf("…") >= 0);
+    if (v === undefined || v === null || v === "" || v === REDACTED || masked) {
       const keep = getPath(cur, f.键);
       setPath(next, f.键, keep === undefined ? "" : keep);
     }

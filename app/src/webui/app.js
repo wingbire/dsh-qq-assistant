@@ -39,8 +39,6 @@
       "runtime.budget.dailyTokens", "runtime.budget.groupHourlyLimit"] },
     { name: "搜索", desc: "要不要在认真回答前先搜一次", keys: [
       "runtime.search.mode"] },
-    { name: "外审复核", desc: "本地拿不准（灰区）和贴着开口线的判否，交外审二次判断该不该进大脑；通道、模型、超时都在这选。外审结论会回流到自适应阈值（自学习）", keys: [
-      "audit.scope", "audit.noAudit", "audit.noMaxPerHour", "audit.channel", "audit.model", "audit.timeoutMs", "audit.onTimeout", "audit.auditUnaddressed", "audit.maxPerHour"] },
     { name: "权限与配置端", desc: "谁能发指令，以及配置端自己跑在哪", keys: [
       "admin.whitelist", "runtime.webui.enabled", "runtime.webui.port", "runtime.napcatWebui"] }
   ];
@@ -103,10 +101,6 @@
 
   /* 【社区插件兼容】四张卡 */
   var PLUGIN_CARDS = [
-    { id: "ourFreeModel", role: "二判通道",
-      desc: "免费模型池。二判（外审）是独立通道，走它不占你付费额度。",
-      installNote: "装进 app/dsh-home/profiles/qq-audit 并挂进 bundles",
-      keys: ["plugins.ourFreeModel", "plugins.ourFreeModelId"] },
     { id: "ourFreeModel", role: "大脑通道",
       desc: "回复本体也走免费模型池。注意：免费池模型大多不认三档 effort，开了之后三档 overlay 会自动去掉 reasoningEffort。",
       installNote: "同一个插件，装在 app/dsh-home/profiles/qq-audit 即可复用",
@@ -494,7 +488,15 @@
         (meta.说明 ? '<div class="hint" style="margin:-2px 0 8px">' + esc(meta.说明) + '</div>' : "") +
         renderGroupFields(g.名) + '</div></details>';
     }).join("");
-    return card + secs;
+    // 外审复核：折叠卡，放在模型接入页（通道/模型/范围/限流都在这；旧字段一并放出，免得老配置改不到）
+    var auditCard = '<details class="card"><summary>外审复核' +
+      '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">灰区与边界判否送二次判断 · 结论回流自学习</span></summary>' +
+      '<div class="body">' +
+      '<div class="hint" style="margin:-2px 0 8px">本地拿不准的灰区、以及"pSay 贴着开口线"的边界判否，会交外审再判一次该不该进大脑。' +
+      '通道选「免费池」时下面的模型下拉只列 OFM 模型（0 成本、约 20~30 秒）；选「DSH 默认」只列 deepseek-v4-*（几秒，按 token 计费）。' +
+      '外审结论（一致/不一致）会回流到自适应阈值 —— 本地判错能推动阈值自己修。</div>' +
+      renderGroupFields("外审") + '</div></details>';
+    return card + secs + auditCard;
   }
 
   function pagePersona() {
