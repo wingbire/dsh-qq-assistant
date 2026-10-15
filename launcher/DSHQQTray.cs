@@ -43,6 +43,11 @@ static class Program
     static int onebotPort = 3001;
     static int webuiPort = 6099;      // NapCat 网页控制台的端口（app.json 的 runtime.napcatWebui 可改）
     static int hideWatchdogTicks = 0;
+    // 意外退出的自愈：每 30 分钟最多自动重启 3 次，避免崩溃循环
+    static int autoRestarts = 0;
+    static DateTime autoRestartWindow = DateTime.MinValue;
+    static bool botWasAlive = false;
+    static bool manualStop = false;
     static int napcatVisibleWindows = 0;
     // 手动"显示 NapCat 窗口"之后，这段时间内巡检不再把它藏回去（登录/扫码要能看见）
     static DateTime showWindowsUntil = DateTime.MinValue;
@@ -286,6 +291,21 @@ static class Program
     {
         string u = JsonString(ReadConfigText(), "napcatWebui", "");
         return u.Length > 0 ? u : "http://127.0.0.1:6099";
+    }
+
+    // 端口在听不一定代表小助手活着（强杀后可能残留）；真应答 /api/status 才算。
+    static bool PortAnswersHttp(int port)
+    {
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/api/status");
+            req.Method = "GET";
+            req.Timeout = 1500;
+            req.ReadWriteTimeout = 1500;
+            using (var resp = (HttpWebResponse)req.GetResponse()) { resp.Close(); }
+            return true;
+        }
+        catch (Exception) { return false; }
     }
 
     static int ReadPort()
@@ -612,13 +632,14 @@ static class Program
 
     static void StartBot()
     {
+        manualStop = false;
         if (AliveProc(child)) return;
         if (childStartFailed) return;      // 上次就起不来，等用户自己再点「启动」（别每 3 秒弹一次）
         if (!File.Exists(entry)) { MessageBox.Show("找不到 " + entry, AppName); childStartFailed = true; return; }
         if (!NodeOk()) return;             // 没装 Node.js 就地讲清楚，别让它去抛 .NET 异常
         // 配置端端口已经在听 = 已经有一个小助手在跑（可能是上一次启动器留下的），不要再起第二个
         int webPort = ReadPort();
-        if (PortOpenOn(webPort))
+        if (PortOpenOn(webPort) && PortAnswersHttp(webPort))
         {
             AppendLog("[启动] 配置端端口 " + webPort + " 已在监听 → 认为小助手已经在跑，不重复启动");
             Notify("小助手已经在跑了", "配置端端口 " + webPort + " 已被占用。要重启的话先在托盘菜单点「停止」。");
@@ -660,6 +681,8 @@ static class Program
 
     static void StopBot()
     {
+        manualStop = true;          // 手动停的不许自愈
+        botWasAlive = false;
         if (!AliveProc(child)) { child = null; Refresh(); return; }
         try
         {
@@ -752,8 +775,30 @@ static class Program
         miAuto.Checked = IsAutoStart();
     }
 
+    // 托盘以前只会显示「未运行」，子进程挂了一直要等用户手点才恢复。
+    // 这里做有限自愈：必须是「本来活着、现在不在了」且不是手动停的，才自动拉起来。
+    static void TickRecovery()
+    {
+        bool alive = AliveProc(child);
+        if (alive) { botWasAlive = true; recoveryWarned = false; return; }
+        if (!botWasAlive || manualStop) return;
+        if (!autoLaunch) return;
+        // 关键：只在真正起来了才清除「本来活着」的标记 —— 否则一次失败（端口残留等）就再也不重试了
+        if ((DateTime.Now - lastRecoverTry).TotalSeconds < 10) return;
+        lastRecoverTry = DateTime.Now;
+        if ((DateTime.Now - autoRestartWindow).TotalMinutes > 30) { autoRestartWindow = DateTime.Now; autoRestarts = 0; recoveryWarned = false; }
+        if (autoRestarts >= 3) {
+            if (!recoveryWarned) { recoveryWarned = true; AppendLog("[recover] 半小时内已尝试 3 次仍未起来，暂停自愈（端口/Node/日志自查）"); }
+            return;
+        }
+        autoRestarts++;
+        AppendLog("[recover] 检测到小助手不在运行，尝试自动重启第 " + autoRestarts + " 次");
+        StartAll();
+    }
+
     static void Refresh()
     {
+        TickRecovery();
         bool mine = AliveProc(child);
         bool alive = mine || PortOpenOn(ReadPort());      // 端口在听 = 有人在跑（哪怕不是本启动器拉起的）
         bool nc = NapCatAlive();

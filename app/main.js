@@ -289,12 +289,14 @@ try {
   }
 } catch (e) { /* 没有这个 profile 就算了 */ }
 const auditor = createAuditor({
-  timeoutMs: (rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 8000,
+  timeoutMs: (rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 30000,   // 兜底值只在建通道时用一次
   rubric: loadRubric(),
   runner: async function (req) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
     ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: req.personaText, model: channelModel("audit") });
-    return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
+    // 超时按"当前配置"取，别沿用建通道时的旧值 —— 改「外审单次超时」保存即生效
+    const tmo = (rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || req.timeoutMs;
+    return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: tmo });
   }
 });
 setAuditChannel(auditor);
@@ -461,6 +463,10 @@ async function onConfigSaved(next) {
   const before = onebotOpts(liveCfg), after = onebotOpts(next);
   liveCfg = next;
   activeCfg = next;
+  // 运行时配置热更：rc 是 const 对象、但属性可以就地更新；运行时各处在调用时读 rc.xxx，
+  // 所以这样一刷，「开口阶段 / 节流与合并 / 判定阈值」这些改完保存**立刻生效**，不用重启。
+  // （以前 rc 是启动快照 → 比如把阶段切成 live，得重启程序才认。）
+  try { Object.assign(rc, runtimeConfig(next)); } catch (e) { log("运行时配置热更失败：" + String(e && e.message)); }
   let linkNote = null;
   if (before.url !== after.url || before.token !== after.token) {
     linkNote = reconnectOnebot(next);
