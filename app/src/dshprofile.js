@@ -108,7 +108,7 @@ export function personaFromConfig(cfg, opts) {
   const voiceOn = voiceCapability(rt.voice, { voices: o.ttsVoices }).capable;
   // 识图声明跟着"模型到底有没有视觉能力"走，而不是只看开关：
   // 换成一个纯文本模型后还写"你看得到图"，模型就会对着空气聊图片。
-  const visionOn = visionCapability(rt.vision).capable;
+  const visionOn = visionCapability(rt.vision, { brainVision: o.brainVision, brainModel: o.brainModel }).capable;
   return {
     botName: p.botName || DEFAULT_PERSONA.botName,
     age: p.age || DEFAULT_PERSONA.age,

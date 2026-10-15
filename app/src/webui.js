@@ -149,6 +149,7 @@ export function createWebUi(deps) {
   const secretValues = d.secretValues || null;    // async () => ({ llm: { deepseekApiKey: "sk-abc...1234" } }) 遮蔽值
   const keyStatusFn = d.keyStatus || null;        // async () => ({ set, masked, source, ofm }) 当前 key 打哪来
   const onSecrets = d.onSecrets || null;          // async (patch) => 把真密钥写进工作区的 secrets.json
+  const capsFn = d.caps || null;                  // async () => ({ brain, rows }) 能力总览（模型能力 ↔ 人设声明）
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
@@ -333,6 +334,10 @@ export function createWebUi(deps) {
       return sendJson(res, 200, pluginInstallFn ? await pluginInstallFn(String(b.id)) : { ok: false, error: "没有接插件安装服务" });
     }
 
+    // 能力总览：模型能力 ↔ 人设声明 对不对得上（"模型接入"页顶部那张卡）
+    if (p === "/api/caps" && req.method === "GET") {
+      return sendJson(res, 200, capsFn ? await capsFn() : { ok: false, error: "没有接能力总览服务" });
+    }
     // 免费模型（Our Free Model 插件）：清单 + 真机检测
     if (p === "/api/models" && req.method === "GET") {
       return sendJson(res, 200, modelListFn ? await modelListFn() : { ok: false, error: "没有接模型清单服务" });

@@ -39,7 +39,8 @@ export function modelHasVision(model) {
 }
 
 // runtime.vision 段 → { enabled, capable, model, source, note }
-export function visionCapability(cfg) {
+export function visionCapability(cfg, opts) {
+  const o = opts || {};
   const c = Object.assign({}, VISION_DEFAULTS, cfg || {});
   const enabled = c.enabled === true && (c.mode === "http" || c.mode === "dsh");
   const out = { enabled: enabled, capable: false, model: c.model, mode: c.mode, source: "", note: "" };
@@ -49,7 +50,14 @@ export function visionCapability(cfg) {
   if (forced === "无") { out.source = "配置指定"; out.note = "按配置声明没有视觉能力（不写看图人设）"; return out; }
   if (c.mode === "http") { out.capable = true; out.source = "http 接口"; out.note = "http 后端由你自己配，按有视觉处理"; return out; }
   const same = !c.model || String(c.model).trim() === "同大脑";
-  if (same) { out.capable = true; out.source = "跟随大脑模型"; out.note = "识图与大脑同一个模型（你显式选的，按有视觉处理）"; return out; }
+  if (same) {
+    // 跟随大脑时，按**大脑实际那个模型**的能力判（插件目录里写了 vision 标记就用它，否则认模型名）。
+    // 换成一个纯文本模型后还写"你看得到图"，模型就会对着空气聊图片。
+    const bm = o.brainModel ? String(o.brainModel) : "";
+    if (o.brainVision === false) { out.source = "跟随大脑模型"; out.note = "识图跟随大脑，但大脑模型" + (bm ? "（" + bm + "）" : "") + "不支持看图 → 不声明、不调用"; return out; }
+    if (o.brainVision === true) { out.capable = true; out.source = "跟随大脑模型"; out.note = "大脑模型" + (bm ? "（" + bm + "）" : "") + "带视觉，跟着它走"; return out; }
+    out.capable = true; out.source = "跟随大脑模型"; out.note = "识图与大脑同一个模型（认不出它有没有视觉，按有处理；确认不支持就把「识图视觉能力」改成「无」）"; return out;
+  }
   const known = modelHasVision(c.model);
   if (known === true) { out.capable = true; out.source = "模型名识别"; out.note = "模型名看起来支持图片"; return out; }
   if (known === false) { out.source = "模型名识别"; out.note = "模型名看着是纯文本模型 → 不写看图人设，也不调用"; return out; }

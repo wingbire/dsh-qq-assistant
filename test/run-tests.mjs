@@ -1575,7 +1575,12 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     eq(info.port > 0 && info.port !== DEFAULT_PORT, true, "端口 0 应挑一个临时端口");
     const j1 = await (await fetch(info.url + "/api/config")).json();
     eq(j1.ok, true);
-    eq(j1.table.分组.length, 6, "人设/判定/主动与节流/运行时/接入/额外功能");
+    eq(j1.table.分组.length, 8, "人设/判定/主动与节流/模型与接入/QQ 接入/群档案/运行时/额外功能");
+    const names1 = j1.table.分组.map(function (g) { return g.名; });
+    ok(names1.indexOf("模型与接入") >= 0, "模型/API 接入集中在「模型与接入」（不再散在运行时和额外功能里）");
+    const allKeys1 = j1.table.分组.flatMap(function (g) { return g.字段.map(function (f) { return f.键; }); });
+    const dupKeys1 = allKeys1.filter(function (k, i) { return allKeys1.indexOf(k) !== i; });
+    eq(dupKeys1.length, 0, "同一字段不能出现在两个分组（以前 ourFreeModel 就重复）：" + dupKeys1.join(","));
     eq(j1.values.napcat.token, "<已配置>", "secret 不能明文回前端");
     ok(JSON.stringify(j1.values).indexOf("SECRET-TOKEN") < 0);
     eq(j1.runtime.webuiPort, 8799);

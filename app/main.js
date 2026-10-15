@@ -13,7 +13,7 @@ import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
-import { createVision, VISION_PERSONA } from "./src/vision.js";
+import { createVision, VISION_PERSONA, modelHasVision } from "./src/vision.js";
 import { createStt } from "./src/stt.js";
 import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, writeProbe as writeOfmProbe, probeModels as probeOfmModels, OFM_DEFAULT_CANDIDATES } from "./src/ofm.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
@@ -133,8 +133,25 @@ const rc = runtimeConfig(cfg);
 // 音色只在开了语音时探一次（spawn 一次 PowerShell）。
 const ttsVoices = rc.voice.enabled ? listSapiVoices() : null;
 const voiceCap = voiceCapability(rc.voice, { voices: ttsVoices });
-const visionCap = visionCapability(rc.vision);
-const persona = personaFromConfig(cfg, { ttsVoices: ttsVoices });
+// 大脑那个模型到底能不能看图（免费池看插件目录的 vision 标记，其它按模型名识别）
+function brainVisionOf(c) {
+  const conf = c || cfg || {};
+  const ch = channelModel("brain", conf);
+  if (!ch) return modelHasVision(String(getPath(conf, "brain.model") || "").trim() || "");
+  if (ch.provider === OFM_PROVIDER) {
+    try {
+      const st = readOfmState(DSH_HOME);
+      const cat = (st && st.catalog) || {};
+      const rows = (cat.kiloRows || []).concat((cat.entries || []).map(function (id) { return { id: id }; }));
+      const row = rows.filter(function (r) { return r.id === ch.model; })[0];
+      if (row && typeof row.vision === "boolean") return row.vision;
+    } catch (e) { /* 读不到就按模型名认 */ }
+  }
+  return modelHasVision(ch.model);
+}
+const bv = brainVisionOf(cfg);
+const visionCap = visionCapability(rc.vision, { brainVision: bv, brainModel: (channelModel("brain", cfg) || {}).model });
+const persona = personaFromConfig(cfg, { ttsVoices: ttsVoices, brainVision: bv, brainModel: (channelModel("brain", cfg) || {}).model });
 
 log("模式：" + (rc.stageMode === "auto" ? "auto（新群观察 " + rc.observeUntilMessages + " 条 → 半自动 " + rc.semiAutoDays + " 天 → 全自动）" : rc.stageMode === "observe" ? "强制观察" : "直接实际发送"));
 log("数据根：" + DATA_ROOT);
@@ -280,7 +297,7 @@ const vision = createVision({
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
     // 配置端改完立刻生效（人设是保存时就重写的，通道也别等到重启）
     const liveCfgNow = runtimeConfig(liveCfg);
-    const live = visionCapability(liveCfgNow.vision);
+    const live = visionCapability(liveCfgNow.vision, { brainVision: brainVisionOf(liveCfg), brainModel: (channelModel("brain", liveCfg) || {}).model });
     if (!live.capable) return { ok: false, error: "当前识图模型没有视觉能力（" + live.source + "）" };
     ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA, model: visionModelOf(liveCfgNow) });
     return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
@@ -381,11 +398,16 @@ function visionModelOf(c) {
 // API 通道：大脑与二判都可以选择走社区插件 Our Free Model（provider 固定为 our-free-model）
 const OFM_PROVIDER = "our-free-model";
 // 实测可用的免费车道（OpenCode 那条车道会指纹识别客户端，不能用；sealIds 那条要登录）
-const OFM_FALLBACK_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const OFM_FALLBACK_MODEL = "kilo-auto/free";     // 实测比 nemotron-ultra 快很多、更稳
 function channelModel(kind, c) {
   const conf = (c || (webui ? webui.getConfig() : cfg)) || {};
   const p = conf.plugins || {};
+  const prov = String(getPath(conf, "brain.provider") || "").trim();
+  const mid = String(getPath(conf, "brain.model") || "").trim();
   if (kind === "brain") {
+    // ① 显式填了「供应商 + 模型」→ 就用它（可以接 DSH 里装的任何 provider，例如 openai-gateway）
+    if (prov && mid) return { provider: prov, model: mid };
+    // ② 否则看社区免费池那条通道
     if (!p.ourFreeModelBrain) return null;
     return { provider: OFM_PROVIDER, model: p.ourFreeModelBrainId || OFM_FALLBACK_MODEL };
   }
@@ -406,7 +428,8 @@ async function onConfigSaved(next) {
     log("接入设置变了 → 已自动重连：" + after.url);
   }
   if (!cli) return { ok: false, error: "找不到 DSH 启动器，改完要重启程序才生效", reconnect: linkNote };
-  const p = personaFromConfig(next);
+  const bvNext = brainVisionOf(next);
+  const p = personaFromConfig(next, { brainVision: bvNext, brainModel: (channelModel("brain", next) || {}).model });
   const text = String(getPath(next, "persona.globalText") || "").trim();
   const r = ensureBrainProfile({ cliPath: cli, persona: p, personaText: text || undefined, model: channelModel("brain", next), efforts: effortsOf(next) });
   if (!r.ok) return { ok: false, error: r.error || "写 profile 失败", reconnect: linkNote };
@@ -462,6 +485,31 @@ const webui = createWebUi({
   secretValues: async function () {
     const k = pickApiKey();
     return k ? { llm: { deepseekApiKey: maskKey(k) } } : null;
+  },
+  // 能力总览：每项"这台机器到底会不会"，以及它对应人设里的哪个块（换模型后这里跟着变）
+  caps: async function () {
+    const conf = webui ? webui.getConfig() : cfg;
+    const rt = runtimeConfig(conf);
+    const chBrain = channelModel("brain", conf);
+    const bv = brainVisionOf(conf);
+    const vc = visionCapability(rt.vision, { brainVision: bv, brainModel: chBrain ? chBrain.model : "" });
+    const vcap = voiceCapability(rt.voice, { voices: listSapiVoices() });
+    const p = conf.plugins || {};
+    const sttOn = !!(rt.stt && rt.stt.enabled);
+    const keyInfo = apiKeyInfo();
+    return {
+      ok: true,
+      brain: { dsh: !!cli, channel: chBrain ? (chBrain.provider + " / " + chBrain.model) : "DSH 默认模型（deepseek-flash）", key: keyInfo },
+      rows: [
+        { name: "看图片（识图）", on: !!vc.capable, detail: vc.note + (vc.capable ? "　→ 人设里写【看图】" : "　→ 人设里写【看不到图】") },
+        { name: "发语音（TTS）", on: !!vcap.capable, detail: vcap.note + (vcap.capable ? "　→ 人设里写【语音】" : "　→ 人设里不写语音能力") },
+        { name: "听语音（转写）", on: sttOn, detail: sttOn ? ("本机 STT：" + (rt.stt.endpoint || "")) : "未启用　→ 人设里写【听不了语音】" },
+        { name: "发表情包", on: p.meme !== false, detail: p.meme !== false ? "　→ 人设里写【表情包】" : "你关掉了　→ 人设里不写" },
+        { name: "发立绘 / 图片", on: p.illustration !== false, detail: p.illustration !== false ? "　→ 人设里写【立绘】" : "你关掉了　→ 人设里不写" },
+        { name: "画图表", on: p.archify !== false, detail: p.archify !== false ? "　→ 人设里写【画图】" : "你关掉了　→ 人设里不写" },
+        { name: "联网搜索", on: p.freeSearch !== false, detail: (p.freeSearch !== false ? "免费搜索通道：" + (p.freeSearchEngine || "bing") : "你关掉了") + "（还要过搜索闸门：有信息需求才搜）" }
+      ]
+    };
   },
   // 「当前到底配没配、从哪来的」——界面在那行输入框下面直接显示，省得猜
   keyStatus: async function () {

@@ -16,7 +16,8 @@
     { id: "status", name: "状态", icon: "◎" },
     { id: "persona", name: "人设", icon: "☺", group: "人设" },
     { id: "tune", name: "调整", icon: "⚙" },
-    { id: "napcat", name: "接入", icon: "⇄", group: "接入" },
+    { id: "models", name: "模型接入", icon: "◈", group: "模型与接入" },
+    { id: "napcat", name: "QQ 接入", icon: "⇄", group: "QQ 接入" },
     { id: "profile", name: "群档案", icon: "▤" },
     { id: "extra", name: "额外功能", icon: "✦" },
     { id: "labels", name: "标注", icon: "✎" },
@@ -395,6 +396,29 @@
   }
 
   /* 人设页：全局人设（进系统提示词）+ 本群专属人设（只进这个群的消息体） */
+  // 模型接入页：先给一张「能力 ↔ 人设」总览，再是该分组的所有输入框
+  function pageModels() {
+    var c = S.caps || null;
+    var card;
+    if (!c) {
+      card = '<div class="card"><div class="body"><div class="muted">正在读能力…</div></div></div>';
+    } else {
+      var rows = (c.rows || []).map(function (r) {
+        return '<tr><td><b>' + esc(r.name) + '</b></td>' +
+          '<td><span class="tag ' + (r.on ? "yes" : "no") + '">' + (r.on ? "会" : "不会") + '</span></td>' +
+          '<td class="muted">' + esc(r.detail || "") + '</td></tr>';
+      }).join("");
+      card = '<div class="card"><div class="head">能力 ↔ 人设对应<span class="muted" style="font-size:12px">换模型后这里会跟着变，人设里的声明也照它写</span></div><div class="body">' +
+        '<div class="hint">大脑通道：<b>' + esc((c.brain && c.brain.channel) || "-") + '</b>' +
+        (c.brain && c.brain.key && c.brain.key.set ? '（Key 已配置）' : '（<b style="color:var(--bad)">Key 未配置</b>）') + '</div>' +
+        '<table style="margin-top:8px"><thead><tr><th>能力</th><th>这台机器</th><th>说明 / 对应的人设块</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div></div>';
+    }
+    return card + '<details class="card" open><summary>模型与接口（本组全部输入框）' +
+      '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">大脑 / 识图 / 语音 / 搜索</span></summary>' +
+      '<div class="body">' + renderGroupFields("模型与接入") + '</div></details>';
+  }
+
   function pagePersona() {
     var head = '<details class="card" open><summary>全局人设' +
       '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">进大脑系统提示词</span></summary><div class="body">' +
@@ -455,7 +479,11 @@
   }
 
   function pageProfile() {
-    if (!S.gid) return Promise.resolve('<div class="card"><div class="body"><div class="muted">先在右上角选一个群，才能看它的群档案。</div></div></div>');
+    // 学习相关的字段（话题固化/过期等）也放这一页，省得再开一个页签
+    var learn = '<details class="card" open><summary>群档案学习规则' +
+    '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">话题怎么固化、临时的多久过期</span></summary>' +
+    '<div class="body">' + renderGroupFields("群档案") + '</div></details>';
+    if (!S.gid) return Promise.resolve(learn + '<div class="card"><div class="body"><div class="muted">先在右上角选一个群，才能看它的群档案。</div></div></div>');
     return api("/api/profile?gid=" + encodeURIComponent(S.gid)).then(function (d) {
       var p = d.profile || {};
       if (!d.profile) {
@@ -640,7 +668,7 @@
       '<span class="hint" style="margin:0">NapCat 的 OneBot 端口常见是 <code>3001</code>；<code>6099</code> 是它的网页控制台，不是这个</span></div>' +
       '</div></div>';
     return status + napcatCard() + '<details class="card" open><summary>接入参数<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">改完点保存（接入类会自动重连）</span></summary><div class="body">' +
-      renderGroupFields("接入") + '</div></details>';
+      renderGroupFields("QQ 接入") + '</div></details>';
   }
 
   /* 接入页第二块：NapCat 自动对接（令牌 / 地址以 NapCat 自己的配置为准） */
@@ -749,12 +777,14 @@
     var meta = PAGES.filter(function (p) { return p.id === S.page; })[0] || PAGES[0];
     $("#page-title").textContent = meta.name;
     var job;
+    if (S.page === "models" && !S.caps) api("/api/caps").then(function (r) { S.caps = r; if (S.page === "models") render(); });
     if (S.page === "status") job = api("/api/status" + (S.gid ? "?gid=" + encodeURIComponent(S.gid) : "")).then(function (st) { S.status = st; return statusHtml(); });
     else if (S.page === "tune") job = Promise.resolve(renderTune());
     else if (S.page === "persona") job = pagePersona();
     else if (S.page === "profile") job = pageProfile();
     else if (S.page === "extra") job = Promise.resolve(renderExtra());
     else if (S.page === "settings") job = Promise.resolve(pageSettings());
+    else if (S.page === "models") job = pageModels();
     else if (S.page === "napcat") { job = Promise.resolve(pageNapcat()); if (!S.napcatInfo && !S.napcatLoading) loadNapcat(); }
     else if (S.page === "labels") job = pageLabels();
     else if (S.page === "memes") job = pageMemes();
