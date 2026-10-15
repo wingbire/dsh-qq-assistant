@@ -136,6 +136,45 @@ t("secrets: 大脑 key 的来源与状态（不填＝没有）", function () {
 });
 
 
+t("runtime: 大脑挂了但被点名/判是 → 不能一声不吭（发本地兜底）", async function () {
+  const sent = [];
+  const seen = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function (r) { seen.push(r); } },
+    bot: fakeBot({ action: "brain", tier: "mid", verdict: "yes" }),
+    askBrain: async function () { return { ok: false, error: "超时 60000ms" }; },
+    send: function (g, t) { sent.push(t); }, sendImage: function () {},
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "摸摸鱼头", atBot: true, now: 0 });
+  await rt.tick(500);
+  eq(sent.length, 1, "被点名 + 大脑挂了：必须出一声（以前这里静默）");
+  eq(rt.stats().brainErrors, 1);
+  eq(rt.stats().brainFallbacks, 1);
+  ok(sent[0].length >= 4, "是一句人话：" + sent[0]);
+  const errObs = seen.filter(function (x) { return x.kind === "brain_error"; })[0];
+  ok(errObs && String(errObs.error).indexOf("超时") >= 0, "原因要记下来");
+  const fb = seen.filter(function (x) { return x.kind === "sent" && x.fallback === "brain_error"; })[0];
+  ok(fb && fb.segments[0] === sent[0], "发出的那条标了 fallback=brain_error");
+
+  // 反面：没被点名、本来也不该回的 → 大脑挂了也不能乱说话
+  const sent2 = [];
+  const rt2 = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid", verdict: "grey" }),
+    askBrain: async function () { return { ok: false, error: "超时 60000ms" }; },
+    send: function (g, t) { sent2.push(t); }, sendImage: function () {},
+    now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
+  });
+  await rt2.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "随便说说", now: 0 });
+  await rt2.tick(500);
+  eq(sent2.length, 0, "没点名、判定也不是「是」→ 安静，别变噪音");
+  ok((rt2.stats().brainErrors || 0) === 1 && (rt2.stats().brainFallbacks || 0) === 0);
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

@@ -42,6 +42,9 @@ export const POKE_POOL = ["干嘛～", "别戳了", "戳我干嘛", "哎，在�
 // 引用场景：这回是在答复某条具体消息（我自己或别人），指向明确的短答比"嗯？"自然
 export const QUOTE_POOL = ["嗯，就是我说的那个", "对，上一条", "就那个意思", "你往上翻翻", "我说的是那个", "嗯，那条"];
 
+// 大脑没用上时（没装 DSH / 超时 / key 不对）被点名也不能一声不吭：说句实在话，别装懂
+export const DOWN_POOL = ["在的，我这会儿脑子有点卡，等我一下", "欸，我在——刚脑子空了一下", "听见了听见了，我缓一会儿再说", "我在，不过这会儿转不动，你等我一下", "在呢，刚那下没接上，你再说一遍？"];
+
 export const MEDIA_POOL = {
   image: ["图我这边没看到内容，你描述下？", "这图我识别不了，说说是啥？", "图没看出来，文字讲讲？", "我这边看不到图，你说说我猜"],
   voice: ["语音我听不了，打字吧", "语音听不到内容，打个字哈", "发语音我这边听不了", "语音没转写，打个字？"],
@@ -68,6 +71,7 @@ export function poolFor(decision, opts) {
   const text = String(o.text != null ? o.text : (d.text || ""));
   const bucket = bucketOf(d);
   const reasonText = (Array.isArray(d.reason) ? d.reason : []).join(" ");
+  if (o.brainDown) return { scene: "down", pool: DOWN_POOL };      // 大脑挂了 → 兜底这句优先
   if (o.poke || reasonText.indexOf("被戳") >= 0) return { scene: "poke", pool: POKE_POOL };
   if (text.indexOf("[图片]") >= 0) return { scene: "image", pool: MEDIA_POOL.image };
   if (text.indexOf("[语音]") >= 0) return { scene: "voice", pool: MEDIA_POOL.voice };

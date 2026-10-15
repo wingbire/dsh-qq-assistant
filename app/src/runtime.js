@@ -126,7 +126,7 @@ export function createRuntime(deps) {
     });
   }
 
-  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0, sttCalls: 0, sttOk: 0, sttFail: 0, sttCached: 0 };
+  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0, sttCalls: 0, sttOk: 0, sttFail: 0, sttCached: 0, brainErrors: 0, brainFallbacks: 0 };
   let busy = false;
 
   function observe(rec) {
@@ -682,8 +682,26 @@ export function createRuntime(deps) {
       usage = r && r.usage ? r.usage : null;
       if (usage) { const tok = Number(usage.totalTokens) || (Number(usage.inputTokens) + Number(usage.outputTokens) + Number(usage.cacheReadTokens) + Number(usage.cacheWriteTokens)); budget.record(tok, at); stats.tokens += tok; }
       if (!r || !r.ok) {
-        observe({ kind: "brain_error", gid: batch.gid, uid: batch.uid, error: r ? r.error : "no result", tier: dec.tier });
-        return { gid: batch.gid, action: "brain_error", error: r ? r.error : null };
+        const err = String((r && r.error) || "no result");
+        stats.brainErrors += 1;
+        observe({ kind: "brain_error", gid: batch.gid, uid: batch.uid, error: err, tier: dec.tier });
+        // 大脑没用上（没装 DSH / 超时 / key 不对）时**被点名的不能一声不吭** ——
+        // 以前这里直接 return，用户在群里 @ 她一句，后台只看得到判定、群里一个字都没有。
+        const aimed = !!(evt.atBot || evt.atAll || dec.verdict === "yes");
+        let fallback = null;
+        if (aimed && !brakes.state(batch.gid, at).stopped) {
+          fallback = localReplies.reply({ reason: ["大脑挂了"] }, { gid: batch.gid, text: evt.text || "", rng: rng, brainDown: true, bucket: dec.bucket });
+          if (fallback) {
+            send(batch.gid, fallback);
+            stats.brainFallbacks += 1;
+            stats.replies += 1;
+            observe({ kind: "sent", gid: batch.gid, uid: batch.uid, speaker: evt.speaker, tier: dec.tier, mergedCount: batch.count, segments: [fallback], fallback: "brain_error", error: err });
+          }
+        }
+        // 后台那行也要说清楚为什么没回复（不然只有一个"判定"看不明白）
+        uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
+          { note: "大脑没用上（" + err.slice(0, 46) + "）" + (fallback ? " → 已发本地兜底" : " → 没回复") });
+        return { gid: batch.gid, action: "brain_error", error: err, fallback: fallback };
       }
       text = r.text || "";
     } else {

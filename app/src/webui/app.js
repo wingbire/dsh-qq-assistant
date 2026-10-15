@@ -318,7 +318,8 @@
         '<td>' + esc(m.action || "-") + '</td>' +
         '<td>' + (m.pSay == null ? "-" : Number(m.pSay).toFixed(2)) + '</td>' +
         '<td>' + esc(m.tier || "-") + '</td>' +
-        '<td class="muted" style="max-width:280px">' + esc(shortText(reason, 60)) + '</td></tr>';
+        '<td class="muted" style="max-width:280px">' + esc(shortText(reason, 60)) +
+          (m.note ? '<div style="color:var(--warn)">' + esc(shortText(m.note, 64)) + '</div>' : '') + '</td></tr>';
     }).join("");
     // 消息量大时这张卡片会很长 → 做成可折叠的（默认折叠，点开状态记在本机，刷新不丢）
     var msgInfo = st.messagesInfo || {};
