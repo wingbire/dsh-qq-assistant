@@ -50,11 +50,29 @@ export function writeAllTierOverlays(dshHome, profileId, base) {
 }
 
 export const PERSONA_FIELDS = [
-  "botName", "age", "traits", "interests", "dislikes",
+  "botName", "age", "traits", "interests", "dislikes", "nicknames",
   "tone", "overflow", "memeRate"
 ];
 
 // N3 决策：先默认。史料里的「蓝色大肥鱼」全文可用 prompts/ 覆盖回来。
+// 点名识别：光有全名不够 —— 群里叫她「肥鱼」「鲸鲸」「大肥鱼」，全名匹配不到就当成没点名，
+// 结果她连"别人在拿她开涮"都不知道（实测那张「哦鲸鲸…」的梗图她没认出来）。
+export function nameVariants(name, extra) {
+  const base = String(name || "").trim();
+  const out = [];
+  const push = function (x) { const v = String(x || "").trim(); if (v && out.indexOf(v) < 0) out.push(v); };
+  push(base);
+  if (base) {
+    push(base.replace(/^[小大老阿]/, ""));                 // 小肥鱼 → 肥鱼
+    push(base.replace(/[小大老阿]$/, ""));
+    if (base.length >= 3) push(base.slice(1));             // 小肥鱼 → 肥鱼
+    if (base.length >= 3) push(base.slice(0, base.length - 1));
+    if (/鲸|鱼/.test(base)) { push("鲸鲸"); push("鲸鱼"); push("鱼鱼"); }   // 常见昵称
+  }
+  for (const x of String(extra || "").split(/[,，、\s]+/)) push(x);
+  return out;
+}
+
 export const DEFAULT_PERSONA = {
   memeEnabled: true, voiceEnabled: false, visionEnabled: false, voiceMaxChars: 60,
   ageStage: "成年",

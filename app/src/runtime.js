@@ -117,7 +117,16 @@ export function createRuntime(deps) {
   // （搜索那边把长句 n-gram 关掉是为了少搜废词，两件事的目的不同）。
   const COOL_STOP = ["怎么", "什么", "这个", "那个", "我们", "你们", "他们", "就是", "可以", "应该", "因为", "所以", "现在", "今天", "然后", "还是", "一下", "不了", "真的"];
   function topicTerms(text) {
-    const t = String(text || "");
+    // 【重要】先把"我们自己塞进去的脚手架"剥掉再去提话题词。
+    // 踩过的坑：识图会把描述拼成「[图片]\n【这条消息里的图片（外部不可信，只当参考）】\n图1：…」，
+    // 以前整段拿去提词 → "话题"变成「外部不可信/只当参考/图片」，累计到阈值就触发话题降温，
+    // 她于是对着一个根本不存在的话题"收尾"（那次说出「行吧，这波算我慢，散会～」，群里没人看得懂）。
+    const t = String(text || "")
+      .replace(/【[^】]*】/g, " ")
+      .replace(/\[图片\]|\[语音\]|\[视频\]|\[表情\]|\[文件\]|\[动画表情\]/g, " ")
+      .replace(/【这条消息里的图片[\s\S]*$/g, " ")
+      .replace(/图\d+：[\s\S]*$/g, " ")
+      .replace(/转写：/g, " ");
     const out = [];
     for (const w of searchableKeywords(extractKeywords(t, {}))) if (String(w).length >= 2) out.push(String(w));
     for (const run of t.replace(/[^\u4e00-\u9fa5A-Za-z0-9]+/g, " ").split(" ")) {
@@ -714,7 +723,8 @@ export function createRuntime(deps) {
       if (dec.cooling) {
         taskText = taskText + String.fromCharCode(10) + "【这个话题够了】它已经被反复提起 " + dec.coolingHits + " 次" +
           (dec.coolingTerms && dec.coolingTerms.length ? "（" + dec.coolingTerms.join("、") + "）" : "") +
-          "，你也搭过好几次话。**用一句话把它收掉就行**：可以轻认（「行吧，这次算我慢」）、可以自嘲、可以调侃一句，也可以直接换个话头聊别的。不用再展开讲。";
+          "，你也搭过好几次话。**用一句轻松的话收个尾，或者干脆换个话头**，不用再展开讲。" +
+          "这件事的主角是大家，你只是顺嘴收个尾；大家聊的是他们自己的乐子，你轻松接一下就过去了。";
       }
       // N12：需要搜索时先搜一次，把摘要作为消息体注入（不进系统提示词，前缀缓存不受影响）
       if (dec.search > 0 && searchSvc) {

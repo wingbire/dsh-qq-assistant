@@ -251,7 +251,8 @@ t("runtime: 话题降温——同一话题被反复提起时改口风（别再�
   }
   const cooled = prompts.filter(function (p) { return String(p).indexOf("【这个话题够了】") >= 0; });
   ok(cooled.length >= 1, "反复提起后要出现收尾指令（出现 " + cooled.length + " 次）");
-  ok(cooled.every(function (p) { return p.indexOf("用一句话把它收掉") >= 0; }), "给的是怎么做，不是一串不许");
+  ok(cooled.every(function (p) { return p.indexOf("用一句轻松的话收个尾") >= 0; }), "给的是怎么做，不是一串不许（正面措辞，且不拿「算我慢」当例子）");
+  ok(cooled.every(function (p) { return p.indexOf("算我慢") < 0; }), "收尾指令里不能再出现自我归咎的样板句（实测她照抄过）");
   ok(seen.some(function (x) { return x.kind === "topic_cooling"; }), "降温要记进观测，便于排查");
   ok(rt.stats().coolingHits >= 1, "统计里有 coolingHits");
 });

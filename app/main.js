@@ -7,7 +7,7 @@ import { createBot } from "./src/index.js";
 import { createOneBot, probePort } from "./src/onebot.js";
 import { createRuntime } from "./src/runtime.js";
 import { runBrain, ensureBrainProfile, resolveDshCli, PROFILE_DEFAULT } from "./src/brain.js";
-import { tierOverlayPath } from "./src/dshprofile.js";
+import { tierOverlayPath , nameVariants } from "./src/dshprofile.js";
 import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
@@ -192,7 +192,7 @@ const interestRules = {
   maxInterests: Number(getPath(cfg, "profile.interestMax")) || 8
 };
 const bot = createBot({
-  dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: [persona.botName], interestRules: interestRules,
+  dataRoot: path.join(DATA_ROOT, "data"), botNames: [persona.botName], nicknames: nameVariants(persona.botName, persona.nicknames), interestRules: interestRules,
   bounds: rc.gates.bounds, tiers: rc.gates.tiers, utilityWeights: rc.gates.weights,  // 判定阈值现在真的生效
   rescueAsk: rc.gates.rescueAsk, blockInjected: rc.gates.blockInjected, audit: rc.audit
 });
@@ -356,7 +356,7 @@ const runtime = createRuntime({
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },
   sendImage: function (gid, file) { log("→图 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupImage(gid, file) : false; },
-  evtDefaults: { botNames: [persona.botName], nicknames: [persona.botName], interests: persona.interests, dislikes: persona.dislikes },
+  evtDefaults: { botNames: [persona.botName], nicknames: nameVariants(persona.botName, persona.nicknames), interests: persona.interests, dislikes: persona.dislikes },
   send: function (gid, text, opts) { log("→ " + gid + " : " + text + (opts && opts.replyTo ? "（引用）" : "")); return link.ob ? link.ob.sendGroupMsg(gid, text, opts) : false; },
   askBrain: async function (o) {
     if (!cli) return { ok: false, error: "找不到 DSH 启动器" };
