@@ -93,7 +93,12 @@ export function mergeConfigSafe(cur, patch, table) {
   for (const f of fieldEntries(table || loadFieldTable())) {
     if (!f.键 || f.类型 === "secret") continue;
     const v = getPath(next, f.键);
-    if (v === undefined || v === null || v === "") continue;
+    if (v === undefined || v === null) continue;
+    if (v === "") {
+      // 空串＝表单没给值：bool 要保留 cur 里的原值（否则一次空提交会把 true 清成空串，等于把功能关掉）
+      if (f.类型 === "bool") setPath(next, f.键, getPath(cur, f.键) === true);
+      continue;
+    }
     if (f.类型 === "bool") {
       if (typeof v === "string") setPath(next, f.键, !/^(false|0|no|off|否|关)$/i.test(v.trim()));
       else if (typeof v === "number") setPath(next, f.键, v !== 0);
