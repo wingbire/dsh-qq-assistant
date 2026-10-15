@@ -159,7 +159,18 @@ log("数据根：" + DATA_ROOT);
 log("人设：" + persona.botName + " / " + persona.age);
 log("接入：" + rc.onebot.wsUrl + (rc.onebot.token ? "（已带令牌）" : "（无令牌）") + (napcatBoot.aligned ? " · 与 NapCat 一致" : ""));
 log("预算：日 " + rc.budget.dailyTokens + " token，超 " + (rc.budget.softRatio * 100) + "% 关主动");
-log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / 8s 超时 → 不确定");
+// 外审那行要打**真实**超时，并在"通道慢 + 超时小"时主动告警：
+// 之前这里写死 8s，配上免费池（实测 20~30s）结果是每次都判「不确定」= 外审从未生效，而日志看不出问题。
+const auditLimitSec = Math.round(((rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 30000) / 1000);
+let auditFreePool = false;
+try {
+  const auditPkg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, "profiles", "qq-audit", "package.json"), "utf8"));
+  const bundles = (((auditPkg.dsh || {}).profile || {}).bundles) || [];
+  auditFreePool = bundles.indexOf("dsh-our-free-model") >= 0;
+} catch (e) { /* profile 不在就算了 */ }
+log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / " + auditLimitSec + "s 超时" +
+  (auditFreePool && auditLimitSec < 25 ? " ⚠️ 这个 profile 走免费模型池（实测一次 20~30 秒），" + auditLimitSec + "s 会让外审一直判「不确定」= 等于没开，建议把「外审单次超时」改到 30000" :
+    (auditFreePool ? "（免费池）" : "")));
 // 判定阈值直接打出来：配置端「调整」页改了到底有没有吃进去，看这一行就知道
 log("判定阈值：开口线 " + rc.gates.bounds.lo + " / 灰区上界 " + rc.gates.bounds.hi
   + " / 三档线 " + rc.gates.tiers.speakAt + "·" + rc.gates.tiers.terseAt + "·" + rc.gates.tiers.detailedAt
@@ -260,7 +271,19 @@ function reconnectOnebot(c) {
 reconnectOnebot(cfg);
 
 // N11 外审通道：独立 qq-audit profile，超时 → 不确定
-// 走官方模型时 8 秒够用；走 Our Free Model 的免费池要放宽（实测约 13 秒），所以做成可配
+// 走官方模型时 8 秒够用；走 Our Free Model 的免费池实测 20~30 秒，所以默认给到 30 秒（可配）
+// 开机自检：如果这个 profile 挂的是免费池、而超时又设得太小，就等于外审从没生效过 —— 直接提醒，
+// 免得又出现"后台只看到外审不可用、却查不出为什么"。
+try {
+  const auditPkg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, "profiles", "qq-audit", "package.json"), "utf8"));
+  const bundles = (((auditPkg.dsh || {}).profile || {}).bundles) || [];
+  const freePool = bundles.indexOf("dsh-our-free-model") >= 0;
+  const ato = Number((rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 0);
+  if (freePool && ato && ato < 25000) {
+    auditWarn = "外审提醒：qq-audit 走的是免费模型池（实测一次 20~30 秒），但「外审单次超时」只设了 " +
+      Math.round(ato / 1000) + " 秒 → 外审会一直判「不确定」，等于没开。建议调到 30000。";
+  }
+} catch (e) { /* 没有这个 profile 就算了 */ }
 const auditor = createAuditor({
   timeoutMs: (rc.audit && rc.audit.timeoutMs) || rc.auditTimeoutMs || 8000,
   rubric: loadRubric(),

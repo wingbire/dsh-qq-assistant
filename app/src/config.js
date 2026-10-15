@@ -139,7 +139,7 @@ export function gatesFromConfig(cfg) {
 export function auditFromConfig(cfg) {
   const c = cfg || {};
   return {
-    timeoutMs: numOf(getPath(c, "audit.timeoutMs"), 8000),
+    timeoutMs: numOf(getPath(c, "audit.timeoutMs"), 30000),
     scope: getPath(c, "audit.scope") || "高档+复核救回",       // 只审高档 / 高档+复核救回 / 灰区也审
     onTimeout: getPath(c, "audit.onTimeout") || "降档",         // 降档 / 保持
     maxPerHour: numOf(getPath(c, "audit.maxPerHour"), 30),     // 0 = 不限
@@ -227,7 +227,7 @@ export function runtimeConfig(cfg) {
       archifyCleanup: getPath(c, "plugins.archifyCleanup") !== false,
       meme: getPath(c, "plugins.meme") !== false
     },
-    auditTimeoutMs: Number(getPath(c, "audit.timeoutMs")) || 8000,
+    auditTimeoutMs: Number(getPath(c, "audit.timeoutMs")) || 30000,
     ageStage: getPath(c, "persona.ageStage") === "幼年" ? "幼年" : "成年",
     illustrations: {
       young: getPath(c, "persona.illustrationYoung") || "角色形象图/幼年.jpg",

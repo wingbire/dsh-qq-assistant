@@ -200,7 +200,12 @@ export function createGates(opts) {
         if (auditRes.error) {
           // 外审坏了（超时/认证失败/通道不通）→ 一律沿用本地判断。
           // 以前这里会把"补救回来的"直接丢掉，等于外审一坏，整条补救路径静默失效。
-          reason.push("外审不可用 → 沿用本地判断");
+          // 只说"外审不可用"会让人查不出原因（实测：免费池要 20~30s，而超时设成了 8s → 每次都超时）——
+          // 所以把「耗时 / 上限 / 具体错误」都写进依据里。
+          const msShown = Math.round((auditRes.ms || 0) / 100) / 10;
+          const limitShown = Math.round((Number(auditCfg.timeoutMs) || 0) / 1000);
+          reason.push("外审不可用（" + String(auditRes.error).slice(0, 40) +
+            (auditRes.ms ? "，耗时 " + msShown + "s" : "") + (limitShown ? "，上限 " + limitShown + "s" : "") + "）→ 沿用本地判断");
         } else if (auditRes.verdict === "no") {
           verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };

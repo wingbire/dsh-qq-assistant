@@ -4,7 +4,9 @@ import { APP_ROOT, DSH_HOME } from "./paths.js";
 
 export const AUDIT_MODEL = "external-audit-model";
 export const AUDIT_PROFILE_ID = "qq-audit";
-export const AUDIT_TIMEOUT_MS = 8000;          // N11：超时算「不确定」
+export const AUDIT_TIMEOUT_MS = 30000;         // N11：超时算「不确定」
+// 默认值必须匹配通道的真实延迟：qq-audit 这个 profile 挂的是免费模型池（dsh-our-free-model），
+// 实测一次 20~30 秒 —— 早先默认 8000 的结果是"每次都超时 → 外审从未真正生效"（后台只看到 19% 外审不可用）。
 export const RUBRIC_FILE = path.join(APP_ROOT, "..", "prompts", "外审rubric.template.md");
 
 export function loadRubric(file) {

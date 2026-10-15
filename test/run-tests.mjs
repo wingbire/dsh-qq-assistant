@@ -28,6 +28,7 @@ import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.j
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
 import { discover as discoverNapCat, syncPlan as napcatSyncPlan, applyAdopt as napcatApplyAdopt, pickServer, parseOnebot, wsUrlOf, maskToken, readWebuiToken, DEFAULT_WS_URL } from "../app/src/napcat.js";
 import { parseAuditVerdict, auditStub, createAuditor, setAuditChannel, getAuditChannel, audit as runAudit, AUDIT_PROFILE_ID, AUDIT_TIMEOUT_MS } from "../app/src/audit.js";
+import { auditFromConfig } from "../app/src/config.js";
 import { createSearch, buildSummary, normalizeResults, injectSummary, cacheKeyOf, parseBingHtml, stripTags, httpSearch, SEARCH_PROFILE_ID } from "../app/src/search.js";
 import { DEFAULT_BOUNDS } from "../app/src/gatescore.js";
 import { createTracker, isAnnoyed, calledBot } from "../app/src/feedback.js";
@@ -398,6 +399,18 @@ t("衔接性：人设的能力声明跟着配置开关走", function () {
   ok(t2.indexOf("【看图】") < 0, "识图关着 → 不能写【看图】");
   ok(t2.indexOf("【表情包】") < 0 && t2.indexOf("【立绘（图片）】") < 0 && t2.indexOf("【画图】") < 0, "表达层关着 → 不能写对应块");
   ok(t2.indexOf("听不了") >= 0 || t2.indexOf("【语音消息】") >= 0, "转写关着 → 要么说听不了，要么不提");
+});
+
+
+t("外审：默认超时要匹配通道（免费池 20~30s，别再是 8s）", function () {
+  const a = auditFromConfig({});
+  ok(a.timeoutMs >= 25000, "默认超时够免费池用（现在是 " + a.timeoutMs + "ms）—— 8s 会让外审每次都判不确定");
+  eq(a.scope, "高档+复核救回", "默认只审高档 + 复核救回（普通判否不送审，这是设计）");
+  eq(a.onTimeout, "降档", "超时默认降档");
+  eq(a.auditUnaddressed, true);
+  const b = auditFromConfig({ audit: { timeoutMs: 9000 } });
+  eq(b.timeoutMs, 9000, "用户显式配了就以用户的为准");
+  ok(AUDIT_TIMEOUT_MS >= 25000, "模块默认常量也要够（现在是 " + AUDIT_TIMEOUT_MS + "）");
 });
 
 
@@ -1032,7 +1045,7 @@ t("audit: 超时/失败一律「不确定」（N11）", async function () {
   const r = await a("在吗", {});
   eq(r.verdict, "unsure");
   eq(r.channel, "brain");
-  eq(AUDIT_TIMEOUT_MS, 8000);
+  ok(AUDIT_TIMEOUT_MS >= 25000, "模块默认超时要够免费池用（实测 20~30s），现在是 " + AUDIT_TIMEOUT_MS);
 });
 
 t("audit: 真实通道返回被解析；装通道后 audit() 走真实通道", async function () {
