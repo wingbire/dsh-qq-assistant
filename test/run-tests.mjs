@@ -288,6 +288,25 @@ t("runtime: 生成后兜底——会议纪要式回复会被打回重写一次",
 });
 
 
+t("webui: 渲染分发里每个 job 都必须是 Promise（防「页面切了但右边不动」）", function () {
+  // 真实事故：pageModels() 返回的是字符串，job.then(...) 直接抛异常，
+  // 结果 innerHTML 从没执行 —— 点"模型接入"右边一直显示上一页。
+  const src = fs.readFileSync("app/src/webui/app.js", "utf8");
+  const lines = src.split(String.fromCharCode(10));
+  const bad = [];
+  for (const ln of lines) {
+    const m = ln.match(/\bjob = ([^;]+);/);
+    if (!m) continue;
+    const expr = m[1].trim();
+    // 只认两种：显式 Promise.resolve(...)，或本身返回 Promise 的 api(...)。
+    // 别放行裸 pageXxx() —— 上次 pageModels() 返回字符串就是这么漏过去的。
+    const okPromise = /^Promise\.resolve\(/.test(expr) || /^api\(/.test(expr);
+    if (!okPromise) bad.push(expr);
+  }
+  eq(bad.length, 0, "这些 job 赋值可能不是 Promise（要用 Promise.resolve 包一下，或让它返回 Promise）：" + bad.join(" | "));
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

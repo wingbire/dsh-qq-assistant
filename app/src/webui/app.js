@@ -780,14 +780,14 @@
     if (S.page === "models" && !S.caps) api("/api/caps").then(function (r) { S.caps = r; if (S.page === "models") render(); });
     if (S.page === "status") job = api("/api/status" + (S.gid ? "?gid=" + encodeURIComponent(S.gid) : "")).then(function (st) { S.status = st; return statusHtml(); });
     else if (S.page === "tune") job = Promise.resolve(renderTune());
-    else if (S.page === "persona") job = pagePersona();
-    else if (S.page === "profile") job = pageProfile();
+    else if (S.page === "persona") job = Promise.resolve(pagePersona());
+    else if (S.page === "profile") job = Promise.resolve(pageProfile());
     else if (S.page === "extra") job = Promise.resolve(renderExtra());
     else if (S.page === "settings") job = Promise.resolve(pageSettings());
-    else if (S.page === "models") job = pageModels();
+    else if (S.page === "models") job = Promise.resolve(pageModels());
     else if (S.page === "napcat") { job = Promise.resolve(pageNapcat()); if (!S.napcatInfo && !S.napcatLoading) loadNapcat(); }
-    else if (S.page === "labels") job = pageLabels();
-    else if (S.page === "memes") job = pageMemes();
+    else if (S.page === "labels") job = Promise.resolve(pageLabels());
+    else if (S.page === "memes") job = Promise.resolve(pageMemes());
     else job = Promise.resolve(renderGroupFields(meta.group));
     job.then(function (html) {
       $("#page").innerHTML = html;
