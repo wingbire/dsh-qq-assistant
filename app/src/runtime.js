@@ -710,15 +710,15 @@ export function createRuntime(deps) {
 
     const quoted2 = parseQuoteMarker(text || "");    // [引用] → 这条做成引用回复
     text = quoted2.text;
-    // 引用不引用只看一件事：**这条是不是在明确回某个人/某一条**（跟回答长短无关）。
-    //   ① 对方本来就是用引用发来的（在接某条线）        → 引用回去
-    //   ② 她这条是被 @ 触发的（@ 就是最明确的指向）      → 引用触发她的那条
-    //   ③ 大脑主动写了 [引用]（想针对更早的某条）        → 引用它正在回的那条
-    // 其余情况（自己陈述、闲聊接话、跟大家讨论）→ 直接发言，别每条都引用（像客服）。
-    // 开关：关 = 从不引用；自动 = ①②③；仅标记 = 只听模型的（③）。
+    // 引用只用在一种情况：**她这条发言是在指向别人的某条具体消息**。
+    //   ① 大脑主动写了 [引用]（她判断"我是在回某一条"）        → 引用她正在回的那条
+    //   ② 对方本来就是用引用发来的（她在接那条线，指向很明确）  → 引用回那条
+    // 注意：**别人 @ 她不算** —— @ 已经说明是在跟她说话，直接答就行，再引用反而啰嗦。
+    // 其余情况（自己陈述、闲聊接话、跟大家讨论、主动搭话）→ 直接发言，别每条都引用（像客服）。
+    // 开关：关 = 从不引用；自动 = ①②；仅标记 = 只听模型的（①）。
     const quoteMode = rc.quoteReply || "自动";
-    const targeted = !!(evt.replyId || evt.atBot || evt.atAll);
-    const wantQuote = quoteMode === "仅标记" ? quoted2.wanted : (quoted2.wanted || (quoteMode === "自动" && targeted));
+    const herOwnTarget = !!(evt.replyId);                       // 她在接某条引用线 = 她的发言有明确指向
+    const wantQuote = quoteMode === "仅标记" ? quoted2.wanted : (quoted2.wanted || (quoteMode === "自动" && herOwnTarget));
     const useQuoteReply = !!evt.messageId && quoteMode !== "关" && wantQuote;
     const voiced = parseVoiceTag(text || "");        // N18：先摘 [语音: 文本]
     const drawn = parseIllustration(voiced.text);    // 再摘 [立绘] / [立绘: 幼年]

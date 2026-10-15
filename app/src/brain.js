@@ -131,6 +131,7 @@ export function buildTaskText(depth, policy, keywords) {
   lines.push("档位：" + (depth === "high" ? "详细" : depth === "mid" ? "总结" : "短评"));
   lines.push("字数上限：" + policy.maxChars);
   lines.push("搜索次数：" + policy.search + (policy.search ? "；关键词：" + (keywords || []).join("、") : "（凭已有知识回答，不要编造实时信息）"));
+  lines.push("要专门回某一条消息（而不是顺着聊）时，在正文里写 [引用]；别人 @ 你则不用。");
   lines.push("直接输出要发到群里的正文，不要解释。");
   return lines.join(String.fromCharCode(10));
 }

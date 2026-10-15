@@ -175,35 +175,43 @@ t("runtime: 大脑挂了但被点名/判是 → 不能一声不吭（发本地�
 });
 
 
-t("runtime: 引用回复按「是否明确指向」用（@她→引用，闲聊→直接发言）", async function () {
-  const mk = async function (evt, mode) {
+t("runtime: 引用回复——她指向别人的某条才用（@她 不算）", async function () {
+  const mk = async function (evt, mode, brainText) {
     const sent = [];
     const rt = createRuntime({
       config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, quoteReply: mode || "自动" },
       store: { paths: {}, addObservation: function () {} },
       bot: fakeBot({ action: "brain", tier: "mid" }),
       send: function (g, t, o) { sent.push({ t: t, o: o || null }); }, sendImage: function () {},
-      askBrain: async function () { return { ok: true, text: "行", usage: { totalTokens: 3 } }; },
+      askBrain: async function () { return { ok: true, text: brainText || "行", usage: { totalTokens: 3 } }; },
       now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
     });
     await rt.onEvent(Object.assign({ gid: "G1", uid: "u2", speaker: "乙", now: 0 }, evt));
     await rt.tick(500);
     return sent;
   };
+  // 别人 @ 她 → 她只是被叫到，不引用（@ 已经说明在跟她说话）
   const s1 = await mk({ text: "@小肥鱼 摸摸鱼头", atBot: true, messageId: "77" });
   eq(s1.length, 1);
-  eq(s1[0].o && s1[0].o.replyTo, "77", "@ 她 = 明确指向某人 → 引用回复");
-  const s2 = await mk({ text: "这游戏真好玩", messageId: "78" });
+  eq(s1[0].o, null, "别人 @ 她 → 直接答，不引用");
+  // 她主动指向某一条（写 [引用]）→ 引用她正在回的那条
+  const s2 = await mk({ text: "这游戏真好玩", messageId: "78" }, "自动", "[引用]行");
   eq(s2.length, 1);
-  eq(s2[0].o, null, "普通陈述/闲聊 → 直接发言，不引用");
+  eq(s2[0].o && s2[0].o.replyTo, "78", "她写 [引用] → 引用她正在回的那条");
+  ok(s2[0].t.indexOf("[引用]") < 0, "标记要摘掉：" + s2[0].t);
+  // 对方用引用发来（她在接那条线）→ 引用回去
   const s3 = await mk({ text: "对", replyId: "55", messageId: "79" });
   eq(s3[0].o && s3[0].o.replyTo, "79", "对方用引用接话 → 引用回去");
-  const s4 = await mk({ text: "@小肥鱼 在吗", atBot: true, messageId: "80" }, "关");
-  eq(s4[0].o, null, "开关=关 → 从不引用");
-  const s5 = await mk({ text: "@小肥鱼 在吗", atBot: true, messageId: "81" }, "仅标记");
-  eq(s5[0].o, null, "仅标记：模型没写 [引用] 就不引用");
+  // 闲聊、没人指向 → 不引用
+  const s4 = await mk({ text: "今天天气不错", messageId: "80" });
+  eq(s4[0].o, null, "闲聊/陈述 → 不引用");
+  // 关 → 从不引用（哪怕她写了标记）
+  const s5 = await mk({ text: "@小肥鱼 在吗", atBot: true, messageId: "81" }, "关", "[引用]行");
+  eq(s5[0].o, null, "开关=关 → 从不引用");
+  // 仅标记 → 只听模型的
+  const s6 = await mk({ text: "在吗", messageId: "82" }, "仅标记", "[引用]行");
+  eq(s6[0].o && s6[0].o.replyTo, "82", "仅标记：她写了才引用");
 });
-
 
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
