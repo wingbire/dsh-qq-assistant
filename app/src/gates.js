@@ -49,7 +49,8 @@ export function createGates(opts) {
   // 外审复核：scope = 只审高档 / 高档+复核救回（默认）/ 灰区也审
   const auditFn = (typeof o.auditFn === "function") ? o.auditFn : audit;   // 注入点：测试用，避免动全局通道
   const auditCfg = o.audit || {};
-  const auditScope = String(auditCfg.scope || "高档+复核救回");
+  // 默认「灰区也审」：灰区（本地拿不准）本来就该复核"是否进大脑"，这是用户的诉求
+  const auditScope = String(auditCfg.scope || "灰区也审");
   const auditRescue = auditScope !== "只审高档";
   const auditGrey = auditScope === "灰区也审";
   const auditTimeoutMode = String(auditCfg.onTimeout || "降档");
@@ -57,6 +58,15 @@ export function createGates(opts) {
   // 未点名、但本地准备进大脑的（"你/他/她"到底指谁，本地规则分不清）→ 交给外审定夺
   const auditUnaddressed = auditCfg.auditUnaddressed !== false;
   const auditTimes = [];
+  // 「边界判否」补救的独立限流（跟外审总限流分开算）
+  const noAuditTimes = [];
+  const noAuditMaxPerHour = Number(auditCfg.noMaxPerHour) || 6;
+  function noAuditAllow(nowMs) {
+    if (!noAuditMaxPerHour) return true;
+    const t = Number(nowMs == null ? Date.now() : nowMs);
+    while (noAuditTimes.length && t - noAuditTimes[0] > 3600000) noAuditTimes.shift();
+    return noAuditTimes.length < noAuditMaxPerHour;
+  }
   function auditAllow(nowMs) {
     if (!auditMaxPerHour) return true;
     const t = nowMs == null ? nowFn() : nowMs;
@@ -109,17 +119,34 @@ export function createGates(opts) {
       || signalOf(j.signals, "reporting").v > 0
       || signalOf(j.signals, "negationToMe").v > 0;
     const askLike = questionWord || detailAsk || cls.topicDepth >= 2;
+    // 「部分判否」也要有机会被外审看到：本地判否里最可能是错的，是**贴着开口线**的那种。
+    // 由 audit.noAudit 控制（关 / 边界判否 / 边界或提问），并用 audit.noMaxPerHour 限流（免费池一次 20 秒，别堆起来）。
+    const noMode = String(auditCfg.noAudit || "边界判否");
+    // 只有"像话"的消息才有资格算边界判否：纯笑声/短灌水没有话题深度也没有提问，救回来只会浪费一次外审
+    const subst = cls.topicDepth >= 1 || String(text || "").replace(/[\s\p{P}\p{S}]/gu, "").length >= 8 || questionWord || detailAsk;
+    const nearMiss = pSay >= (bounds.lo - 0.08) && subst;
+    const noMayRescue = noMode !== "关" && (noMode === "边界或提问" ? (nearMiss || questionWord || detailAsk) : nearMiss);
     let rescued = false;
-    if (verdict === "no" && !injected && !toOther && askLike && rescueAsk !== "关") {
-      verdict = "grey";
-      rescued = true;
-      reason.push("语义补救：没点名但像个真问题 → 先按灰区" + (rescueAsk === "中档" ? "，并给中档地板" : "，只给短句"));
+    let rescuedByBoundary = false;
+    if (verdict === "no" && !injected && !toOther && rescueAsk !== "关" && (askLike || noMayRescue)) {
+      if (!askLike && noMayRescue && !noAuditAllow(evt.now)) {
+        reason.push("边界判否（pSay " + (Math.round(pSay * 100) / 100) + " 贴着开口线 " + bounds.lo + "），但本小时边界复核次数已满 → 这次不送审");
+      } else {
+        verdict = "grey";
+        rescued = true;
+        rescuedByBoundary = !askLike;
+        if (rescuedByBoundary) noAuditTimes.push(evt.now == null ? nowFn() : evt.now);
+        reason.push(rescuedByBoundary
+          ? "边界判否补救：pSay " + (Math.round(pSay * 100) / 100) + " 贴着开口线 " + bounds.lo + " → 先按灰区，交外审复核是否该进大脑"
+          : "语义补救：没点名但像个真问题 → 先按灰区" + (rescueAsk === "中档" ? "，并给中档地板" : "，只给短句"));
+      }
     }
     // 疑似注入的外部指令：直接不回，也不送大脑（pSay×0.5 不够；rubric 第 5 条要求判否）
     if (injected && blockInjected) { verdict = "no"; rescued = false; reason.push("疑似注入指令 → 直接不回（不送大脑）"); }
     // 灌水拦截：单字符 / 纯标点（"?"、"。"、"哈"）不值得回 —— rubric 第 3 条
     const stripped = String(text || "").replace(/[\s\p{P}\p{S}]/gu, "");
-    if (stripped.length <= 1) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
+    // 重复同一字符（"哈哈哈哈哈哈"）也是灌水：以前只拦单字符，导致"纯笑声"会被算成边界判否、再被外审放进大脑
+    if (stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
 
     const sem = signalOf(j.signals, "idfOverlapToMyWords").v;
     const cont = signalOf(j.signals, "continuation").v;

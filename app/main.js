@@ -168,7 +168,11 @@ try {
   const bundles = (((auditPkg.dsh || {}).profile || {}).bundles) || [];
   auditFreePool = bundles.indexOf("dsh-our-free-model") >= 0;
 } catch (e) { /* profile 不在就算了 */ }
-log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / " + auditLimitSec + "s 超时" +
+// 外审那行还要写清"走哪条通道、用哪个模型"——配置端选完，看这一行就知道生效没有
+const auditCh = String(getPath(cfg, "audit.channel") || "免费池");
+const auditModelShown = String(getPath(cfg, "audit.model") || "").trim()
+  || (/免费|free|ofm/i.test(auditCh) ? (cfg.plugins && cfg.plugins.ourFreeModelId) || "kilo-auto/free" : "deepseek-v4-flash");
+log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / " + auditCh + " / " + auditModelShown + " / " + auditLimitSec + "s 超时" +
   (auditFreePool && auditLimitSec < 25 ? " ⚠️ 这个 profile 走免费模型池（实测一次 20~30 秒），" + auditLimitSec + "s 会让外审一直判「不确定」= 等于没开，建议把「外审单次超时」改到 30000" :
     (auditFreePool ? "（免费池）" : "")));
 // 判定阈值直接打出来：配置端「调整」页改了到底有没有吃进去，看这一行就知道
@@ -422,7 +426,9 @@ function visionModelOf(c) {
 // API 通道：大脑与二判都可以选择走社区插件 Our Free Model（provider 固定为 our-free-model）
 const OFM_PROVIDER = "our-free-model";
 // 实测可用的免费车道（OpenCode 那条车道会指纹识别客户端，不能用；sealIds 那条要登录）
-const OFM_FALLBACK_MODEL = "kilo-auto/free";     // 实测比 nemotron-ultra 快很多、更稳
+const OFM_FALLBACK_MODEL = "kilo-auto/free";
+const AUDIT_DSH_MODEL = "deepseek-v4-flash";        // 外审走 DSH 旁路时的默认模型（实测远比免费池快）
+const AUDIT_DSH_PROVIDER = "deepseek-official";     // 实测比 nemotron-ultra 快很多、更稳
 function channelModel(kind, c) {
   const conf = (c || (webui ? webui.getConfig() : cfg)) || {};
   const p = conf.plugins || {};
@@ -434,6 +440,15 @@ function channelModel(kind, c) {
     // ② 否则看社区免费池那条通道
     if (!p.ourFreeModelBrain) return null;
     return { provider: OFM_PROVIDER, model: p.ourFreeModelBrainId || OFM_FALLBACK_MODEL };
+  }
+  if (kind === "audit") {
+    // 外审通道可配：免费池（OFM，0 成本但约 20~30 秒）或 DSH 旁路（默认 deepseek-v4-flash，几秒）
+    const ch = String(getPath(conf, "audit.channel") || "免费池");
+    const am = String(getPath(conf, "audit.model") || "").trim();
+    if (/免费|free|ofm/i.test(ch)) {
+      return { provider: OFM_PROVIDER, model: am || p.ourFreeModelId || OFM_FALLBACK_MODEL };
+    }
+    return { provider: AUDIT_DSH_PROVIDER, model: am || AUDIT_DSH_MODEL };
   }
   if (!p.ourFreeModel) return null;
   return { provider: OFM_PROVIDER, model: p.ourFreeModelId || OFM_FALLBACK_MODEL };

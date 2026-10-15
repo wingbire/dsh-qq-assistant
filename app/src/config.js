@@ -140,10 +140,12 @@ export function auditFromConfig(cfg) {
   const c = cfg || {};
   return {
     timeoutMs: numOf(getPath(c, "audit.timeoutMs"), 30000),
-    scope: getPath(c, "audit.scope") || "高档+复核救回",       // 只审高档 / 高档+复核救回 / 灰区也审
+    scope: getPath(c, "audit.scope") || "灰区也审",       // 只审高档 / 高档+复核救回 / 灰区也审
     onTimeout: getPath(c, "audit.onTimeout") || "降档",         // 降档 / 保持
     maxPerHour: numOf(getPath(c, "audit.maxPerHour"), 30),     // 0 = 不限
-    auditUnaddressed: getPath(c, "audit.auditUnaddressed") !== false   // 未点名却要进大脑的也审（默认开）
+    auditUnaddressed: getPath(c, "audit.auditUnaddressed") !== false,  // 未点名却要进大脑的也审（默认开）
+    noAudit: getPath(c, "audit.noAudit") || "边界判否",   // 部分判否也送审：关 / 边界判否 / 边界或提问
+    noMaxPerHour: numOf(getPath(c, "audit.noMaxPerHour"), 6)   // 边界判否复核的独立限流（0 = 不限）
   };
 }
 

@@ -10,7 +10,8 @@ export const PROVIDER_DIR_MAP = {
 };
 
 // 常见但不保证：只在"列不出真实清单"时当提示，标注为「常见」，用户仍可手填别的
-export const COMMON_MODELS = ["deepseek-flash", "deepseek-chat", "deepseek-reasoner"];
+export const COMMON_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4.1-flash"];   // DSH 里实际的 v4 命名
+export const DSH_AUDIT_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4.1-flash"];
 
 // 只认已知 provider（目录里还有 .credentials.yaml、channel-pack、attachments 这类噪音，
 // 靠"猜目录名"会把它们一起列进来）。未知 provider 请直接手填 —— 不编造候选。
@@ -38,6 +39,10 @@ export function buildSelectOptions(o) {
     opts["runtime.vision.provider"] = [""].concat(providers);   // dsh 模式才用，允许留空
   }
   if (models.length) opts["brain.model"] = models;
+  // 外审用的模型：免费池就选 OFM 的，走 DSH 就选 deepseek-v4-*（下拉里两类都列，字段说明写清了怎么选）
+  const am = [];
+  for (const x of DSH_AUDIT_MODELS.concat(ofmIds)) if (x && am.indexOf(x) < 0) am.push(x);
+  if (am.length) opts["audit.model"] = am;
   if (voices.length) opts["runtime.voice.voice"] = voices;
   opts["runtime.stt.lang"] = STT_LANGS.slice();
   return opts;

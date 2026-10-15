@@ -346,7 +346,8 @@ t("options: 可下拉字段的候选（provider / 音色 / 模型 / 语言）", 
   const o = buildSelectOptions({ providers: ["deepseek-official", "our-free-model"], ofmIds: ["kilo-auto/free"], voices: ["Microsoft Huihui"] });
   eq(o["brain.provider"].length, 2);
   ok(o["runtime.vision.provider"].indexOf("") >= 0, "识图 provider 允许留空（http 模式不用填）");
-  ok(o["brain.model"].indexOf("deepseek-flash") >= 0 && o["brain.model"].indexOf("kilo-auto/free") >= 0, "模型候选 = 常见 deepseek + 免费池目录");
+  ok(o["brain.model"].indexOf("deepseek-v4-flash") >= 0 && o["brain.model"].indexOf("kilo-auto/free") >= 0, "模型候选 = DSH 的 v4 命名 + 免费池目录（实测 DSH 里是 deepseek-v4-*，不是旧的 deepseek-flash）");
+  ok(o["audit.model"] && o["audit.model"].indexOf("deepseek-v4-flash") >= 0 && o["audit.model"].length > 3, "外审模型候选同时含 DSH 与免费池两类");
   eq(o["runtime.voice.voice"][0], "Microsoft Huihui");
   ok(o["runtime.stt.lang"].indexOf("zh") >= 0, "转写语言有候选");
   eq(buildSelectOptions({}).constructor, Object, "没有任何候选时不报错");
@@ -405,12 +406,42 @@ t("衔接性：人设的能力声明跟着配置开关走", function () {
 t("外审：默认超时要匹配通道（免费池 20~30s，别再是 8s）", function () {
   const a = auditFromConfig({});
   ok(a.timeoutMs >= 25000, "默认超时够免费池用（现在是 " + a.timeoutMs + "ms）—— 8s 会让外审每次都判不确定");
-  eq(a.scope, "高档+复核救回", "默认只审高档 + 复核救回（普通判否不送审，这是设计）");
+  eq(a.scope, "灰区也审", "默认把灰区也送外审（本地最容易判错的地方）");
+  eq(a.noAudit, "边界判否", "判否里的「贴着开口线」那部分也送审");
+  eq(a.noMaxPerHour, 6, "边界判否复核有独立限流");
   eq(a.onTimeout, "降档", "超时默认降档");
   eq(a.auditUnaddressed, true);
   const b = auditFromConfig({ audit: { timeoutMs: 9000 } });
   eq(b.timeoutMs, 9000, "用户显式配了就以用户的为准");
   ok(AUDIT_TIMEOUT_MS >= 25000, "模块默认常量也要够（现在是 " + AUDIT_TIMEOUT_MS + "）");
+});
+
+
+t("外审范围：灰区默认送审、边界判否也送审、灌水不送", async function () {
+  const calls = [];
+  const g = createGates({ auditFn: async function (text) { calls.push(text); return { verdict: "yes" }; } });
+  const base = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [] };
+  const run = async function (text, extra) { return g.decide(Object.assign({}, base, { text: text }, extra || {}), {}); };
+
+  // ① 本地判否但"像真问题"（没点名）→ 先被补救成灰区 → 再送外审复核要不要进大脑
+  calls.length = 0;
+  const d1 = await run("这个报错怎么解，帮我看看堆栈");
+  ok(calls.length >= 1, "本地判否但像真问题的，要送外审复核：" + (d1.reason || []).join("；"));
+  ok((d1.reason || []).join(" ").indexOf("外审") >= 0, "依据里要写清外审结论");
+  ok(d1.tier === "mid" || d1.tier === "high", "外审复核后应该进大脑档位，而不是被压成本地短句：" + d1.tier);
+  // ② 纯笑声 → 既不补救也不送审（以前会被算成边界判否、再被外审放进大脑）
+  calls.length = 0;
+  const d2 = await run("哈哈哈哈哈哈");
+  eq(calls.length, 0, "纯灌水不该占用外审");
+  eq(d2.action, "ignore", "纯灌水不该回");
+  // ③ 与自己无关的短闲聊 → 不送审
+  calls.length = 0;
+  const d3 = await run("今天天气不错");
+  eq(calls.length, 0, "没点名没提问的闲话不送审：" + d3.action);
+  // ④ 边界判否开关关掉后，不再因为「贴着开口线」而补救
+  const g2 = createGates({ auditFn: async function () { return { verdict: "yes" }; }, audit: { noAudit: "关", scope: "只审高档" } });
+  const d4 = await g2.decide(Object.assign({}, base, { text: "这游戏真好玩" }), {});
+  ok((d4.reason || []).join(" ").indexOf("边界判否补救") < 0, "关掉后不该有边界补救：" + (d4.reason || []).join("；"));
 });
 
 
