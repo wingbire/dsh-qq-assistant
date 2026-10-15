@@ -37,8 +37,8 @@
       "runtime.coalesceWindowMs", "runtime.coalesceMaxBatch", "runtime.maxSegments", "autojoin.rate", "autojoin.minGapSec"] },
     { name: "预算与熔断", desc: "每天最多花多少 token；超 80% 关主动，超 100% 只回被点名的", keys: [
       "runtime.budget.dailyTokens", "runtime.budget.groupHourlyLimit"] },
-    { name: "搜索", desc: "要不要在认真回答前先搜一次", keys: [
-      "runtime.search.mode"] },
+    { name: "搜索", desc: "先选「谁去搜」：本机直搜＝程序自己调免费引擎（零模型调用、快）；DSH 独立调用＝让模型去搜（更懂页面但更慢更贵）。下面再选用哪家引擎（只在本机直搜下生效）", keys: [
+      "runtime.search.mode", "plugins.freeSearch", "plugins.freeSearchEngine"] },
     { name: "权限与配置端", desc: "谁能发指令，以及配置端自己跑在哪", keys: [
       "admin.whitelist", "runtime.webui.enabled", "runtime.webui.port", "runtime.napcatWebui"] }
   ];
@@ -105,10 +105,10 @@
       desc: "回复本体也走免费模型池。注意：免费池模型大多不认三档 effort，开了之后三档 overlay 会自动去掉 reasoningEffort。",
       installNote: "同一个插件，装在 app/dsh-home/profiles/qq-audit 即可复用",
       keys: ["plugins.ourFreeModelBrain", "plugins.ourFreeModelBrainId"] },
-    { id: "freeSearch", role: "搜索通道",
-      desc: "24 个搜索引擎 + 智能路由与故障回退。开着就用它的引擎，关掉用本程序内置的直搜（Bing/DDG）。",
+    { id: "freeSearch", role: "搜索插件（dsh-free-search）",
+      desc: "24 个搜索引擎 + 智能路由与故障回退。引擎、开关与搜索通道统一在「调整 → 搜索」里调，这里只管装和填密钥。",
       installNote: "装进 app/vendor，程序直接 import 它的引擎函数",
-      keys: ["plugins.freeSearch", "plugins.freeSearchEngine", "runtime.search.mode", "llm.search.apiKey"] },
+      keys: ["llm.search.apiKey"] },
     { id: "archify", role: "图表绘制",
       desc: "把结构/流程画成图（SVG→PNG）。大脑画好之后由程序把成品发进群。",
       installNote: "装完把 skills/archify 放进 app/dsh-home/skills",
