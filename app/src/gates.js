@@ -230,14 +230,24 @@ export function createGates(opts) {
         auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames });
         reason.push("外审（" + auditScope + "）：" + auditRes.verdict);
         if (auditRes.error) {
-          // 外审坏了（超时/认证失败/通道不通）→ 一律沿用本地判断。
-          // 以前这里会把"补救回来的"直接丢掉，等于外审一坏，整条补救路径静默失效。
-          // 只说"外审不可用"会让人查不出原因（实测：免费池要 20~30s，而超时设成了 8s → 每次都超时）——
-          // 所以把「耗时 / 上限 / 具体错误」都写进依据里。
+          // 外审坏了（超时/认证失败/通道不通）。这里要区分「这次是不是为了问外审才被补救上来的」：
+          //   是 → 外审没给结论，就不该放行，回到判否。否则会出现与直觉相反的结果：
+          //        外审一坏，反而更容易进大脑（用户实测：外审静默失效 + 补救判据恒真 → 发什么都搭话）。
+          //   否（本来就是灰区/高档）→ 沿用本地判断，不额外惩罚。
+          // 想让外审坏了也照样放行补救，把「外审超时处理」设成「保持」。
           const msShown = Math.round((auditRes.ms || 0) / 100) / 10;
           const limitShown = Math.round((Number(auditCfg.timeoutMs) || 0) / 1000);
-          reason.push("外审不可用（" + String(auditRes.error).slice(0, 40) +
-            (auditRes.ms ? "，耗时 " + msShown + "s" : "") + (limitShown ? "，上限 " + limitShown + "s" : "") + "）→ 沿用本地判断");
+          const detail = "外审不可用（" + String(auditRes.error).slice(0, 40) +
+            (auditRes.ms ? "，耗时 " + msShown + "s" : "") + (limitShown ? "，上限 " + limitShown + "s" : "") + "）";
+          if (rescued && auditTimeoutMode !== "保持") {
+            verdict = "no";
+            rescued = false;
+            rescuedByBoundary = false;
+            tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审不可用 → 补救的这条不放行（保守）" };
+            reason.push(detail + " → 它本来是判否、只为问外审才补救，故不放行");
+          } else {
+            reason.push(detail + " → 沿用本地判断");
+          }
         } else if (auditRes.verdict === "no") {
           verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };

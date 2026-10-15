@@ -518,6 +518,20 @@ t("options: 免费池候选会滤掉被墙/探测失败的模型", function () {
 });
 
 
+t("外审坏了要更保守：补救回来的消息不再放行（用户实测的漏洞）", async function () {
+  // 修复前：外审报错 → 沿用本地判断 → 沿用到的其实是「补救后的灰区」→ 进大脑 → 话痨
+  const g = createGates({ auditFn: async function () { return { error: "OpenCode's free tier can only be used", ms: 3000 }; }, audit: { noAudit: "边界或提问", noMaxPerHour: 99, timeoutMs: 30000 } });
+  const evt = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [], text: "是不是会给队友上个什么攻击吸血的buff" };
+  const d = await g.decide(evt, {});
+  eq(d.action, "ignore", "外审不可用 + 这条是补救来的 → 应当拦住：" + (d.reason || []).join("；"));
+  ok((d.reason || []).join(" ").indexOf("不放行") >= 0, "依据里要写明为什么被拦");
+  // 配置成「保持」时回到旧行为（沿用），给需要的人留个口子
+  const g2 = createGates({ auditFn: async function () { return { error: "通道不通", ms: 1000 }; }, audit: { noAudit: "边界或提问", noMaxPerHour: 99, timeoutMs: 30000, onTimeout: "保持" } });
+  const d2 = await g2.decide(Object.assign({}, evt), {});
+  ok(d2.action !== "ignore" || (d2.reason || []).join(" ").indexOf("沿用本地判断") >= 0, "「保持」时沿用本地判断");
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");
