@@ -122,22 +122,26 @@ export function createGates(opts) {
     // 「部分判否」也要有机会被外审看到：本地判否里最可能是错的，是**贴着开口线**的那种。
     // 由 audit.noAudit 控制（关 / 边界判否 / 边界或提问），并用 audit.noMaxPerHour 限流（免费池一次 20 秒，别堆起来）。
     const noMode = String(auditCfg.noAudit || "边界判否");
-    // 只有"像话"的消息才有资格算边界判否：纯笑声/短灌水没有话题深度也没有提问，救回来只会浪费一次外审
+    // 【重要修正】这里以前用「pSay 贴着开口线」当判据 —— 但 pSay 有个 0.35 的地板，
+    // 实测绝大多数消息都是 0.354，导致这条判据**恒为真**：每条消息都被当成边界判否送去外审，
+    // 外审说一句"短"她就回一句，表现就是"发什么都搭话"。
+    // 换成真正会变的信号：上下文延续（有人在接她的话）+ 有实质内容。
     const subst = cls.topicDepth >= 1 || String(text || "").replace(/[\s\p{P}\p{S}]/gu, "").length >= 8 || questionWord || detailAsk;
-    const nearMiss = pSay >= (bounds.lo - 0.08) && subst;
+    // 内联取值，避免依赖后面才声明的 cont（TDZ）
+    const nearMiss = subst && signalOf(j.signals, "continuation").v >= 0.5;
     const noMayRescue = noMode !== "关" && (noMode === "边界或提问" ? (nearMiss || questionWord || detailAsk) : nearMiss);
     let rescued = false;
     let rescuedByBoundary = false;
     if (verdict === "no" && !injected && !toOther && rescueAsk !== "关" && (askLike || noMayRescue)) {
       if (!askLike && noMayRescue && !noAuditAllow(evt.now)) {
-        reason.push("边界判否（pSay " + (Math.round(pSay * 100) / 100) + " 贴着开口线 " + bounds.lo + "），但本小时边界复核次数已满 → 这次不送审");
+        reason.push("边界判否（上下文延续 " + (Math.round(signalOf(j.signals, "continuation").v * 100) / 100) + "，像是有人在接她的话），但本小时边界复核次数已满 → 这次不送审");
       } else {
         verdict = "grey";
         rescued = true;
         rescuedByBoundary = !askLike;
         if (rescuedByBoundary) noAuditTimes.push(evt.now == null ? nowFn() : evt.now);
         reason.push(rescuedByBoundary
-          ? "边界判否补救：pSay " + (Math.round(pSay * 100) / 100) + " 贴着开口线 " + bounds.lo + " → 先按灰区，交外审复核是否该进大脑"
+          ? "边界判否补救：上下文延续 " + (Math.round(signalOf(j.signals, "continuation").v * 100) / 100) + "（有人在接她的话）→ 先按灰区，交外审复核是否该进大脑"
           : "语义补救：没点名但像个真问题 → 先按灰区" + (rescueAsk === "中档" ? "，并给中档地板" : "，只给短句"));
       }
     }

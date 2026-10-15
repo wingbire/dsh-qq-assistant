@@ -14,7 +14,7 @@ import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA, modelHasVision, listVisionModels } from "./src/vision.js";
-import { buildSelectOptions, providerIdsOf } from "./src/options.js";
+import { buildSelectOptions, providerIdsOf, availableOfmIds } from "./src/options.js";
 import { createStt } from "./src/stt.js";
 import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, writeProbe as writeOfmProbe, probeModels as probeOfmModels, OFM_DEFAULT_CANDIDATES } from "./src/ofm.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
@@ -173,8 +173,9 @@ const auditCh = String(getPath(cfg, "audit.channel") || "免费池");
 const auditModelShown = String(getPath(cfg, "audit.model") || "").trim()
   || (/免费|free|ofm/i.test(auditCh) ? (cfg.plugins && cfg.plugins.ourFreeModelId) || "kilo-auto/free" : "deepseek-v4-flash");
 log("搜索：通道 " + rc.searchMode.toUpperCase() + "（" + (rc.searchMode === "b" ? "DSH 独立调用" : "本机直搜") + "），外审：qq-audit / " + auditCh + " / " + auditModelShown + " / " + auditLimitSec + "s 超时" +
-  (auditFreePool && auditLimitSec < 25 ? " ⚠️ 这个 profile 走免费模型池（实测一次 20~30 秒），" + auditLimitSec + "s 会让外审一直判「不确定」= 等于没开，建议把「外审单次超时」改到 30000" :
-    (auditFreePool ? "（免费池）" : "")));
+  (String(getPath(cfg, "audit.channel") || "").indexOf("免费") >= 0 && auditLimitSec < 25
+    ? " ⚠️ 外审选了免费池（实测一次 20~30 秒），" + auditLimitSec + "s 会让它一直判「不确定」= 等于没开，建议改到 30000"
+    : ""));
 // 判定阈值直接打出来：配置端「调整」页改了到底有没有吃进去，看这一行就知道
 log("判定阈值：开口线 " + rc.gates.bounds.lo + " / 灰区上界 " + rc.gates.bounds.hi
   + " / 三档线 " + rc.gates.tiers.speakAt + "·" + rc.gates.tiers.terseAt + "·" + rc.gates.tiers.detailedAt
@@ -550,7 +551,10 @@ const webui = createWebUi({
     } catch (e) { ofmIds = []; }
     let voices = [];
     try { voices = listSapiVoices() || []; } catch (e) { voices = []; }
-    return buildSelectOptions({ providers: providerIdsOf(dirs), ofmIds: ofmIds, voices: voices });
+    // 免费池候选按探测结果过滤（OpenCode 那批拒绝第三方调用，选了等于白等）
+    let avail = null;
+    try { avail = JSON.parse(fs.readFileSync(path.join(DSH_HOME, "our-free-model", "availability.json"), "utf8")); } catch (e) { avail = null; }
+    return buildSelectOptions({ providers: providerIdsOf(dirs), ofmIds: availableOfmIds(avail, ofmIds), voices: voices });
   },
   caps: async function () {
     const conf = webui ? webui.getConfig() : cfg;

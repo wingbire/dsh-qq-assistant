@@ -30,6 +30,17 @@ export function resolveSelect(list, values) {
 }
 // 只认已知 provider（目录里还有 .credentials.yaml、channel-pack、attachments 这类噪音，
 // 靠"猜目录名"会把它们一起列进来）。未知 provider 请直接手填 —— 不编造候选。
+// 免费池候选要按最近一次探测结果过滤：OpenCode 那批 *-free 会拒绝第三方调用
+// （"can only be used from within OpenCode"），以前下拉里照列，选了就等于外审静默失效。
+export function availableOfmIds(availability, ids) {
+  const res = (availability && availability.results) || {};
+  return (ids || []).filter(function (id) {
+    const r = res[id];
+    if (!r) return true;                       // 没测过的不砍（不能因为没数据就全删）
+    return r.state === "available";
+  });
+}
+
 export function providerIdsOf(dirs) {
   const have = {};
   for (const d of (dirs || [])) have[String(d || "").trim()] = true;

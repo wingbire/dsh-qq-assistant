@@ -22,7 +22,7 @@ import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken,
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
 import { guardReply, softFlags } from "../app/src/guard.js";
-import { buildSelectOptions, providerIdsOf, resolveSelect } from "../app/src/options.js";
+import { buildSelectOptions, providerIdsOf, resolveSelect, availableOfmIds } from "../app/src/options.js";
 import { apiKeyInfo, pickApiKey as pickKeyForTest, saveSecrets as saveSecretsT, loadSecrets as loadSecretsT, looksMasked } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
@@ -496,6 +496,25 @@ t("密钥护栏：掩码绝不能被当成新 key 写进去（一次真实事故
   const cur = { llm: { deepseekApiKey: "sk-realkey" }, napcat: { token: "T" } };
   const merged = mergeConfigSafe(cur, { llm: { deepseekApiKey: "sk-dab...5714" } }, loadFieldTable());
   eq(merged.llm.deepseekApiKey, "sk-realkey", "掩码形状也要当没改");
+});
+
+
+t("外审范围：边界判否只认「有人在接她的话」，不再拿 pSay 当地板判据", async function () {
+  // pSay 常年贴 0.35 地板 → 以前"贴着开口线"恒真 → 每条消息都送外审 → 外审说"短"她就回一句（话痨来源）
+  const calls = [];
+  const g = createGates({ auditFn: async function (t) { calls.push(t); return { verdict: "short" }; }, audit: { noAudit: "边界判否", noMaxPerHour: 0 } });
+  const base = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [] };
+  const d1 = await g.decide(Object.assign({}, base, { text: "这启动也太快了吧" }), {});
+  eq(calls.length, 0, "别人之间的普通陈述不该送外审：" + (d1.reason || []).join("；"));
+  ok((d1.reason || []).join(" ").indexOf("边界判否补救") < 0, "不该被边界补救");
+  ok((d1.reason || []).join(" ").indexOf("pSay") < 0, "依据里不该再出现「pSay 贴着开口线」这种恒真描述");
+  eq(d1.action, "ignore", "普通陈述应当不回");
+});
+
+t("options: 免费池候选会滤掉被墙/探测失败的模型", function () {
+  const ids = ["kilo-auto/free", "ling-3.1-flash-free", "cat-jam-free", "never-tested"];
+  const avail = { results: { "ling-3.1-flash-free": { state: "unknown" }, "cat-jam-free": { state: "region-blocked" }, "kilo-auto/free": { state: "available" } } };
+  eq(availableOfmIds(avail, ids).join(","), "kilo-auto/free,never-tested", "只留可用的，没测过的保留");
 });
 
 
