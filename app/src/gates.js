@@ -168,6 +168,7 @@ export function createGates(opts) {
     let tierInfo = { tier: "low", maxChars: 20, reason: "判否" };
     let plan = { search: 0, keywords: [] };
     let auditRes = null;
+    const verdictBeforeAudit = verdict;      // 外审前的本地判断，用来算"外审跟本地一致吗"
 
     if (verdict === "no") {
       reason.push("本地判否 → 不回复、不进大脑");
@@ -259,6 +260,15 @@ export function createGates(opts) {
       }
     }
 
+    // 外审结论要能被外面记录（自学习要用）：叫过没有 / 结论 / 是否与本地一致。
+    // "一致"的定义：本地判否 ↔ 外审也说否；本地灰区/是 ↔ 外审说该回（是或短）。不确定/报错不计入。
+    let auditInfo = null;
+    if (auditRes && !auditRes.error) {
+      const v = String(auditRes.verdict || "");
+      const localNo = verdictBeforeAudit === "no";
+      const agreed = (v === "yes" || v === "short") ? !localNo : (v === "no" ? localNo : null);
+      auditInfo = { called: true, verdict: v, agreed: agreed, ms: auditRes.ms || null };
+    }
     let action = "ignore";
     if (verdict !== "no") action = tierInfo.tier === "low" ? "local_short" : "brain";
     if (action === "local_short") reason.push("低深度 → 不进大脑，本地短句");
@@ -272,7 +282,7 @@ export function createGates(opts) {
 
     return {
       gid: evt.gid, uid: evt.uid, at: evt.now || Date.now(),
-      action: action, verdict: verdict, pSay: Math.round(pSay * 1000) / 1000,
+      action: action, verdict: verdict, auditInfo: auditInfo, pSay: Math.round(pSay * 1000) / 1000,
       U: Math.round(u.U * 1000) / 1000,
       tier: tierInfo.tier, maxChars: tierInfo.maxChars,
       search: plan.search, keywords: plan.keywords,

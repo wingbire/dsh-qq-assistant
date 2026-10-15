@@ -877,6 +877,9 @@ export function createRuntime(deps) {
     // P3：登记一条待定反馈，等这个群的下一条消息来判它是正还是负
     tracker.noteReply({
       gid: evt.gid, uid: evt.uid, arm: dec.arm, bucket: dec.bucket, tokens: dec.keywords || [],
+      // 自学习：把外审结论一起带上（index.js 用它算 auditFlipRate → adaptBounds）
+      auditCalled: !!(dec.audit && dec.audit.called),
+      auditAgreed: !!(dec.audit && dec.audit.agreed === true),
       at: at, tier: dec.tier, segments: sent.length, botNames: (evtDefaults.botNames || []).slice(),
       inTokens: usage ? Number(usage.inputTokens) || 0 : 0, outTokens: usage ? Number(usage.outputTokens) || 0 : 0
     });

@@ -445,6 +445,20 @@ t("外审范围：灰区默认送审、边界判否也送审、灌水不送", as
 });
 
 
+t("自学习：判定的外审结论会被带出来（auditFlipRate 才有数据）", async function () {
+  const g = createGates({ auditFn: async function () { return { verdict: "yes", ms: 1200 }; } });
+  const base = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [] };
+  const d = await g.decide(Object.assign({}, base, { text: "这个报错怎么解，帮我看看堆栈" }), {});
+  ok(d.auditInfo && d.auditInfo.called, "调过外审就要带 audit.called：" + JSON.stringify(d.auditInfo));
+  eq(d.auditInfo.verdict, "yes");
+  ok(d.auditInfo.agreed === true || d.auditInfo.agreed === false, "要能算出跟本地一致不一致");
+  eq(typeof d.auditInfo.ms, "number");
+  const g2 = createGates({ auditFn: async function () { throw new Error("不该被调用"); } });
+  const d2 = await g2.decide(Object.assign({}, base, { text: "哈哈哈哈哈哈" }), {});
+  eq(d2.auditInfo, null, "没走外审就不该有结论（否则学习回路会被噪声污染）");
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

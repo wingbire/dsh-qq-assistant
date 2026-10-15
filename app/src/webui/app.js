@@ -39,6 +39,8 @@
       "runtime.budget.dailyTokens", "runtime.budget.groupHourlyLimit"] },
     { name: "搜索", desc: "要不要在认真回答前先搜一次", keys: [
       "runtime.search.mode"] },
+    { name: "外审复核", desc: "本地拿不准（灰区）和贴着开口线的判否，交外审二次判断该不该进大脑；通道、模型、超时都在这选。外审结论会回流到自适应阈值（自学习）", keys: [
+      "audit.scope", "audit.noAudit", "audit.noMaxPerHour", "audit.channel", "audit.model", "audit.timeoutMs", "audit.onTimeout", "audit.auditUnaddressed", "audit.maxPerHour"] },
     { name: "权限与配置端", desc: "谁能发指令，以及配置端自己跑在哪", keys: [
       "admin.whitelist", "runtime.webui.enabled", "runtime.webui.port", "runtime.napcatWebui"] }
   ];
