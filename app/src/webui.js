@@ -150,7 +150,8 @@ export function createWebUi(deps) {
   const keyStatusFn = d.keyStatus || null;        // async () => ({ set, masked, source, ofm }) 当前 key 打哪来
   const onSecrets = d.onSecrets || null;          // async (patch) => 把真密钥写进工作区的 secrets.json
   const capsFn = d.caps || null;                  // async () => ({ brain, rows }) 能力总览（模型能力 ↔ 人设声明）
-  const visionProbeFn = d.visionProbe || null;    // async ({endpoint, apiKey}) => ({ ok, models, picked }) 多模态接口自检
+  const visionProbeFn = d.visionProbe || null;
+  const selectOptionsFn = d.selectOptions || null;   // async () => ({ "brain.provider": [...], ... }) 可下拉字段的候选    // async ({endpoint, apiKey}) => ({ ok, models, picked }) 多模态接口自检
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
@@ -335,6 +336,10 @@ export function createWebUi(deps) {
       return sendJson(res, 200, pluginInstallFn ? await pluginInstallFn(String(b.id)) : { ok: false, error: "没有接插件安装服务" });
     }
 
+    // 可下拉字段的候选清单（音色 / provider / 免费池模型 / 转写语言）
+    if (p === "/api/select-options" && req.method === "GET") {
+      return sendJson(res, 200, { ok: true, options: selectOptionsFn ? await selectOptionsFn() : {} });
+    }
     // 多模态接口自检：填了地址 + Key 就能列出可用模型，并把能确定的配置一次性写好
     if (p === "/api/vision/probe" && req.method === "POST") {
       const body = await readBody(req);

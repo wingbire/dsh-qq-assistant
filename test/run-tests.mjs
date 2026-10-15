@@ -22,6 +22,7 @@ import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken,
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
 import { guardReply, softFlags } from "../app/src/guard.js";
+import { buildSelectOptions, providerIdsOf } from "../app/src/options.js";
 import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
@@ -333,6 +334,19 @@ t("vision: 多模态地址归一化 + 自动挑模型（用户只填 key）", as
     fetch: async function () { return { ok: true, status: 200, json: async function () { return { models: [{ name: "models/gemini-2.0-flash" }] }; } }; }
   });
   eq(r2.models[0].id, "gemini-2.0-flash", "Gemini 原生形状也认，去掉 models/ 前缀");
+});
+
+
+t("options: 可下拉字段的候选（provider / 音色 / 模型 / 语言）", function () {
+  eq(providerIdsOf(["attachments", "llm-deepseek", "openai-gateway", "our-free-model", "profiles", "sessions"]).join(","),
+    "deepseek-official,openai-gateway,our-free-model", "目录名映射成 provider 名，并滤掉非 provider 目录");
+  const o = buildSelectOptions({ providers: ["deepseek-official", "our-free-model"], ofmIds: ["kilo-auto/free"], voices: ["Microsoft Huihui"] });
+  eq(o["brain.provider"].length, 2);
+  ok(o["runtime.vision.provider"].indexOf("") >= 0, "识图 provider 允许留空（http 模式不用填）");
+  ok(o["brain.model"].indexOf("deepseek-flash") >= 0 && o["brain.model"].indexOf("kilo-auto/free") >= 0, "模型候选 = 常见 deepseek + 免费池目录");
+  eq(o["runtime.voice.voice"][0], "Microsoft Huihui");
+  ok(o["runtime.stt.lang"].indexOf("zh") >= 0, "转写语言有候选");
+  eq(buildSelectOptions({}).constructor, Object, "没有任何候选时不报错");
 });
 
 

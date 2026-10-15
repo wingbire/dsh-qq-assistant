@@ -14,6 +14,7 @@ import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA, modelHasVision, listVisionModels } from "./src/vision.js";
+import { buildSelectOptions, providerIdsOf } from "./src/options.js";
 import { createStt } from "./src/stt.js";
 import { readOfmState, modelList as ofmModelList, readProbe as readOfmProbe, writeProbe as writeOfmProbe, probeModels as probeOfmModels, OFM_DEFAULT_CANDIDATES } from "./src/ofm.js";
 import { createTts, voiceCapability, listSapiVoices } from "./src/tts.js";
@@ -491,6 +492,20 @@ const webui = createWebUi({
   visionProbe: async function (o) {
     const req2 = o || {};
     return listVisionModels({ endpoint: req2.endpoint, apiKey: req2.apiKey });
+  },
+  // 可下拉字段的候选清单：provider 由工作区里实际装的目录推、音色问 SAPI、模型取免费池目录
+  selectOptions: async function () {
+    let dirs = [];
+    try { dirs = fs.readdirSync(DSH_HOME); } catch (e) { dirs = []; }
+    let ofmIds = [];
+    try {
+      const st = readOfmState(DSH_HOME);
+      const cat = (st && st.catalog) || {};
+      ofmIds = (cat.kiloRows || []).map(function (r) { return r.id; }).concat(cat.entries || []);
+    } catch (e) { ofmIds = []; }
+    let voices = [];
+    try { voices = listSapiVoices() || []; } catch (e) { voices = []; }
+    return buildSelectOptions({ providers: providerIdsOf(dirs), ofmIds: ofmIds, voices: voices });
   },
   caps: async function () {
     const conf = webui ? webui.getConfig() : cfg;

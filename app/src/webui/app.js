@@ -43,6 +43,45 @@
       "admin.whitelist", "runtime.webui.enabled", "runtime.webui.port", "runtime.napcatWebui"] }
   ];
 
+  // 载入可选模型列表（按钮与进入页面时共用同一套逻辑）
+  function loadVisionModels() {
+    var inpEp = document.querySelector('[data-key="runtime.vision.endpoint"]');
+    var inpAk = document.querySelector('[data-key="runtime.vision.apiKey"]');
+    var vmsg = $("#vision-load-msg");
+    if (vmsg) vmsg.textContent = "正在问接口…";
+    return api("/api/vision/probe", {
+      endpoint: (inpEp && inpEp.value) || getPath(S.values, "runtime.vision.endpoint") || "",
+      apiKey: (inpAk && inpAk.value) || "",
+      save: true
+    }).then(function (r) {
+      S.visionModels = r || { ok: false, error: "没有返回" };
+      if (r && r.values) S.values = r.values;
+      S.caps = null;
+      render();
+      return r;
+    });
+  }
+
+  // 识图模型下拉框：地址与 Key 填好后（自动或手点）载入可选模型，选中即写进配置 —— 跟 DSH 里选模型一个手感
+  function visionPickHtml() {
+    var m = S.visionModels;
+    var cur = String(getPath(S.values, "runtime.vision.model") || "");
+    var rows = (m && m.ok && m.models) ? m.models : [];
+    var ids = rows.map(function (x) { return x.id; });
+    if (cur && cur !== "同大脑" && ids.indexOf(cur) < 0) ids.unshift(cur);   // 已保存、但接口没列出来的也留着，免得选择框空着
+    var visionOf = {};
+    rows.forEach(function (x) { visionOf[x.id] = x.vision; });
+    var opts = ids.map(function (id) {
+      return '<option value="' + esc(id) + '"' + (id === cur ? " selected" : "") + '>' + esc(id) + (visionOf[id] ? "（可看图）" : "") + '</option>';
+    }).join("");
+    var status = !m ? "填好地址与 Key → 点「载入模型」" : (m.ok ? ("可用 " + m.count + " 个" + (m.hint ? " · " + m.hint : "")) : ("载入失败：" + (m.error || "")));
+    return '<div class="hint" style="margin:10px 0 6px">http 模式：地址填 base 即可（Gemini 这类会自动补全），provider 留空。</div>' +
+      '<div class="ctl-row" style="gap:8px;align-items:center"><span style="min-width:96px">识图模型</span>' +
+      '<select id="vision-model" style="min-width:340px">' + (opts || '<option value="">（还没载入模型）</option>') + '</select>' +
+      '<button class="btn-sm" id="btn-vision-load">载入模型</button>' +
+      '<span class="hint" id="vision-load-msg" style="margin:0">' + esc(status) + '</span></div>';
+  }
+
   /* 「额外功能」页：语音 / 图片（识图 + 表情包）—— 开关会直接改写人设 */
   var EXTRA_GROUPS = [
     { name: "语音", icon: "♪", desc: "用 Windows 自带 SAPI 把文字念成 wav，走 OneBot 的 record 段发出",
@@ -51,10 +90,7 @@
     { name: "识图", icon: "▨", desc: "收到图片时额外调一次多模态模型，把画面内容描述拼进上下文",
       master: "runtime.vision.enabled", keys: ["runtime.vision.enabled", "runtime.vision.mode", "runtime.vision.endpoint", "runtime.vision.apiKey", "runtime.vision.model", "runtime.vision.capable", "runtime.vision.provider"],
       persona: "打开后会写进人设：你看得到群里的图",
-      extra: '<div class="hint" style="margin:10px 0 6px">http 模式：地址填 base 即可（Gemini 这类会自动补全），provider 留空，模型点下面自动填。' +
-        '<div style="margin-top:6px"><button class="btn-sm good" id="btn-vision-probe">检测可用模型</button>' +
-        '<span id="vision-probe-msg" class="muted" style="margin-left:8px"></span></div>' +
-        '<div id="vision-probe-list" style="margin-top:8px"></div></div>' },
+      extra: visionPickHtml() },
     { name: "立绘（图片）", icon: "✦", desc: "允许大脑写 [立绘] 发自绘形象图（幼年 / 成年）",
       master: "plugins.illustration", keys: ["plugins.illustration"],
       persona: "关掉后人设里不再提立绘，程序也不会发" },
@@ -209,6 +245,17 @@
       ctrl = '<textarea data-key="' + key + '" rows="4" placeholder="留空 = 用字段自动拼装">' + esc(value == null ? "" : value) + '</textarea>';
     } else {
       ctrl = '<input type="text" data-key="' + key + '" value="' + esc(value == null ? "" : value) + '">';
+    }
+    // 能列出候选的字段（音色 / provider / 模型 / 转写语言）在控件上方加一个下拉：选中即生效，不用再点保存。
+    var optList = (S.opts && S.opts[key]) || null;
+    if (optList && optList.length) {
+      var cur = String(value == null ? "" : value);
+      var has = optList.indexOf(cur) >= 0;
+      var optsHtml = (has || !cur ? "" : '<option value="' + esc(cur) + '" selected>' + esc(cur) + '（当前值）</option>') +
+        optList.map(function (o) { return '<option value="' + esc(o) + '"' + (o === cur ? " selected" : "") + '>' + esc(o || "（留空）") + '</option>'; }).join("");
+      ctrl = '<div class="ctl-row" style="margin-bottom:6px;gap:8px;align-items:center">' +
+        '<select data-key="' + esc(key) + '" data-apply="1" style="min-width:300px">' + optsHtml + '</select>' +
+        '<span class="hint" style="margin:0">选中即生效</span></div>' + ctrl;
     }
     return '<div class="field"><div class="label">' + esc(f.标签 || key) + '</div>' + hint + '<div class="ctrl">' + ctrl + '</div></div>';
   }
@@ -809,6 +856,10 @@
     job.then(function (html) {
       $("#page").innerHTML = html;
       if (S.page === "settings") loadSettings();
+      // 进「额外功能」且识图已配好地址 → 自动载入模型列表，用户点下拉就能选
+      if (S.page === "extra" && !S.visionModels && String(getPath(S.values, "runtime.vision.endpoint") || "")) {
+        loadVisionModels();
+      }
     }).catch(function (e) {
       $("#page").innerHTML = '<div class="card"><div class="body">加载失败：' + esc(e.message) + '</div></div>';
     });
@@ -906,35 +957,16 @@
         return;
       }
 
-      // 多模态接口自检：地址+Key → 列模型 → 顺手把模式/地址/Key/模型全写好（用户不用再动手）
-      if (e.target.closest("#btn-vision-probe")) {
-        var msg = $("#vision-probe-msg");
-        var inpEp = document.querySelector('[data-key="runtime.vision.endpoint"]');
-        var inpAk = document.querySelector('[data-key="runtime.vision.apiKey"]');
-        var ep = (inpEp && inpEp.value) || getPath(S.values, "runtime.vision.endpoint") || "";
-        var ak = (inpAk && inpAk.value) || "";
-        if (msg) msg.textContent = "正在问接口…";
-        api("/api/vision/probe", { endpoint: ep, apiKey: ak, save: true }).then(function (r) {
-          if (!r || !r.ok) { if (msg) msg.textContent = "失败：" + ((r && r.error) || "未知原因"); return; }
-          if (r.values) S.values = r.values;
-          if (msg) msg.textContent = "可用 " + r.count + " 个模型" + (r.picked ? "，已自动选 " + r.picked : "");
-          var box = $("#vision-probe-list");
-          if (box) {
-            box.innerHTML = '<select id="vision-model-pick">' + (r.models || []).map(function (m) {
-              return '<option value="' + esc(m.id) + '"' + (m.id === r.picked ? " selected" : "") + '>' + esc(m.id) + (m.vision ? "（可看图）" : "") + '</option>';
-            }).join("") + '</select> <button class="btn-sm good" id="btn-vision-apply">换成这个模型</button>';
-          }
-          S.caps = null;
-        });
-        return;
-      }
-      if (e.target.closest("#btn-vision-apply")) {
-        var sel = $("#vision-model-pick");
-        if (!sel) return;
-        api("/api/config", { patch: { runtime: { vision: { model: sel.value, enabled: true, mode: "http" } } } }).then(function (r) {
+      // 识图模型下拉：点「载入模型」→ 问接口要列表（顺手把地址归一化 + Key 一起存好）
+      if (e.target.closest("#btn-vision-load")) { loadVisionModels(); return; }
+      // 下拉里选中哪个，立刻生效（跟 DSH 里选模型一样，不用再点别的按钮）
+      if (e.target.closest("#vision-model")) {
+        var pick = $("#vision-model");
+        if (!pick || !pick.value) return;
+        api("/api/config", { patch: { runtime: { vision: { model: pick.value, enabled: true, mode: "http", provider: "" } } } }).then(function (r) {
           if (r && r.values) S.values = r.values;
           S.caps = null;
-          toast("识图模型已设为 " + sel.value);
+          toast("识图模型已设为 " + pick.value);
           render();
         });
         return;
@@ -1109,6 +1141,25 @@
     });
 
     document.addEventListener("change", function (e) {
+      // 可下拉字段：选中即写进配置（把整棵内存配置当 patch 提交；遮蔽的 secret 后端会当"没改"）
+      if (e.target && e.target.matches && e.target.matches("select[data-apply][data-key]")) {
+        var kk = e.target.getAttribute("data-key");
+        var vv = e.target.value;
+        var parts = kk.split(".");
+        var node = S.values;
+        for (var i = 0; i < parts.length - 1; i++) {
+          if (!node[parts[i]] || typeof node[parts[i]] !== "object") node[parts[i]] = {};
+          node = node[parts[i]];
+        }
+        node[parts[parts.length - 1]] = vv;
+        api("/api/config", { patch: S.values }).then(function (r) {
+          if (r && r.values) S.values = r.values;
+          S.caps = null;
+          toast("已应用 " + kk + " = " + (vv || "（留空）"));
+          render();
+        });
+        return;
+      }
       if (e.target && e.target.id === "group-select") {
         S.gid = e.target.value || null;
         try { localStorage.setItem("dshqq-gid", S.gid || ""); } catch (err) {}
@@ -1181,6 +1232,10 @@
       if (h && PAGES.some(function (p) { return p.id === h; })) S.page = h;
     } catch (e) {}
     bind();
+    api("/api/select-options").then(function (o) {
+      S.opts = (o && o.options) || {};
+      if (S.table) render();
+    }).catch(function () { S.opts = {}; });
     api("/api/config").then(function (c) {
       S.table = c.table; S.values = c.values; S.runtime = c.runtime; S.defaults = c.defaults; S.keyInfo = c.keyInfo || null;
       return loadGroups();
