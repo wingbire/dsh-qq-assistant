@@ -21,7 +21,7 @@ import { createBrakes, parseAdminCommand, isAdmin } from "../app/src/brakes.js";
 import { createOneBot, normalizeEvent, normalizeNotice, decodeCqText, withToken, errorText, probePort } from "../app/src/onebot.js";
 import { createRuntime } from "../app/src/runtime.js";
 import { createStt } from "../app/src/stt.js";
-import { guardReply } from "../app/src/guard.js";
+import { guardReply, softFlags } from "../app/src/guard.js";
 import { apiKeyInfo, pickApiKey as pickKeyForTest } from "../app/src/secrets.js";
 import { readOfmState, modelList, readProbe, writeProbe } from "../app/src/ofm.js";
 import { defaultsFromTable, redactConfig, mergeConfigSafe, REDACTED, runtimeConfig, setPath, getPath, deepMerge, loadFieldTable } from "../app/src/config.js";
@@ -214,15 +214,19 @@ t("runtime: 引用回复——她指向别人的某条才用（@她 不算）", 
   eq(s6[0].o && s6[0].o.replyTo, "82", "仅标记：她写了才引用");
 });
 
-t("guard: 生成后兜底能认出会议纪要 / 替人背书 / 客服腔", function () {
+t("guard: 只硬拦信任与事实两类；语气类只记录不阻断（别把角色限死）", function () {
   const bad1 = "刚聊的：5050本子双十一加国补五千上下，浅羽说联想溢价高，不如攒台式配轻薄本远程";
   const bad2 = "浅羽，刚刚黑鸟wingbire说了，支持gemini的api，放心用吧～";
-  const bad3 = "有什么可以帮您的吗？";
-  for (const b of [bad1, bad2, bad3]) {
+  for (const b of [bad1, bad2]) {
     const r = guardReply(b);
     eq(r.ok, false, "该拦：" + b.slice(0, 20));
-    ok(String(r.hint).length > 4, "要给出怎么改：" + r.hint);
+    ok(String(r.hint).length > 12, "要给示范（怎么改），不只说违规：" + r.hint);
   }
+  // 语气类问题不重写（重写会把话改僵），只记录，交给【我可以】+【语气样板】带
+  const soft1 = "有什么可以帮您的吗？";
+  eq(guardReply(soft1).ok, true, "客服腔不阻断发送");
+  ok(softFlags(soft1).indexOf("客服腔") >= 0, "但要记下来，便于观察");
+  ok(softFlags("我之所以慢是因为搜出来的全没用").indexOf("过度自证") >= 0, "过度自证只记录");
   for (const g of ["dsh 是 DeepSeek Harness 的缩写，就是跑模型的壳", "这委屈小猫哈哈哈哈，随时来问就行~", "行行行，这事翻篇"]) {
     eq(guardReply(g).ok, true, "不该拦：" + g.slice(0, 16));
   }
@@ -243,10 +247,26 @@ t("runtime: 话题降温——同一话题被反复提起时改口风（别再�
     await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你的搜索怎么这么慢", now: t0 + i * 1000 });
     await rt.tick(t0 + i * 1000 + 500);
   }
-  const cooled = prompts.filter(function (p) { return String(p).indexOf("【别再解释】") >= 0; });
-  ok(cooled.length >= 1, "反复提起后提示词里要出现【别再解释】（出现 " + cooled.length + " 次）");
+  const cooled = prompts.filter(function (p) { return String(p).indexOf("【这个话题够了】") >= 0; });
+  ok(cooled.length >= 1, "反复提起后要出现收尾指令（出现 " + cooled.length + " 次）");
+  ok(cooled.every(function (p) { return p.indexOf("用一句话把它收掉") >= 0; }), "给的是怎么做，不是一串不许");
   ok(seen.some(function (x) { return x.kind === "topic_cooling"; }), "降温要记进观测，便于排查");
   ok(rt.stats().coolingHits >= 1, "统计里有 coolingHits");
+});
+
+t("人设：许可在前、禁令收敛（机制上防止规则把角色限死）", function () {
+  const cfg = { persona: { botName: "小肥鱼" }, runtime: {}, plugins: {} };
+  const t = buildPersonaText(personaFromConfig(cfg), cfg);
+  const bans = (t.match(/(绝不|不许|禁止|不得)/g) || []).length;
+  const cans = (t.match(/可以/g) || []).length;
+  ok(bans <= 10, "硬禁令要收敛（现在 " + bans + " 处）——堆多了输出会变合规腔");
+  ok(cans >= 8, "许可要多于禁令（可以 " + cans + " 处 vs 禁令 " + bans + " 处）");
+  ok(t.indexOf("【我可以】") >= 0, "要有许可清单");
+  ok(t.indexOf("【语气样板】") >= 0, "要有正例示范（照样例说比遵守规则自然）");
+  ok(t.indexOf("宁可像个活人说错一句话") >= 0, "要有总原则兜底");
+  const never = t.slice(t.indexOf("【绝不】"), t.indexOf("【语气样板】")).split(String.fromCharCode(10))
+    .filter(function (x) { return x.trim().indexOf("- ") === 0; });
+  ok(never.length <= 4, "【绝不】最多 4 条，现在 " + never.length + " 条");
 });
 
 t("runtime: 生成后兜底——会议纪要式回复会被打回重写一次", async function () {

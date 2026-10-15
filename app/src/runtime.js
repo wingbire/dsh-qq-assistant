@@ -16,7 +16,7 @@ import { createUiMessages } from "./uimessages.js";
 import { createStt, resolveLocalAudio, downloadAudio } from "./stt.js";
 import { depthPolicy, buildTaskText } from "./brain.js";
 import { parseMeme } from "./audit.js";
-import { guardReply } from "./guard.js";
+import { guardReply, softFlags } from "./guard.js";
 import { extractKeywords, searchableKeywords } from "./classify.js";
 import { injectSummary } from "./search.js";
 import { createTracker } from "./feedback.js";
@@ -710,9 +710,9 @@ export function createRuntime(deps) {
       });
       let taskText = buildTaskText(dec.tier, Object.assign({}, policy, { search: dec.search }), dec.keywords);
       if (dec.cooling) {
-        taskText = taskText + String.fromCharCode(10) + "【别再解释】这个话题今晚已经被反复提起 " + dec.coolingHits + " 次" +
+        taskText = taskText + String.fromCharCode(10) + "【这个话题够了】它已经被反复提起 " + dec.coolingHits + " 次" +
           (dec.coolingTerms && dec.coolingTerms.length ? "（" + dec.coolingTerms.join("、") + "）" : "") +
-          "，你也回过好几次了：**不要再自证、不要辩解、不要重复你之前的立场**。要么一句轻认就翻篇，要么把话头带到别处。";
+          "，你也搭过好几次话。**用一句话把它收掉就行**：可以轻认（「行吧，这次算我慢」）、可以自嘲、可以调侃一句，也可以直接换个话头聊别的。不用再展开讲。";
       }
       // N12：需要搜索时先搜一次，把摘要作为消息体注入（不进系统提示词，前缀缓存不受影响）
       if (dec.search > 0 && searchSvc) {
@@ -781,6 +781,8 @@ export function createRuntime(deps) {
         return { gid: batch.gid, action: "brain_error", error: err, fallback: fallback };
       }
       text = r.text || "";
+      const soft = softFlags(text);
+      if (soft.length) observe({ kind: "reply_tone", gid: batch.gid, uid: batch.uid, flags: soft, text: String(text).slice(0, 60) });
     } else {
       return { gid: batch.gid, action: "noop" };
     }
