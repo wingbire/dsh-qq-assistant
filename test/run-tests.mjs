@@ -2569,31 +2569,31 @@ t("runtime: 跳过观察期——某群直接全自动、群间隔离、可回�
   eq(rt2.stage("G1").stage, "observe", "强制观察优先于手动跳过");
 });
 
-t("gates: 被点名 / 要求展开不许被成本压成「本地短句」", async function () {
+t("gates: 被点名 / 要求展开一律进大脑（本地短句已删）", async function () {
   const g = createGates({ auditFn: async function () { return { verdict: "yes" }; } });
   const base = { gid: "G1", uid: "u1", now: 0, botNames: ["小肥鱼"], nicknames: [], interests: [] };
 
   const nick = await g.decide(Object.assign({}, base, { text: "小肥鱼，这个报错的原因是什么" }), {});
   eq(nick.hardHits.indexOf("nick") >= 0, true, "先确认硬触发认得出来");
-  eq(nick.action, "brain", "叫到名字问真事必须进大脑（原来 U=0.27 → 本地短句「嗯？」）");
+  eq(nick.action, "brain", "叫到名字问真事必须进大脑");
   eq(nick.tier === "low", false);
 
   // 点名但只是打招呼：走"应答型"本地短答（零成本、口气对），不再为一句"在吗"调模型
   const hi = await g.decide(Object.assign({}, base, { text: "小肥鱼，打个招呼" }), {});
-  eq(hi.action, "local_short", "点名寒暄 → 本地短答");
+  eq(hi.action, "brain", "点名寒暄 → 也进大脑（带上下文，不再本地拼短句）");
   eq(hi.tier, "low");
 
   const at = await g.decide(Object.assign({}, base, { text: "这个报错的原因是什么", atBot: true }), {});
   eq(at.action, "brain", "@ 到它、问的是真事 → 进大脑");
   const atHi = await g.decide(Object.assign({}, base, { text: "打个招呼", atBot: true }), {});
-  eq(atHi.action, "local_short", "@ 到它但只是打招呼 → 本地应答型短答");
+  eq(atHi.action, "brain", "@ 到它但只是打招呼 → 也进大脑");
 
   const detail = await g.decide(Object.assign({}, base, { text: "@我 展开说说这个原理", atBot: true }), {});
   eq(detail.detailAsk, true);
   eq(detail.tier === "low", false, "要求展开 → 至少中档（原来是 U=-238 → 回「啥事」）");
 
   const plain = await g.decide(Object.assign({}, base, { text: "嘻嘻，现在好了" }), {});
-  eq(plain.action !== "brain", true, "没人搭理你的闲聊，别自己花钱开口");
+  eq(plain.action, "brain", "没人点名的闲聊只要判成要回，也进大脑（低深度只要求一句话收尾）");
 });
 
 t("audit: 三档输出解析（是 / 短 / 否 / 不确定）", function () {
@@ -2608,7 +2608,7 @@ t("audit: 三档输出解析（是 / 短 / 否 / 不确定）", function () {
   eq(parseAuditVerdict(""), "unsure");
 });
 
-t("gates: 外审三档分别落到「不回 / 短句 / 认真回」", async function () {
+t("gates: 外审三档分别落到「不回 / 进大脑短收 / 认真回」", async function () {
   const base = { gid: "G1", uid: "u1", now: 0, atBot: true, botNames: ["小肥鱼"], nicknames: [], text: "小肥鱼 详细讲讲这个原理" };
   let d = await createGates({ auditFn: async function () { return { verdict: "no" }; } }).decide(Object.assign({}, base), {});
   eq(d.audit, "no");
@@ -2616,7 +2616,7 @@ t("gates: 外审三档分别落到「不回 / 短句 / 认真回」", async func
 
   d = await createGates({ auditFn: async function () { return { verdict: "short" }; } }).decide(Object.assign({}, base), {});
   eq(d.audit, "short");
-  eq(d.action, "local_short", "一句短的够了 → 走本地短句池");
+  eq(d.action, "brain", "外审说一句短的够了 → 仍进大脑，只是字数上限低");
   eq(d.tier, "low");
 
   d = await createGates({ auditFn: async function () { return { verdict: "yes" }; } }).decide(Object.assign({}, base), {});
@@ -2640,7 +2640,7 @@ t("gates: 没点名的真问题会被救回来（外审 rubric 第 4 条）", as
   eq(d3.action, "ignore");
   // 只给短句
   const d4 = await createGates(Object.assign({ rescueAsk: "短句" }, yes)).decide(Object.assign({}, base, { text: "这个报错的原因是什么" }), {});
-  eq(d4.action, "local_short");
+  eq(d4.action, "brain");
 });
 
 t("gates: 疑似注入指令直接不回，且不浪费一次外审", async function () {
@@ -2855,7 +2855,7 @@ t("runtime: 识图提前到判定之前（纯图片不再被当无意义文本�
     config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
     store: { paths: {}, addObservation: function (r) { seen.push(r); } },
     vision: { enabled: function () { return true; }, describe: async function () { calls += 1; return { ok: true, text: "蓝发鲸鱼女仆" }; } },
-    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "local_short", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
+    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "brain", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
     send: function () {}, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
   });
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[图片]", hasImage: true, images: [{ file: "C:/a.jpg" }], now: 0 });
@@ -2907,7 +2907,7 @@ t("runtime: 语音走本机 STT，转写拼进正文并参与本地一判", asyn
     store: { paths: {}, addObservation: function () {} },
     stt: { enabled: function () { return true; }, probe: async function () { return { ok: true }; },
       transcribe: async function (p) { sttCalls += 1; return { ok: true, text: "明天晚上八点开黑", ms: 9, bytes: 3 }; } },
-    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "local_short", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
+    bot: { handleEvent: async function (evt) { seen.push({ kind: "judge", text: evt.text }); return { gid: evt.gid, uid: evt.uid, action: "brain", verdict: "grey", pSay: 0.5, U: 0.1, tier: "low", maxChars: 20, search: 0, keywords: [], bucket: "general", arm: "terse", reason: ["t"], injected: false }; } },
     send: function () {}, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
   });
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "[语音]", hasVoice: true, voiceRef: { path: voiceFile, file: voiceFile, url: "http://x/a.amr" }, now: 0 });
@@ -3238,15 +3238,15 @@ t("gates: 24 条模拟情景里踩过的坑（指代不明 / 人称混用 / 长�
   eq(await act("?"), "ignore", "单符号不该回");
   eq(await act("哈哈哈哈哈哈"), "ignore", "纯灌水不该回");
   // 2) 没点名的情绪话/劝架/对别人说话：U 过线也只给本地短答，别去调模型
-  eq(await act("他妈的这游戏怎么又崩了"), "local_short");
-  eq(await act("你俩别吵了，说点别的"), "local_short");
+  eq(await act("他妈的这游戏怎么又崩了"), "brain");
+  eq(await act("你俩别吵了，说点别的"), "brain");
   // 「你」到底指谁，本地规则分不清 → 交给外审（这正是 auditUnaddressed 的用武之处）
   const c22 = { gid: "100000001", uid: "10000", now: 0, botNames: ["小肥鱼"], nicknames: [], text: "你这周有空吗，陪我去看个电影" };
-  eq((await createGates({ auditFn: async function () { return { verdict: "short" }; } }).decide(Object.assign({}, c22), {})).action, "local_short", "外审说「短」→ 只回一句");
+  eq((await createGates({ auditFn: async function () { return { verdict: "short" }; } }).decide(Object.assign({}, c22), {})).action, "brain", "外审说「短」→ 只回一句");
   eq((await createGates({ auditFn: async function () { return { verdict: "no" }; } }).decide(Object.assign({}, c22), {})).action, "ignore", "外审说「否」→ 干脆不说");
   // 3) 点名寒暄 → 本地应答型短答（口气对、零成本）；点名问真事 → 进大脑
-  eq(await act("小肥鱼在吗"), "local_short");
-  eq(await act("小肥鱼来打个招呼"), "local_short");
+  eq(await act("小肥鱼在吗"), "brain");
+  eq(await act("小肥鱼来打个招呼"), "brain");
   eq(await act("小肥鱼 这个报错的原因是什么，帮我看看"), "brain");
   // 4) 没点名的求助（谁有…）：以前直接漏接，现在补救进大脑
   eq(await act("谁有那个插件的下载地址"), "brain");
@@ -3255,7 +3255,7 @@ t("gates: 24 条模拟情景里踩过的坑（指代不明 / 人称混用 / 长�
   const contEvt = Object.assign({}, base, { text: "那按你的意思再试一次？", lastBotText: "先把这个配置改成 3001 再试", lastBotAt: 1, now: 30000 });
   eq((await g.decide(contEvt, {})).action, "brain", "接着它说的 → 进大脑");
   // 6) 纯转述别人：不回；转述里带"你帮我"求它：进大脑
-  eq(await act("他说你们这个机器人说话挺有意思的"), "local_short");
+  eq(await act("他说你们这个机器人说话挺有意思的"), "brain");
   eq(await act("他说你会写代码，能帮我写个脚本吗"), "brain");
   // 7) 不是说你 → 不回
   eq(await act("不是说你，别插嘴"), "ignore");

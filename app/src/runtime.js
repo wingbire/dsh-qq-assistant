@@ -699,9 +699,9 @@ export function createRuntime(deps) {
     let text = "";
     let usage = null;
     let searchInfo = null;
-    if (dec.action === "local_short") {
-      text = localReplies.reply(dec, { rng: rng, text: evt.text, gid: evt.gid, quoted: !!evt.replyId, cooling: !!dec.cooling });
-    } else if (dec.action === "brain") {
+    // 本地短句这条路已删：判定要回就进大脑（低深度会在提示词里被要求"一句话收尾"）。
+    // 只有两种例外仍用本地语料：大脑挂了（下面 fallback）、以及被戳一戳。
+    if (dec.action === "brain") {
       if (!askBrain) return { gid: batch.gid, action: "brain_unavailable" };
       const dc = (Array.isArray(rc.depthChars) && rc.depthChars.length >= 3) ? rc.depthChars : [20, 60, 200];
       const policy = depthPolicy(dec.tier, {

@@ -204,9 +204,9 @@ export function createGates(opts) {
       const greetingOnly = (!detailAsk && isGreeting(text) && !substance) || bareName;
       if (tierInfo.tier !== "low") {
         if (addressed && greetingOnly) {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "点名但只是寒暄 → 本地短答（省一次模型调用）" };
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "点名但只是寒暄 → 进大脑但要求一句话收尾" };
         } else if (!addressed && vent) {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "情绪宣泄、没点名 → 本地短答，不送大脑" };
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "情绪宣泄、没点名 → 进大脑但要求一句话收尾" };
         } else if (!addressed && !semanticReason) {
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "没点名、也没有求详/提问 → 只给本地短答" };
         }
@@ -252,7 +252,7 @@ export function createGates(opts) {
           verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };
         } else if (auditRes.verdict === "short") {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审：一句短的够了" };
+          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审：一句短的够了 → 仍进大脑，字数上限低" };
         } else if (auditRes.verdict === "yes") {
           // 配置明确说"这种只给短句"时，外审的"该认真回"不该把政策抬掉（外审仍能说"否"）
           const capped = rescued && rescueAsk === "短句";
@@ -284,8 +284,11 @@ export function createGates(opts) {
       auditInfo = { called: true, verdict: v, agreed: agreed, ms: auditRes.ms || null };
     }
     let action = "ignore";
-    if (verdict !== "no") action = tierInfo.tier === "low" ? "local_short" : "brain";
-    if (action === "local_short") reason.push("低深度 → 不进大脑，本地短句");
+    // 只要判成"要回"，一律走大脑。以前低深度会走本地短句（localReplies），
+    // 但它不结合上下文，回出来就是"嗯嗯""哈哈"这种很怪的东西 —— 已删掉这条路。
+    // 深度低仍然有意义：tier=low 会变成"一句话收尾"的字数要求（depthChars[0]）。
+    if (verdict !== "no") action = "brain";
+    if (action === "brain" && tierInfo.tier === "low") reason.push("深度低 → 仍进大脑，但要求一句话收尾（不再本地短句）");
 
     let arm = "standard";
     if (action !== "ignore" && banditRef) {
