@@ -16,7 +16,7 @@
     { id: "status", name: "状态", icon: "◎" },
     { id: "persona", name: "人设", icon: "☺", group: "人设" },
     { id: "tune", name: "调整", icon: "⚙" },
-    { id: "models", name: "模型接入", icon: "◈", group: "模型与接入" },
+    { id: "models", name: "模型接入", icon: "◈" },
     { id: "napcat", name: "QQ 接入", icon: "⇄", group: "QQ 接入" },
     { id: "profile", name: "群档案", icon: "▤" },
     { id: "extra", name: "额外功能", icon: "✦" },
@@ -414,9 +414,21 @@
         '<table style="margin-top:8px"><thead><tr><th>能力</th><th>这台机器</th><th>说明 / 对应的人设块</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div></div>';
     }
-    return card + '<details class="card" open><summary>模型与接口（本组全部输入框）' +
-      '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">大脑 / 识图 / 语音 / 搜索</span></summary>' +
-      '<div class="body">' + renderGroupFields("模型与接入") + '</div></details>';
+    // 三类分开摆：本地工具（路径/端口）→ 大脑模型（DSH 调的 API）→ DSH 插件模型
+    var groups = [
+      { 名: "本地工具", 副: "路径与端口 · 不起模型调用", 图标: "⌘" },
+      { 名: "大脑模型", 副: "DSH 直接调用的 API · 供应商 / 模型 / 密钥 / 思考强度", 图标: "◉" },
+      { 名: "DSH 插件模型", 副: "以插件形式接入的通道 · 免费池 / 免费搜索", 图标: "⧉" }
+    ];
+    var secs = groups.map(function (g) {
+      var meta = ((S.table && S.table.分组) || []).filter(function (x) { return x.名 === g.名; })[0] || {};
+      return '<details class="card" open><summary>' + esc(g.图标 + " " + g.名) +
+        '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' + esc(g.副) + '</span></summary>' +
+        '<div class="body">' +
+        (meta.说明 ? '<div class="hint" style="margin:-2px 0 8px">' + esc(meta.说明) + '</div>' : "") +
+        renderGroupFields(g.名) + '</div></details>';
+    }).join("");
+    return card + secs;
   }
 
   function pagePersona() {

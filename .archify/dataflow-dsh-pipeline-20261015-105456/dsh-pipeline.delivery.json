@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d874adf2-9bf0-4dbf-9e57-b8bb8f3469d4",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "E:\\dshQ群小助手配置端2\\.archify\\dataflow-dsh-pipeline-20261015-105456\\candidate.json",
+  "output": "E:\\dshQ群小助手配置端2\\.archify\\dataflow-dsh-pipeline-20261015-105456\\dsh-pipeline.html",
+  "specification": {
+    "sha256": "482a503c6a6b714ae8447160540b904dfffc94af13f93e9c197c5b3e8936483f",
+    "bytes": 3360
+  },
+  "artifact": {
+    "sha256": "66ef26e08656fcf0e2288c2ea8440f6525e5b31b0d4b4ed1b0d9fa47cc2ee566",
+    "bytes": 751743
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "小肥鱼回一条群消息：当前真实链路",
+    "subtitle": "本地汇聚输入 → DSH 单一大脑 → 本地加工发出",
+    "output": ".archify/dataflow-dsh-pipeline-20261015-105456/dsh-pipeline.html",
+    "viewBox": [
+      1080,
+      420
+    ],
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "repository": {
+      "url": "https://github.com/wingbire/dsh-qq-assistant.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "9fcf42d071a4839955a829a5c753f8bbbc075405"
+    }
+  },
+  "stages": [
+    {
+      "label": "① 群里"
+    },
+    {
+      "label": "② 本地判定（0 成本）"
+    },
+    {
+      "label": "③ 输入汇聚（本地拼）"
+    },
+    {
+      "label": "④ DSH 大脑"
+    },
+    {
+      "label": "⑤ 加工并发出（本地）"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "qq",
+      "type": "frontend",
+      "label": "QQ 群 / NapCat",
+      "sublabel": "OneBot v11 桥",
+      "stage": 0,
+      "row": 1,
+      "tag": "ws://127.0.0.1:3001"
+    },
+    {
+      "id": "local",
+      "type": "backend",
+      "label": "小助手本地层",
+      "sublabel": "判定 · 闸门 · 群档案 · 节流",
+      "stage": 1,
+      "row": 1,
+      "tag": "说 / 不说 在这里定",
+      "sources": [
+        {
+          "path": "app/src/gatescore.js",
+          "label": "判定与搜索闸门"
+        }
+      ]
+    },
+    {
+      "id": "gather",
+      "type": "backend",
+      "label": "上下文与素材拼装",
+      "sublabel": "转写 / 识图 / 搜索",
+      "stage": 2,
+      "row": 1,
+      "tag": "都拼成一段文字",
+      "sources": [
+        {
+          "path": "app/src/runtime.js",
+          "label": "拼装与调用"
+        }
+      ]
+    },
+    {
+      "id": "dsh",
+      "type": "external",
+      "label": "DSH 无头进程",
+      "sublabel": "profile qq-brain",
+      "stage": 3,
+      "row": 1,
+      "tag": "模型 deepseek-flash",
+      "sources": [
+        {
+          "path": "app/src/brain.js",
+          "line": 175,
+          "label": "命令行拼装"
+        },
+        {
+          "path": "app/src/brain.js",
+          "line": 245,
+          "label": "spawn"
+        }
+      ]
+    },
+    {
+      "id": "out",
+      "type": "frontend",
+      "label": "兜底校验 → 拆条发出",
+      "sublabel": "引用 · 表情 · 语音",
+      "stage": 4,
+      "row": 1,
+      "tag": "回群里",
+      "sources": [
+        {
+          "path": "app/src/guard.js",
+          "line": 6,
+          "label": "兜底校验"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "from": "qq",
+      "to": "local",
+      "label": "群消息",
+      "classification": "每一条都先过本地",
+      "variant": "emphasis"
+    },
+    {
+      "from": "local",
+      "to": "gather",
+      "label": "要回才继续",
+      "classification": "过闸门 + 档位",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gather",
+      "to": "dsh",
+      "label": "拼好的 prompt",
+      "classification": "唯一一次模型调用",
+      "variant": "emphasis"
+    },
+    {
+      "from": "dsh",
+      "to": "out",
+      "label": "一段正文",
+      "classification": "回本地加工后再发",
+      "variant": "emphasis"
+    }
+  ]
+}
