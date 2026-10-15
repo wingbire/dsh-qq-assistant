@@ -49,7 +49,7 @@
       master: "runtime.voice.enabled", keys: ["runtime.voice.enabled", "runtime.voice.voice", "runtime.voice.maxChars"],
       persona: "打开后会写进人设：允许在正文末尾写 [语音: 内容]" },
     { name: "识图", icon: "▨", desc: "收到图片时额外调一次多模态模型，把画面内容描述拼进上下文",
-      master: "runtime.vision.enabled", keys: ["runtime.vision.enabled", "runtime.vision.mode", "runtime.vision.endpoint", "runtime.vision.apiKey", "runtime.vision.model"],
+      master: "runtime.vision.enabled", keys: ["runtime.vision.enabled", "runtime.vision.mode", "runtime.vision.endpoint", "runtime.vision.apiKey", "runtime.vision.model", "runtime.vision.capable", "runtime.vision.provider"],
       persona: "打开后会写进人设：你看得到群里的图" },
     { name: "立绘（图片）", icon: "✦", desc: "允许大脑写 [立绘] 发自绘形象图（幼年 / 成年）",
       master: "plugins.illustration", keys: ["plugins.illustration"],
@@ -72,7 +72,7 @@
     { id: "freeSearch", role: "搜索通道",
       desc: "24 个搜索引擎 + 智能路由与故障回退。开着就用它的引擎，关掉用本程序内置的直搜（Bing/DDG）。",
       installNote: "装进 app/vendor，程序直接 import 它的引擎函数",
-      keys: ["plugins.freeSearch", "plugins.freeSearchEngine"] },
+      keys: ["plugins.freeSearch", "plugins.freeSearchEngine", "runtime.search.mode", "llm.search.apiKey"] },
     { id: "archify", role: "图表绘制",
       desc: "把结构/流程画成图（SVG→PNG）。大脑画好之后由程序把成品发进群。",
       installNote: "装完把 skills/archify 放进 app/dsh-home/skills",
@@ -415,11 +415,16 @@
         '</div></div>';
     }
     // 三类分开摆：本地工具（路径/端口）→ 大脑模型（DSH 调的 API）→ DSH 插件模型
+    // 这一页只放"必须在这配"的：本地工具（路径/端口）+ 大脑模型（DSH 调的 API）。
+    // 识图、语音、插件通道都有更规整的卡片视图，统一在「额外功能」页调（避免同一配置两处并存）。
     var groups = [
       { 名: "本地工具", 副: "路径与端口 · 不起模型调用", 图标: "⌘" },
-      { 名: "大脑模型", 副: "DSH 直接调用的 API · 供应商 / 模型 / 密钥 / 思考强度", 图标: "◉" },
-      { 名: "DSH 插件模型", 副: "以插件形式接入的通道 · 免费池 / 免费搜索", 图标: "⧉" }
+      { 名: "大脑模型", 副: "DSH 直接调用的 API · 供应商 / 模型 / 密钥 / 思考强度", 图标: "◉" }
     ];
+    var elsewhere = '<div class="card"><div class="body"><div class="hint" style="margin:0">' +
+      '识图（多模态接口）、语音，以及以插件形式接入的通道（免费模型池 / 免费搜索），都统一在「**额外功能**」页调 —— ' +
+      '那里是卡片式开关，一开一关不容易配错。这一页只保留必须在这填的：DSH 启动器路径、本机转写服务、大脑供应商与模型。' +
+      '</div></div></div>';
     var secs = groups.map(function (g) {
       var meta = ((S.table && S.table.分组) || []).filter(function (x) { return x.名 === g.名; })[0] || {};
       // 「大脑模型」段尾部挂一张多模态接口自检卡：填好地址与 Key，点一下就能列出可用模型并自动填配置
@@ -437,7 +442,7 @@
         (meta.说明 ? '<div class="hint" style="margin:-2px 0 8px">' + esc(meta.说明) + '</div>' : "") +
         renderGroupFields(g.名) + probe + '</div></details>';
     }).join("");
-    return card + secs;
+    return card + secs + elsewhere;
   }
 
   function pagePersona() {
