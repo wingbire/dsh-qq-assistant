@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -664,10 +665,18 @@ static class Program
         {
             int cp = PidOf(child);
             if (cp <= 0) { child = null; Refresh(); return; }
-            var kill = new ProcessStartInfo("taskkill", "/PID " + cp + " /T /F");
-            kill.UseShellExecute = false;
-            kill.CreateNoWindow = true;
-            Process.Start(kill).WaitForExit(4000);
+            // 先请它自己收尾（最多等 4 秒）再决定是否强杀：
+            // 以前直接 taskkill /T /F，攒着写的状态（预算用量、消息表、学习权重）就丢了
+            TryHttpShutdown();
+            var t0 = DateTime.Now;
+            while (AliveProc(child) && (DateTime.Now - t0).TotalSeconds < 4) System.Threading.Thread.Sleep(200);
+            if (AliveProc(child))
+            {
+                var kill = new ProcessStartInfo("taskkill", "/PID " + cp + " /T /F");
+                kill.UseShellExecute = false;
+                kill.CreateNoWindow = true;
+                Process.Start(kill).WaitForExit(4000);
+            }
         }
         catch (Exception) { try { child.Kill(); } catch (Exception) { } }
         child = null;
@@ -676,8 +685,40 @@ static class Program
 
     static void OpenWeb()
     {
-        if (!AliveProc(child)) StartAll();
+        // 先确保服务在，并且**等它就绪**再开浏览器：
+        // 以前拉起后立刻 Shell()，页面头几秒连不上，看起来像「服务重新连接」。
+        if (!AliveProc(child)) { StartAll(); WaitForPort(ReadPort(), 20000); }
         Shell("http://127.0.0.1:" + ReadPort());
+    }
+
+    static bool WaitForPort(int port, int ms)
+    {
+        var t0 = DateTime.Now;
+        while ((DateTime.Now - t0).TotalMilliseconds < ms)
+        {
+            if (PortOpenOn(port)) return true;
+            System.Threading.Thread.Sleep(300);
+        }
+        return PortOpenOn(port);
+    }
+
+    // 请小助手自己收尾（预算/消息表/学习权重落盘），只走本机回环
+    static void TryHttpShutdown()
+    {
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + ReadPort() + "/api/action");
+            req.Method = "POST";
+            req.ContentType = "application/json";
+            req.Timeout = 2500;
+            req.ReadWriteTimeout = 2500;
+            var body = Encoding.UTF8.GetBytes("{\"action\":\"shutdown\"}");
+            req.ContentLength = body.Length;
+            using (var st = req.GetRequestStream()) st.Write(body, 0, body.Length);
+            using (var resp = (HttpWebResponse)req.GetResponse()) { resp.Close(); }
+            AppendLog("[stop] 已请求温和收尾");
+        }
+        catch (Exception) { AppendLog("[stop] 温和收尾没走通，直接结束进程"); }
     }
 
     static void Shell(string target)

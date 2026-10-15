@@ -518,6 +518,7 @@ const webui = createWebUi({
   config: cfg, table: table, store: store, memes: memes, runtime: runtime, labels: runtime.labels,
   plugins: async function () { return pluginProbe.probe(); }, installPlugin: doPluginInstall,
   configFile: CONFIG_FILE, probeOnebot: probeOnebot, listGroups: listGroups, onConfigSaved: onConfigSaved,
+  shutdown: function () { gracefulExit("配置端请求停机"); },
   napcatInfo: napcatView, napcatAdopt: adoptNapCat, napcatReveal: napcatReveal,
   checkUpdate: doCheckUpdate, applyUpdate: doApplyUpdate, depsProbe: async function () { return depsProbe.probe(); }, depFix: doDepFix,
   // 大脑 key：界面显示遮蔽值；填真值就落进工作区的 secrets.json（只存本机，绝不出现在日志里）
@@ -648,8 +649,10 @@ setInterval(function () {
   log("状态 " + JSON.stringify(Object.assign({}, s.stats, { 待定反馈: runtime.pendingFeedback(), 预算: s.budget.mode, 阶段: "按群" })));
 }, 30000);
 
-process.on("SIGINT", function () {
-  log("收到 SIGINT，收尾中…");
+// 收尾只写一处：SIGINT 与"托盘请求停机"共用。
+// 背景：托盘以前的停止是 taskkill /T /F 直接强杀 → 预算用量、消息表、学习权重这些攒着写的状态全丢。
+function gracefulExit(why) {
+  log((why || "退出") + "，收尾中…");
   try { runtime.budget.flush(); } catch (e) {}          // 用量平时就攒着写，这里只是最后一次
   try { runtime.localReplies.flush(); } catch (e) {}    // "这个群最近说过哪几句"同理
   try { runtime.uiMessages.flush(); } catch (e) {}      // 配置端那张消息表也是攒着写
@@ -657,4 +660,6 @@ process.on("SIGINT", function () {
   if (link.ob) link.ob.close();
   clearInterval(timer);
   setTimeout(function () { process.exit(0); }, 200);
-});
+}
+process.on("SIGINT", function () { gracefulExit("收到 SIGINT"); });
+process.on("SIGTERM", function () { gracefulExit("收到 SIGTERM"); });

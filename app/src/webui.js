@@ -154,6 +154,7 @@ export function createWebUi(deps) {
   const selectOptionsFn = d.selectOptions || null;   // async () => ({ "brain.provider": [...], ... }) 可下拉字段的候选    // async ({endpoint, apiKey}) => ({ ok, models, picked }) 多模态接口自检
   const depFixFn = d.depFix || null;              // async (id) => { ok, open?, output? }
   const reconnectFn = d.reconnect || null;        // async () => { ok, url, state } —— 接入设置改完不用重启
+  const shutdownFn = d.shutdown || null;          // () => void —— 托盘的停止：先温和收尾再被杀
   const pluginsProbeFn = d.plugins || null;       // async () => { items: [...] } —— 社区插件兼容
   const pluginInstallFn = d.installPlugin || null;
   const probeOnebot = d.probeOnebot || null;      // async (force) => { state, selfId, online, version, nickname }
@@ -303,6 +304,16 @@ export function createWebUi(deps) {
         if (!b.gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
         const r = runtime.setStage(b.gid, b.stage);
         return sendJson(res, 200, Object.assign({ ok: !r.error, action: act }, r));
+      }
+      if (act === "shutdown") {
+        // 托盘停止前先走这一步：让它有机会把攒着写的状态落盘，再被强杀（只允许本机回环调用）
+        const ra = String((req.socket && req.socket.remoteAddress) || "");
+        if (ra !== "127.0.0.1" && ra !== "::1" && ra !== "::ffff:127.0.0.1") {
+          return sendJson(res, 403, { ok: false, error: "只允许本机调用" });
+        }
+        sendJson(res, 200, { ok: true, action: act });
+        setTimeout(function () { if (shutdownFn) { try { shutdownFn(); } catch (e) {} } }, 80);
+        return;
       }
       if (act === "reconnect") {
         if (!reconnectFn) return sendJson(res, 500, { ok: false, error: "没有接重连服务" });
