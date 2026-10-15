@@ -50,7 +50,11 @@
       persona: "打开后会写进人设：允许在正文末尾写 [语音: 内容]" },
     { name: "识图", icon: "▨", desc: "收到图片时额外调一次多模态模型，把画面内容描述拼进上下文",
       master: "runtime.vision.enabled", keys: ["runtime.vision.enabled", "runtime.vision.mode", "runtime.vision.endpoint", "runtime.vision.apiKey", "runtime.vision.model", "runtime.vision.capable", "runtime.vision.provider"],
-      persona: "打开后会写进人设：你看得到群里的图" },
+      persona: "打开后会写进人设：你看得到群里的图",
+      extra: '<div class="hint" style="margin:10px 0 6px">http 模式：地址填 base 即可（Gemini 这类会自动补全），provider 留空，模型点下面自动填。' +
+        '<div style="margin-top:6px"><button class="btn-sm good" id="btn-vision-probe">检测可用模型</button>' +
+        '<span id="vision-probe-msg" class="muted" style="margin-left:8px"></span></div>' +
+        '<div id="vision-probe-list" style="margin-top:8px"></div></div>' },
     { name: "立绘（图片）", icon: "✦", desc: "允许大脑写 [立绘] 发自绘形象图（幼年 / 成年）",
       master: "plugins.illustration", keys: ["plugins.illustration"],
       persona: "关掉后人设里不再提立绘，程序也不会发" },
@@ -421,28 +425,15 @@
       { 名: "本地工具", 副: "路径与端口 · 不起模型调用", 图标: "⌘" },
       { 名: "大脑模型", 副: "DSH 直接调用的 API · 供应商 / 模型 / 密钥 / 思考强度", 图标: "◉" }
     ];
-    var elsewhere = '<div class="card"><div class="body"><div class="hint" style="margin:0">' +
-      '识图（多模态接口）、语音，以及以插件形式接入的通道（免费模型池 / 免费搜索），都统一在「**额外功能**」页调 —— ' +
-      '那里是卡片式开关，一开一关不容易配错。这一页只保留必须在这填的：DSH 启动器路径、本机转写服务、大脑供应商与模型。' +
-      '</div></div></div>';
     var secs = groups.map(function (g) {
       var meta = ((S.table && S.table.分组) || []).filter(function (x) { return x.名 === g.名; })[0] || {};
-      // 「大脑模型」段尾部挂一张多模态接口自检卡：填好地址与 Key，点一下就能列出可用模型并自动填配置
-      var probe = g.名 === "大脑模型"
-        ? '<div class="hint" style="margin:10px 0 6px">多模态接口自检（切到「独立接口 http」时用）：地址填 base 或完整 chat/completions 都行，' +
-          'Gemini 会自动补成 /v1beta/openai/chat/completions；「识图模型 provider」在 http 模式<b>不用填</b>（那是 dsh 模式选通道用的）；' +
-          '「识图模型」由检测自动填。<div style="margin-top:6px">' +
-          '<button class="btn-sm good" id="btn-vision-probe">检测可用模型并自动填好</button>' +
-          '<span id="vision-probe-msg" class="muted" style="margin-left:8px"></span></div>' +
-          '<div id="vision-probe-list" style="margin-top:8px"></div></div>'
-        : "";
       return '<details class="card" open><summary>' + esc(g.图标 + " " + g.名) +
         '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">' + esc(g.副) + '</span></summary>' +
         '<div class="body">' +
         (meta.说明 ? '<div class="hint" style="margin:-2px 0 8px">' + esc(meta.说明) + '</div>' : "") +
-        renderGroupFields(g.名) + probe + '</div></details>';
+        renderGroupFields(g.名) + '</div></details>';
     }).join("");
-    return card + secs + elsewhere;
+    return card + secs;
   }
 
   function pagePersona() {
@@ -549,7 +540,7 @@
         '<span class="pill ' + (on ? "ok" : "warn") + '" style="margin-left:auto;font-weight:400">' + (on ? "已开启" : "已关闭") + '</span></summary>' +
         '<div class="body"><div class="hint" style="margin:-2px 0 4px">' + esc(g.desc) + '</div>' +
         '<div class="hint" style="margin:0 0 8px;color:var(--accent-deep)">人设影响：' + esc(g.persona) + '</div>' +
-        rows + '</div></details>';
+        rows + (g.extra || "") + '</div></details>';
     }).join("");
 
     return api("/api/plugins").then(function (d) {
