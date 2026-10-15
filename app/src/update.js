@@ -185,7 +185,7 @@ export function createDepsProbe(opts) {
         detail: major >= 22 ? "程序本体跑在这上面" : "版本太低（需要 ≥ 22）",
         fix: { kind: "url", value: "https://nodejs.org/zh-cn/download", note: "下载 LTS 装完重启程序" } },
       { id: "dsh", name: "DeepSeek Harness（大脑）", required: true, ok: !!dshCli, version: dshCli ? path.basename(dshCli) : null,
-        detail: dshCli || "没找到 dsh.cmd——不装它小助手一句都回不了（本地判定照跑）",
+        detail: dshCli || "没找到 DSH：本地短答照发（点名寒暄/情绪/被戳/图片语音），但答题、长回答、识图、外审、搜索都用不了。DSH 只要装着即可，不必开着窗口",
         fix: { kind: "url", value: "https://github.com/deepseek-ai", note: "请从你获得 DSH 的渠道安装，然后在「调整 → 再装」或 app.json 里填 dsh 路径" } },
       { id: "apikey", name: "DeepSeek API Key", required: true, ok: !!hasKey, version: hasKey ? "已配置" : null,
         detail: hasKey ? "只存在本机 app/dsh-data/config/secrets.json" : "没配 key，大脑调不动（配置端 → 接入 → 大脑 API Key 里填一把）",

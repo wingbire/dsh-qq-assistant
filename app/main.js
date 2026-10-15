@@ -174,7 +174,12 @@ function effortsOf(c) {
   return { low: g("low", "off"), mid: g("mid", "low"), high: g("high", "high") };
 }
 const boot = ensureBrainProfile({ cliPath: cli, persona: persona, personaText: (String(getPath(cfg, "persona.globalText") || "").trim() || undefined), model: channelModel("brain", cfg), efforts: effortsOf(cfg) });
-log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));
+if (!cli) {
+  // 说清楚"没装 DSH"的边界：本地层照常，需要大脑的全不行（别让人以为整个程序废了）
+  log("大脑：没找到 DSH（本地短答照常；答题/长回答/识图/外审/搜索都用不了）—— 装了 DSH 即可，不必开着窗口");
+} else {
+  log("大脑 profile：" + JSON.stringify({ ok: boot.ok, patch: boot.patch || null, error: boot.error || null }));
+}
 
 // OneBot 客户端做成可重建的：改完接入设置点「重连」就能立刻生效，不用重启程序
 const link = { ob: null };

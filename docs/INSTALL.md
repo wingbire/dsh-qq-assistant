@@ -115,3 +115,18 @@ QQ 语音在 NapCat 事件里只有文件路径/URL（实测字段 `file/path/ur
 
 然后在配置端打开 **语音转写**（`runtime.stt.enabled`）。设置页 →「拓展依赖」会自动体检这三项。
 模型：`tiny` 最快最糙、`small` 默认够用、`medium/large-v3` 更准（要 GPU 得另装 cuBLAS/cuDNN；缺了会自动退回 CPU）。
+
+### 要不要一直开着 DSH？（不用，但要装着）
+
+DSH 必须**装**在这台机器上（程序要能找到 dsh.cmd / DeepSeek Harness.exe），但**不用开着窗口**：
+每次需要回话时，程序会自己拉起一个 DSH 的**无头**进程（--profile qq-brain … headless --json），拿到结果就退出。
+所以在任务管理器里看到的 DeepSeek Harness.exe，有几个就是它临时拉起来、几秒后自己消失的。
+
+**没装（或没找到）DSH 会怎样**：
+
+- 本地层照常工作：点名寒暄 / 情绪宣泄 / 灌水 / 被戳 / 图片语音这类**本地短答**会照发（零成本、不调模型）
+- 需要大脑的全部不行：答题、长回答、识图、外审复核、搜索
+- 启动日志会写「大脑 profile：{"ok":false,"error":"找不到 DSH 启动器"}」，依赖体检把「DeepSeek Harness（大脑）」标成必需缺失
+- 也可以手动指定：配置端 →「接入」→「大脑(DSH CLI)路径」填 dsh.cmd 的位置
+
+另外：**免费模型（Our Free Model）是 DSH 的插件** —— 它省的是 **API key 的钱**，不省 DSH 这个依赖。
