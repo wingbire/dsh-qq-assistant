@@ -532,6 +532,25 @@ t("外审坏了要更保守：补救回来的消息不再放行（用户实测�
 });
 
 
+t("配置合并：表单提交的字符串会按字段表扳回类型（踩过 bool 变 \"true\"）", function () {
+  const cur = { runtime: { voice: { enabled: true, voice: "Microsoft Yaoyao" } }, gates: { bounds: { lo: 0.4 } } };
+  const table = { 分组: [{ 名: "x", 字段: [
+    { 键: "runtime.voice.enabled", 类型: "bool" },
+    { 键: "runtime.voice.voice", 类型: "string" },
+    { 键: "gates.bounds.lo", 类型: "number" }
+  ] }] };
+  const m1 = mergeConfigSafe(cur, { runtime: { voice: { enabled: "false" } } }, table);
+  eq(m1.runtime.voice.enabled, false, "字符串 false 要变成布尔 false");
+  eq(typeof m1.runtime.voice.enabled, "boolean");
+  const m2 = mergeConfigSafe(cur, { runtime: { voice: { enabled: "true" } } }, table);
+  eq(m2.runtime.voice.enabled, true, "字符串 true 要变成布尔 true");
+  eq(typeof m2.runtime.voice.enabled, "boolean");
+  const m3 = mergeConfigSafe(cur, { gates: { bounds: { lo: "0.55" } } }, table);
+  eq(m3.gates.bounds.lo, 0.55, "数字字符串要变成数字");
+  const m4 = mergeConfigSafe(cur, { runtime: { voice: { enabled: "" } } }, table);
+  eq(typeof m4.runtime.voice.enabled, "boolean", "空串不该变成 true");
+});
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

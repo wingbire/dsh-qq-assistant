@@ -88,6 +88,19 @@ export function redactConfig(cfg, table) {
 // 客户端随后带着假令牌去连 NapCat，表现就是"重启之后再也连不上"。
 export function mergeConfigSafe(cur, patch, table) {
   const next = deepMerge(cur, patch || {});
+  // 按字段表把类型扳回来：配置端表单提交的值都是字符串，直接合并会把 bool 存成 "true"
+  // （实测踩过：runtime.voice.enabled / plugins.ourFreeModel 变成了字符串，=== true 的比较全部失效）。
+  for (const f of fieldEntries(table || loadFieldTable())) {
+    if (!f.键 || f.类型 === "secret") continue;
+    const v = getPath(next, f.键);
+    if (v === undefined || v === null || v === "") continue;
+    if (f.类型 === "bool") {
+      if (typeof v === "string") setPath(next, f.键, !/^(false|0|no|off|否|关)$/i.test(v.trim()));
+      else if (typeof v === "number") setPath(next, f.键, v !== 0);
+    } else if (f.类型 === "number") {
+      if (typeof v === "string" && v.trim() !== "") { const n = Number(v); if (isFinite(n)) setPath(next, f.键, n); }
+    }
+  }
   for (const f of fieldEntries(table || loadFieldTable())) {
     if (f.类型 !== "secret" || !f.键) continue;
     const v = getPath(next, f.键);

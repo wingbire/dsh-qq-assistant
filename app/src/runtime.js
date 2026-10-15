@@ -149,7 +149,9 @@ export function createRuntime(deps) {
       const shared = (e.terms || []).filter(function (x) { return terms.indexOf(x) >= 0; });
       if (shared.length) { hits += 1; if (e.replied) mine += 1; for (const x of shared) if (sharedTerms.indexOf(x) < 0) sharedTerms.push(x); }
     }
-    if (hits >= 3 && mine >= 2) return { hits: hits, mine: mine, terms: sharedTerms.slice(0, 3) };
+    // 阈值：同一个话题被提起 ≥2 次、其中 ≥1 次她已经回过嘴 → 后面这条就带上「话题降温」指令。
+    // 原来是 hits>=3 && mine>=2，实测太迟钝：她能在「九块三」这种梗里连回 4 次（用户反馈"看着怪"）。
+    if (hits >= 2 && mine >= 1) return { hits: hits, mine: mine, terms: sharedTerms.slice(0, 3) };
     return null;
   }
   const stt = d.stt || createStt({ config: rc.stt, fetch: d.fetch });
