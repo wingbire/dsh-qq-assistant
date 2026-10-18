@@ -54,6 +54,8 @@ static class Program
     static DateTime autoRestartWindow = DateTime.MinValue;
     static bool botWasAlive = false;
     static bool manualStop = false;
+    // 已经有一个实例在服务时认领它（避免每次启动都弹『端口被占用』）
+    static bool adoptedExisting = false;
     static DateTime lastRecoverTry = DateTime.MinValue;   // 上次尝试自愈的时间（失败要按间隔重试）
     static bool recoveryWarned = false;                  // 自愈放弃时只提示一次
     static int napcatVisibleWindows = 0;
@@ -644,6 +646,28 @@ static class Program
     }
 
     // 本地 STT 侧车：起之前先探 /health，已经在跑就不重复起；退出时只关自己起的那个。
+    // 清掉「不是本托盘起的」小助手实例（上次启动器留下的孤儿）：它会一直占着配置端端口，
+    // 导致新实例起不来、用户又点「停止」无效。只认工作区里的 app/main.js，不碰别的 node 进程。
+    static void KillStrayBot()
+    {
+        try
+        {
+            int mine = 0;
+            try { mine = child == null ? 0 : PidOf(child); } catch (Exception) { mine = 0; }
+            var q = new System.Management.ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='node.exe'");
+            foreach (var mo in q.Get())
+            {
+                string cmd = Convert.ToString(mo["CommandLine"]);
+                if (cmd == null || cmd.IndexOf("main.js", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (cmd.IndexOf(root, StringComparison.OrdinalIgnoreCase) < 0 && cmd.IndexOf("app\\main.js") < 0 && cmd.IndexOf("app/main.js") < 0) continue;
+                int pid2 = Convert.ToInt32(mo["ProcessId"]);
+                if (pid2 == mine) continue;
+                AppendLog("[停止] 清掉残留实例 pid " + pid2);
+                Process.Start(new ProcessStartInfo("taskkill", "/PID " + pid2 + " /T /F") { UseShellExecute = false, CreateNoWindow = true });
+            }
+        }
+        catch (Exception ex) { AppendLog("[停止] 清理残留实例失败：" + ex.Message); }
+    }
     static void StartStt()
     {
         if (!sttAutoStart) return;
@@ -675,12 +699,21 @@ static class Program
         if (childStartFailed) return;      // 上次就起不来，等用户自己再点「启动」（别每 3 秒弹一次）
         if (!File.Exists(entry)) { MessageBox.Show("找不到 " + entry, AppName); childStartFailed = true; return; }
         if (!NodeOk()) return;             // 没装 Node.js 就地讲清楚，别让它去抛 .NET 异常
-        // 配置端端口已经在听 = 已经有一个小助手在跑（可能是上一次启动器留下的），不要再起第二个
+        // 【重要】只要端口在听就不要再起第二个 —— 以前这里还要求"端口能应答"，
+        // 但应用启动时端口**已经在听而 HTTP 还没起来**，托盘就误判成"没在跑"又起一个；
+        // 第二个抢同一个端口失败，用户看到的就是「配置端端口 8799 被占用」。
+        // 现在：端口在听＝已经有一个实例（可能正在启动）→ 接管它，不再重复启动，也不弹窗。
         int webPort = ReadPort();
-        if (PortOpenOn(webPort) && PortAnswersHttp(webPort))
+        if (PortOpenOn(webPort))
         {
-            AppendLog("[启动] 配置端端口 " + webPort + " 已在监听 → 认为小助手已经在跑，不重复启动");
-            Notify("小助手已经在跑了", "配置端端口 " + webPort + " 已被占用。要重启的话先在托盘菜单点「停止」。");
+            if (!adoptedExisting)
+            {
+                adoptedExisting = true;
+                AppendLog("[启动] 配置端 " + webPort + " 已在监听 → 接管现有实例（不重复启动；如果是它还在启动中，稍等它自己就绪）");
+            }
+            botWasAlive = true;
+            childStartFailed = false;
+            Refresh();
             return;
         }
         Directory.CreateDirectory(logDir);
@@ -721,7 +754,7 @@ static class Program
     {
         manualStop = true;          // 手动停的不许自愈
         botWasAlive = false;
-        if (!AliveProc(child)) { child = null; Refresh(); return; }
+        if (!AliveProc(child)) { KillStrayBot(); child = null; Refresh(); return; }
         try
         {
             int cp = PidOf(child);
