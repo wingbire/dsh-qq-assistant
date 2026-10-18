@@ -319,11 +319,36 @@ export function profileExists(dshHome, profileId) {
 }
 
 // 首次使用：在指定 DSH_HOME 下从官方模板派生 profile（不会动 ~/.dsh）。
+// 老 profile 里可能残留着**上一个 DSH 版本**的本地插件副本（node_modules/@deepseek-ai）。
+// 实测事故：DSH 升到 0.2.1-rc.2 后，profile 里 0.2.0-rc.2 的副本被 DSH 判为"版本不兼容"，
+// 于是它把 profile 的每一行插件都禁用了 —— 大脑/外审/识图全部静默失效，而启动日志看不出问题。
+// 新版模板干脆不带本地 node_modules（插件直接从 DSH 安装里解析），所以这里把残留清掉即可。
+export function staleProfileDeps(dshHome, profileId) {
+  const nm = path.join(profileDir(dshHome, profileId), "node_modules", "@deepseek-ai");
+  try {
+    if (!fs.existsSync(nm)) return [];
+    return fs.readdirSync(nm).filter(function (x) { return x.indexOf("dsh-") === 0; });
+  } catch (e) { return []; }
+}
+
 export function ensureProfile(opts) {
   const o = opts || {};
   const dshHome = o.dshHome || DSH_HOME;
   const profileId = o.profileId || PROFILE_ID;
-  if (profileExists(dshHome, profileId)) return { ok: true, created: false, dir: profileDir(dshHome, profileId) };
+  if (profileExists(dshHome, profileId)) {
+    const stale = staleProfileDeps(dshHome, profileId);
+    if (!stale.length) return { ok: true, created: false, dir: profileDir(dshHome, profileId) };
+    // 有残留 → 备份后按当前 DSH 版本重建（顺带保住用户的 patch 由调用方重写）
+    const dir = profileDir(dshHome, profileId);
+    const bak = dir + ".stale-" + Date.now();
+    try { fs.renameSync(dir, bak); } catch (e) { /* 备份失败就退回删 node_modules */ }
+    if (!fs.existsSync(dir)) {
+      // 走下面的重建流程
+    } else {
+      try { fs.rmSync(path.join(dir, "node_modules"), { recursive: true, force: true }); } catch (e) {}
+      return { ok: true, created: false, repaired: true, dir: dir, stale: stale };
+    }
+  }
   if (!o.launch || !o.launch.exe) return { ok: false, created: false, error: "缺少 DSH 启动器" };
   ensureDir(dshHome);
   const args = ["--expose-internals", o.launch.cliJs, profileId, "--from-default-profile", "headless", "--dump-config"];
