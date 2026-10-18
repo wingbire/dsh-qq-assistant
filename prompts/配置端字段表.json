@@ -267,6 +267,13 @@
           "说明": "留空 = 启动器自己在常见位置找 NapCatWinBootMain.exe"
         },
         {
+          "键": "napcat.uin",
+          "标签": "小助手的 QQ 号（用于 NapCat 快速登录）",
+          "类型": "string",
+          "默认": "",
+          "说明": "填了就按「NapCatWinBootMain.exe <QQ号>」启动 NapCat = 快速登录，不用每次去控制台点「选择登录」。前提是这台机器上已经手动登录过一次（NapCat 需要先登录一次才能记住会话）"
+        },
+        {
           "键": "napcat.configPath",
           "标签": "NapCat 配置文件路径",
           "类型": "string",
@@ -737,6 +744,13 @@
       "键前缀": "",
       "说明": "Windows SAPI 音色（在「额外功能 → 语音」那张卡里调）",
       "字段": [
+        {
+          "键": "runtime.stt.autoStart",
+          "标签": "随托盘自动启动本地语音转写",
+          "类型": "bool",
+          "默认": true,
+          "说明": "开（默认）＝托盘启动时顺带拉起 tools/stt-server.py，退出时关掉；关＝你要自己开。它只影响「语音转文字」，不开也不影响打字"
+        },
         {
           "键": "runtime.voice.enabled",
           "标签": "启用语音",

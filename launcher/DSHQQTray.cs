@@ -40,6 +40,12 @@ static class Program
     static Icon appIcon;
     static System.Threading.Mutex singleInstance;   // 必须静态持有！局部变量会被 GC 收掉，句柄一关命名互斥体就消失，单实例就失效了
     static bool autoLaunch = true, autoClose = true, hideWindow = true;
+    // NapCat 快速登录：给了 QQ 号就按 "NapCatWinBootMain.exe <uin>" 启动（等价于 napcat.quick.bat），
+    // 否则走原来的无参启动 = 每次都要手动去控制台选登录。
+    static string napcatUin = "";
+    // 本地 STT 侧车（tools/stt-server.py）随托盘启停，省得每次手动开。
+    static bool sttAutoStart = true;
+    static Process sttProc = null;
     static int onebotPort = 3001;
     static int webuiPort = 6099;      // NapCat 网页控制台的端口（app.json 的 runtime.napcatWebui 可改）
     static int hideWatchdogTicks = 0;
@@ -48,6 +54,8 @@ static class Program
     static DateTime autoRestartWindow = DateTime.MinValue;
     static bool botWasAlive = false;
     static bool manualStop = false;
+    static DateTime lastRecoverTry = DateTime.MinValue;   // 上次尝试自愈的时间（失败要按间隔重试）
+    static bool recoveryWarned = false;                  // 自愈放弃时只提示一次
     static int napcatVisibleWindows = 0;
     // 手动"显示 NapCat 窗口"之后，这段时间内巡检不再把它藏回去（登录/扫码要能看见）
     static DateTime showWindowsUntil = DateTime.MinValue;
@@ -224,6 +232,8 @@ static class Program
         autoLaunch = JsonBool(json, "autoLaunch", true);
         autoClose = JsonBool(json, "autoClose", true);
         hideWindow = JsonBool(json, "hideWindow", true);
+        napcatUin = JsonString(json, "uin", "");
+        sttAutoStart = JsonBool(json, "sttAutoStart", true);
         string configured = JsonString(json, "launchPath", "");
         string wsUrl = JsonString(json, "wsUrl", "");
         var pm = Regex.Match(wsUrl ?? "", ":(\\d+)");
@@ -546,6 +556,7 @@ static class Program
         try
         {
             var psi = new ProcessStartInfo(napcatExe);
+            if (!string.IsNullOrEmpty(napcatUin)) { psi.Arguments = napcatUin; AppendLog("[napcat] 使用快速登录（已指定 QQ 号）"); }
             psi.WorkingDirectory = napcatDir;
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
@@ -621,15 +632,42 @@ static class Program
             }
         }
         else if (NapCatAlive()) { /* 已经在了，不重复启动 */ }
+        StartStt();
         StartBot();
     }
 
     static void StopAll()
     {
         StopBot();
+        StopStt();
         if (autoClose) StopNapCat();
     }
 
+    // 本地 STT 侧车：起之前先探 /health，已经在跑就不重复起；退出时只关自己起的那个。
+    static void StartStt()
+    {
+        if (!sttAutoStart) return;
+        if (sttProc != null && !sttProc.HasExited) return;
+        try
+        {
+            try { var wc = new System.Net.WebClient(); string h = wc.DownloadString("http://127.0.0.1:8910/health"); if (h.IndexOf("\"ok\": true") >= 0 || h.IndexOf("\"ok\":true") >= 0) { AppendLog("[stt] 已经在跑"); return; } } catch (Exception) { }
+            string script = Path.Combine(root, "tools", "stt-server.py");
+            if (!File.Exists(script)) { AppendLog("[stt] 没找到 tools/stt-server.py，跳过"); return; }
+            var psi = new ProcessStartInfo("python");
+            psi.Arguments = "\"" + script + "\"";
+            psi.WorkingDirectory = root;
+            psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.WindowStyle = ProcessWindowStyle.Hidden;
+            sttProc = Process.Start(psi);
+            AppendLog(sttProc != null ? ("[stt] 已随托盘启动 PID " + PidOf(sttProc)) : "[stt] 启动失败");
+        }
+        catch (Exception ex) { AppendLog("[stt] 启动失败：" + ex.Message); }
+    }
+    static void StopStt()
+    {
+        var p = sttProc; sttProc = null;
+        if (p == null) return;
+        try { if (!p.HasExited) { int pid = PidOf(p); Process.Start(new ProcessStartInfo("taskkill", "/PID " + pid + " /T /F") { UseShellExecute = false, CreateNoWindow = true }); AppendLog("[stt] 已关闭"); } } catch (Exception) { }
+    }
     static void StartBot()
     {
         manualStop = false;
