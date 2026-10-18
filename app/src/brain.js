@@ -243,7 +243,14 @@ export function runBrain(opts) {
     } catch (e) { return finish(null, "创建输出文件失败: " + String(e && e.message)); }
 
     try {
-      child = spawn(launch.exe, args, { windowsHide: true, stdio: stdio, env: brainEnv(o) });
+      // 【重要】别用 DeepSeek Harness.exe 起子进程：那是 Electron 启动器，
+      // 每起一次都会抢焦点/闪一下窗口（用户实测：她想事情的时候窗口会弹一下）。
+      // args 的形状是 ["--expose-internals", cliJs, "--profile", ...]，用 node 直跑完全一致，
+      // 纯控制台进程 + windowsHide 就彻底没有窗口。拿不到 cliJs 时才退回 exe。
+      const nodeExe = process.execPath;
+      const canNode = !!(launch.cliJs && fs.existsSync(launch.cliJs) && /node(\.exe)?$/i.test(nodeExe));
+      const exe = canNode ? nodeExe : launch.exe;
+      child = spawn(exe, args, { windowsHide: true, stdio: stdio, env: brainEnv(o) });
     } catch (e) { return finish(null, "spawn 失败: " + String(e && e.message)); }
 
     if (mode === "pipe") {
