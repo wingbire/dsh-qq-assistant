@@ -554,6 +554,23 @@ t("配置合并：表单提交的字符串会按字段表扳回类型（踩过 b
   eq(m5.runtime.voice.enabled, false, "原值 false 时空串也保持 false");
 });
 
+t("runtime: 大脑输出空串 = 她选择不说，不能记成一次发送（实测踩过）", async function () {
+  const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function () { return { ok: true, text: "   ", usage: { totalTokens: 10 } }; },
+    send: function (gid, t) { sent.push(t); }, sendImage: function () {},
+    now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "随便说点什么", now: t0 });
+  await rt.tick(t0 + 500);
+  eq(sent.length, 0, "空回复不能发到群里（一次也不行）");
+});
+
+
 t("gatescore: 搜索闸门（闲聊不搜 / 真有信息需求才搜 / 用户让搜必搜）", function () {
   eq(searchPlan("low", ["原神"], {}).search, 0, "低档永远不搜");
   eq(searchPlan("mid", ["无敌了"], {}).search, 0, "闲聊、吐槽 → 不搜（原来这里会搜）");

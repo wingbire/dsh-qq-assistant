@@ -793,6 +793,16 @@ export function createRuntime(deps) {
         return { gid: batch.gid, action: "brain_error", error: err, fallback: fallback };
       }
       text = r.text || "";
+      // 【空回复】模型有权选择不说（人设里就有「没话说就安静看着」）。这是合法选择、不是错误。
+      // 以前它会一路走到发送流程：记成 sent、算一次回复，但群里一个字都没有 ——
+      // 用户实测「判定写了 brain、花了 15817 token，群里却什么都没看到」就是这个。
+      if (!String(text).trim()) {
+        stats.brainSilent = (stats.brainSilent || 0) + 1;
+        observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "模型选择不发言（输出为空）" });
+        uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
+          { note: "她选择不说（模型输出为空）" });
+        return { gid: batch.gid, action: "brain_silent" };
+      }
       const soft = softFlags(text);
       if (soft.length) observe({ kind: "reply_tone", gid: batch.gid, uid: batch.uid, flags: soft, text: String(text).slice(0, 60) });
     } else {
