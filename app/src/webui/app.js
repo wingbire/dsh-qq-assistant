@@ -305,10 +305,18 @@
   /* ---------- 状态页 ---------- */
   function stageText(st) {
     if (!st) return "未知";
-    if (st.forced) return st.stage === "observe" ? "强制观察" : "强制实际发送";
+    // forced = 全局开关压过了按群阶段机（「调整 → 开口阶段」选了 live/observe）。
+    // 以前这里写"强制实际发送"，像在说传输层的事，容易看不懂；现在直接说清楚是哪一档、为什么。
+    if (st.forced) {
+      return st.stage === "observe" ? "只观察（全局强制：不发言）" : "全自动（全局强制：跳过观察与半自动）";
+    }
     var m = { observe: "观察中", semi: "半自动", full: "全自动" };
     var t = m[st.stage] || st.stage;
     if (st.stage === "observe") t += "（已收 " + (st.observed || 0) + " 条）";
+    if (st.stage === "semi" && st.semiUntil) {
+      var d = new Date(st.semiUntil);
+      t += "（" + (d.getMonth() + 1) + "-" + d.getDate() + " 转全自动）";
+    }
     return t;
   }
 
