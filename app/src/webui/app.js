@@ -34,7 +34,7 @@
     { name: "开口阶段", desc: "新群先只观察不发言，攒够条数转半自动，再转全自动", keys: [
       "runtime.stageMode", "runtime.observeUntilMessages", "runtime.semiAutoDays"] },
     { name: "节流与合并", desc: "同一个人连着发几条算一轮、回复最多拆几条、主动搭话多频", keys: [
-      "runtime.coalesceWindowMs", "runtime.coalesceMaxBatch", "runtime.maxSegments", "autojoin.rate", "autojoin.minGapSec"] },
+      "runtime.coalesceWindowMs", "runtime.coalesceMaxBatch", "runtime.maxSegments", "autojoin.rate", "autojoin.minGapSec", "autojoin.requireInterest"] },
     { name: "预算与熔断", desc: "每天最多花多少 token；超 80% 关主动，超 100% 只回被点名的", keys: [
       "runtime.budget.dailyTokens", "runtime.budget.groupHourlyLimit"] },
     { name: "搜索", desc: "先选「谁去搜」：本机直搜＝程序自己调免费引擎（零模型调用、快）；DSH 独立调用＝让模型去搜（更懂页面但更慢更贵）。下面再选用哪家引擎（只在本机直搜下生效）", keys: [

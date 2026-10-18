@@ -5,7 +5,7 @@ export const PROACTIVE_DEFAULTS = {
   rate: 0.25,
   minGapSec: 120,
   maxPerHour: 6,
-  requireInterest: true,
+  requireInterest: false,   // 【放开】默认不要求命中兴趣：她想接什么话题由自己判断，频率仍由 rate/minGap/maxPerHour 管
   tier: "low",
   maxChars: 20,
   cooldownAfterBotReplySec: 60
@@ -45,7 +45,7 @@ export function createProactive(opts) {
 
     return {
       speak: true, tier: cfg.tier, maxChars: cfg.maxChars, gid: s.gid,
-      reason: "兴趣命中：" + hit.join("、"),
+      reason: hit.length ? ("兴趣命中：" + hit.join("、")) : "自由搭话（没命中兴趣）",
       keywords: hit.concat(cls.keywords).slice(0, 5),
       bucket: cls.buckets[0] || "general"
     };

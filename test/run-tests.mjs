@@ -265,9 +265,9 @@ t("人设：许可在前、禁令收敛（机制上防止规则把角色限死�
   ok(bans <= 10, "硬禁令要收敛（现在 " + bans + " 处）——堆多了输出会变合规腔");
   ok(cans >= 8, "许可要多于禁令（可以 " + cans + " 处 vs 禁令 " + bans + " 处）");
   ok(t.indexOf("【我可以】") >= 0, "要有许可清单");
-  ok(t.indexOf("【语气样板】") >= 0, "要有正例示范（照样例说比遵守规则自然）");
+  ok(t.indexOf("【你的态度】") >= 0, "要有正面的态度引导（不用句型库：实测句子会被照抄）");
   ok(t.indexOf("宁可像个活人说错一句话") >= 0, "要有总原则兜底");
-  const never = t.slice(t.indexOf("【绝不】"), t.indexOf("【语气样板】")).split(String.fromCharCode(10))
+  const never = t.slice(t.indexOf("【绝不】"), t.indexOf("【你的态度】")).split(String.fromCharCode(10))
     .filter(function (x) { return x.trim().indexOf("- ") === 0; });
   ok(never.length <= 4, "【绝不】最多 4 条，现在 " + never.length + " 条");
 });
@@ -392,7 +392,7 @@ t("衔接性：人设的能力声明跟着配置开关走", function () {
   ok(t1.indexOf("【语音】") >= 0, "语音开着 → 人设要写【语音】");
   ok(t1.indexOf("【表情包】") >= 0 && t1.indexOf("【立绘（图片）】") >= 0 && t1.indexOf("【画图】") >= 0, "表达层开关开着 → 人设要写对应块");
   ok(t1.indexOf("【引用回复】") >= 0, "引用回复块在");
-  ok(t1.indexOf("【我可以】") >= 0 && t1.indexOf("【绝不】") >= 0 && t1.indexOf("【语气样板】") >= 0, "陪伴三段结构在");
+  ok(t1.indexOf("【我可以】") >= 0 && t1.indexOf("【绝不】") >= 0 && t1.indexOf("【你的态度】") >= 0, "陪伴三段结构在（许可 / 底线 / 态度）");
 
   const off = JSON.parse(JSON.stringify(on));
   off.runtime.vision = { enabled: false, mode: "off" };
@@ -587,9 +587,11 @@ t("score: reward 随成本下降", function () {
   ok(hi < lo, "成本高的 reward 应更低");
 });
 
-t("proactive: 未命中兴趣不插话", function () {
+t("proactive: 默认不要求命中兴趣（可以自由搭话，频率另有硬闸）", function () {
   const p = createProactive({ rng: function () { return 0; }, config: { rate: 1 } });
-  eq(p.consider({ text: "今天天气不错", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, false);
+  eq(p.consider({ text: "今天天气不错", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, true, "没命中兴趣也能搭话（默认放开）");
+  const p2 = createProactive({ rng: function () { return 0; }, config: { rate: 1, requireInterest: true } });
+  eq(p2.consider({ text: "今天天气不错", now: 1000000, uid: "u1" }, { action: "ignore" }, { interests: ["开黑"] }).speak, false, "开了 requireInterest 就只在兴趣话题上搭话");
 });
 t("proactive: 兴趣命中 + 概率过 → 插话", function () {
   const p = createProactive({ rng: function () { return 0; }, config: { rate: 1 } });
@@ -2603,7 +2605,7 @@ t("gates: 被点名 / 要求展开一律进大脑（本地短句已删）", asyn
   // 点名但只是打招呼：走"应答型"本地短答（零成本、口气对），不再为一句"在吗"调模型
   const hi = await g.decide(Object.assign({}, base, { text: "小肥鱼，打个招呼" }), {});
   eq(hi.action, "brain", "点名寒暄 → 也进大脑（带上下文，不再本地拼短句）");
-  eq(hi.tier, "low");
+  eq(hi.tier, "mid", "寒暄不再被压成低档（档位交给大脑）");
 
   const at = await g.decide(Object.assign({}, base, { text: "这个报错的原因是什么", atBot: true }), {});
   eq(at.action, "brain", "@ 到它、问的是真事 → 进大脑");
@@ -2639,7 +2641,7 @@ t("gates: 外审三档分别落到「不回 / 进大脑短收 / 认真回」", a
   d = await createGates({ auditFn: async function () { return { verdict: "short" }; } }).decide(Object.assign({}, base), {});
   eq(d.audit, "short");
   eq(d.action, "brain", "外审说一句短的够了 → 仍进大脑，只是字数上限低");
-  eq(d.tier, "low");
+  ok(d.tier !== "low", "外审说短也不再压档（长度交给大脑）");
 
   d = await createGates({ auditFn: async function () { return { verdict: "yes" }; } }).decide(Object.assign({}, base), {});
   eq(d.audit, "yes");

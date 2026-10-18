@@ -202,15 +202,12 @@ export function createGates(opts) {
       // 情绪宣泄（他妈的…又崩了）：没点名、也没问号 → 给一句短答，不送大脑
       const vent = !addressed && !/[?？]/.test(text) && /他妈|特么|妈的|卧槽|靠|服了|醉了|绝了|气死/.test(text);
       const greetingOnly = (!detailAsk && isGreeting(text) && !substance) || bareName;
-      if (tierInfo.tier !== "low") {
-        if (addressed && greetingOnly) {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "点名但只是寒暄 → 进大脑但要求一句话收尾" };
-        } else if (!addressed && vent) {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "情绪宣泄、没点名 → 进大脑但要求一句话收尾" };
-        } else if (!addressed && !semanticReason) {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "没点名、也没有求详/提问 → 只给本地短答" };
-        }
-      }
+      // 【放开】下面三条以前会把「寒暄 / 情绪宣泄 / 没点名无求详」压成低档（30 字）——
+      // 那是"怎么说话"的判断，不属于"该不该开口"，会把她的性格限死。
+      // 现在只写进依据，档位和口吻交给大脑；是否开口仍由 verdict（本地判否 + 外审否决）决定。
+      if (addressed && greetingOnly) reason.push("寒暄（档位不再压成低档）");
+      else if (!addressed && vent) reason.push("情绪宣泄（档位不再压成低档）");
+      else if (!addressed && !semanticReason) reason.push("没点名也没求详（档位交给大脑）");
       plan = searchPlan(tierInfo.tier, cls.keywords, {
         questionWord: !!cls.isQuestion, detailAsk: !!detailAsk, fresh: !!cls.isFresh,
         hasUrl: !!cls.hasUrl, explicitSearch: !!cls.explicitSearch
@@ -252,7 +249,8 @@ export function createGates(opts) {
           verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };
         } else if (auditRes.verdict === "short") {
-          tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审：一句短的够了 → 仍进大脑，字数上限低" };
+          // 外审只保留"否"的否决权；"短"不再强制压字数 —— 长短由大脑按语境决定（判定不该管口吻）。
+          reason.push("外审：觉得一句就够（长度交给大脑）");
         } else if (auditRes.verdict === "yes") {
           // 配置明确说"这种只给短句"时，外审的"该认真回"不该把政策抬掉（外审仍能说"否"）
           const capped = rescued && rescueAsk === "短句";
