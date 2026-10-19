@@ -4,6 +4,7 @@ import { createAddressee } from "./addressee.js";
 import { isGreeting } from "./localreply.js";
 import { utilityScore, UTILITY_WEIGHTS, TIERS, gateFactor, clamp01 } from "./utility.js";
 import { valve, depthTier, searchPlan, clampBounds, DEFAULT_BOUNDS } from "./gatescore.js";
+import { features as probFeatures, pLocal as probLocal } from "./probability.js";
 import { bucketOf } from "./bandit.js";
 import { audit } from "./audit.js";
 
@@ -48,6 +49,8 @@ export function createGates(opts) {
   const blockInjected = o.blockInjected !== false;         // 疑似注入指令：直接不回（默认开）
   // 外审复核：scope = 只审高档 / 高档+复核救回（默认）/ 灰区也审
   const auditFn = (typeof o.auditFn === "function") ? o.auditFn : audit;   // 注入点：测试用，避免动全局通道
+  // 开口概率模型的权重（由 tools/calibrate.mjs 用用户标注拟合）。没有就回退旧的 j.conf 算法。
+  const probWeights = o.probWeights || null;
   const auditCfg = o.audit || {};
   // 默认「灰区也审」：灰区（本地拿不准）本来就该复核"是否进大脑"，这是用户的诉求
   const auditScope = String(auditCfg.scope || "灰区也审");
@@ -116,7 +119,8 @@ export function createGates(opts) {
     if (detailAsk) cls.topicDepth = Math.max(cls.topicDepth, 2);
     const bucket = bucketOf(cls.buckets);
 
-    let pSay = j.conf;
+    // 【算法】用标定过的概率模型算开口概率：p = sigmoid(Σ 特征×权重)。没有权重时回退旧算法。
+    let pSay = probWeights ? probLocal(probFeatures({ text: text, botNames: evt.botNames || [], nicknames: nicknames, atBot: evt.atBot, replyToBot: evt.replyToBot, twoPersonDialog: evt.twoPersonDialog }), probWeights) : j.conf;
     if (injected) pSay = pSay * 0.5;
 
     const v0 = valve(pSay, bounds);
@@ -263,7 +267,10 @@ export function createGates(opts) {
             reason.push(detail + " → 沿用本地判断");
           }
         } else if (auditRes.verdict === "no") {
-          verdict = "no";                                            // 外审说"不值得回" → 真的不回（原来只压成短句）
+          // 外审说「不值得回」→ 不回。
+          // 注：试过改成「两层打分融合」（本地强就把外审的否降级为存疑），但实测反而让她更多插话 ——
+          // 本地模型的证据还不够强，配不上否决外审。等上下文特征 + 更多标注把本地模型练出来再说。
+          verdict = "no";
           tierInfo = { tier: "low", maxChars: mcOf(0), reason: "外审判否 → 不回" };
         } else if (auditRes.verdict === "short") {
           // 外审只保留"否"的否决权；"短"不再强制压字数 —— 长短由大脑按语境决定（判定不该管口吻）。

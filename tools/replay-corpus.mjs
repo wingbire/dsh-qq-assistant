@@ -14,7 +14,12 @@ if (!items.length) {
   process.exit(0);
 }
 
+let probWeights = null;
+let calibThreshold = null;
+try { const cal = JSON.parse(fs.readFileSync(path.join(dataDir, "calibration.json"), "utf8")); probWeights = cal.weights; calibThreshold = Number(cal.threshold) || null; } catch (e) { }
 const gates = createGates({
+  probWeights: probWeights,
+  bounds: calibThreshold ? { lo: calibThreshold, hi: Math.min(0.92, calibThreshold + 0.2) } : undefined,
   auditFn: async function (text, ctx) {
     const item = items.find(function (i) { return i.text === text; });
     const v = (item && item.audit) || "short";
