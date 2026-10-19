@@ -669,7 +669,10 @@ export function createRuntime(deps) {
     // 合并判定是"对整批再判一次"，而外审对同一句话并不稳定（同一段文字可能这次 short、下次 no）。
     // 不能让它把**逐条**已经判过"该回"的结果推翻 —— 用户看到的"她明明想回却没回"就是这个：
     // 09:18 「给小肥鱼的性格又调整了一下」逐条判了 brain（外审 short），整批再判外审给了 no，于是整批被丢掉。
-    const saidReply = decisions.some(function (d) { return d && d.action === "brain"; });
+    // 【限定】只对**真的合并了多条**的批次做覆盖。单条消息的「再判一次」判的是同一段文字，
+    // 结论不同只是外审不稳定，这时应当以这一次为准 —— 否则每条被逐条放行的都会强行回话
+    // （用户实测：18:05「晚上啥时候」是别人之间的问答，却被覆盖成要回，她插了一句）。
+    const saidReply = batch.count > 1 && decisions.some(function (d) { return d && d.action === "brain"; });
     if (saidReply && mergedDec.action === "ignore") {
       const strong = decisions.filter(function (d) { return d && d.action === "brain"; }).slice(-1)[0];
       if (strong) {
