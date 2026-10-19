@@ -1,7 +1,7 @@
 import { classify, CLASSIFY_TABLE, extractKeywords, searchableKeywords } from "../app/src/classify.js";
 import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
-import { labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
+import { loadCorpus, labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
@@ -571,7 +571,7 @@ t("runtime: 没人点她时大脑空输出＝安静看着（不发）", async fu
   eq(sent.length, 0, "没人点她、她也没话 → 安静看着，不发");
 });
 
-t("runtime: 被点名时大脑空输出 → 催一次让大脑结合上文再说；仍空就真不说（不本地兜底）", async function () {
+t("runtime: 大脑输出空 → 这次不说（只调一次，不催第二次、不本地兜底）", async function () {
   const sent = [];
   let calls = 0;
   const rt = createRuntime({
@@ -585,7 +585,7 @@ t("runtime: 被点名时大脑空输出 → 催一次让大脑结合上文再说
   const t0 = Date.now();
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "戳戳小肥鱼", now: t0, atBot: true });
   await rt.tick(t0 + 500);
-  ok(calls >= 2, "空回复要先催一次（实际调用 " + calls + " 次）");
+  eq(calls, 1, "只调一次大脑，不再催第二次（催第二次就是逼她凑话）");
   eq(sent.length, 0, "催完还空 → 真的不说，不用本地短句兜底");
 });
 
@@ -1705,10 +1705,9 @@ t("runtime: 合并判定不再重复 learn（修 IDF 学两次）", async functi
   await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "一", now: 0 });
   await rt.onEvent({ gid: "A", uid: "u1", speaker: "甲", text: "二", now: 10 });
   await rt.tick(200);
-  eq(calls.length, 3, "两条逐条判定 + 一次合并判定");
+  eq(calls.length, 2, "两条逐条判定即可，整批不再重判（单一判定点）");
   eq(calls[0], false);
   eq(calls[1], false);
-  eq(calls[2], true, "合并判定必须 learn:false");
 });
 
 t("runtime: 群档案块进 prompt，且仍在上下文之前", async function () {
@@ -3690,6 +3689,26 @@ t("corpus: 重新拉取时，已标注的条目按「原文+时间」保留", fu
 t("corpus: 从判定依据里抠外审结论", function () {
   eq(auditFromReason(["深度分档：U < 多讲线", "外审（灰区也审）：short"]), "short");
   eq(auditFromReason(["本地判否 → 不回复、不进大脑"]), "");
+});
+t("corpus: 真实语料回放不低于基线（有本地语料时才跑）", async function () {
+  const file = path.resolve("app/dsh-data/data/data/corpus.json");
+  if (!fs.existsSync(file)) { ok(true, "没有本地语料，跳过"); return; }
+  const items = loadCorpus(file).filter(function (i) { return i && i.expect; });
+  if (!items.length) { ok(true, "语料还没标注，跳过"); return; }
+  const g = createGates({
+    auditFn: async function (text) {
+      const hit = items.find(function (i) { return i.text === text; });
+      return { verdict: (hit && hit.audit) || "short", channel: "stub" };
+    },
+    audit: { scope: "灰区也审", noAudit: "边界或提问", maxPerHour: 999, timeoutMs: 1000, onTimeout: "降档" }
+  });
+  let hitN = 0;
+  for (const it of items) {
+    const d = await g.decide({ gid: "T", uid: "u1", speaker: it.speaker || "", text: it.text, now: new Date(it.at).getTime() || 0, atBot: !!it.atBot, replyToBot: !!it.replyToBot, botNames: ["小肥鱼"], nicknames: ["肥鱼"], recentBotMention: true }, {});
+    if ((d.action === "brain") === (it.expect !== "该不回")) hitN += 1;
+  }
+  const rate = hitN / items.length;
+  ok(rate >= 0.6, "符合率 " + hitN + "/" + items.length + "（" + Math.round(rate * 100) + "%）不应低于 60% —— 低了就是判定的严重回归");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

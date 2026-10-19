@@ -60,6 +60,8 @@ export function fromDecisions(decisions, prev, limit) {
       speaker: d.speaker || "",
       text: d.text,
       decided: d.action || "",
+      atBot: !!d.atBot,
+      replyToBot: !!d.replyToBot,
       reason: Array.isArray(d.reason) ? d.reason : [],
       audit: auditFromReason(d.reason),
       expect: old ? (old.expect || "") : ""

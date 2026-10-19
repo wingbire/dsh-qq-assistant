@@ -5,7 +5,7 @@ import path from "node:path";
 import { createGates } from "../app/src/gates.js";
 import { loadCorpus, corpusFile, corpusStats } from "../app/src/corpus.js";
 
-const dataDir = path.resolve(process.argv[2] || "app/dsh-data");
+const dataDir = path.resolve(process.argv[2] || "app/dsh-data/data/data");   // 语料与标注都在 数据/数据 下（store.paths.labels 的同级）
 const file = corpusFile(dataDir);
 const items = loadCorpus(file).filter(function (i) { return i && i.expect; });
 const st = corpusStats(loadCorpus(file));
@@ -28,7 +28,7 @@ const bad = [];
 for (const it of items) {
   const evt = {
     gid: "CORPUS", uid: "u1", speaker: it.speaker || "", text: it.text,
-    now: new Date(it.at).getTime() || 0, botNames: ["小肥鱼"], nicknames: ["肥鱼", "鲸鲸"],
+    now: new Date(it.at).getTime() || 0, atBot: !!it.atBot, replyToBot: !!it.replyToBot, botNames: ["小肥鱼"], nicknames: ["肥鱼", "鲸鲸"],
     recentBotMention: true
   };
   const d = await gates.decide(evt, {});

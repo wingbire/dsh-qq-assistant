@@ -683,25 +683,13 @@ export function createRuntime(deps) {
       atBot: !!batch.atBot, replyToBot: !!batch.replyToBot,
       now: batch.lastAt, mergedCount: batch.count
     });
-    // learn:false —— 逐条判定时已经学过一遍，合并判定不能再学（修 IDF 学两次）
-    const mergedDec = Object.assign({}, await bot.handleEvent(mergedEvt, { learn: false }), { evt: mergedEvt });
-    // 合并判定是"对整批再判一次"，而外审对同一句话并不稳定（同一段文字可能这次 short、下次 no）。
-    // 不能让它把**逐条**已经判过"该回"的结果推翻 —— 用户看到的"她明明想回却没回"就是这个：
-    // 09:18 「给小肥鱼的性格又调整了一下」逐条判了 brain（外审 short），整批再判外审给了 no，于是整批被丢掉。
-    // 【限定】只对**真的合并了多条**的批次做覆盖。单条消息的「再判一次」判的是同一段文字，
-    // 结论不同只是外审不稳定，这时应当以这一次为准 —— 否则每条被逐条放行的都会强行回话
-    // （用户实测：18:05「晚上啥时候」是别人之间的问答，却被覆盖成要回，她插了一句）。
-    const saidReply = batch.count > 1 && decisions.some(function (d) { return d && d.action === "brain"; });
-    if (saidReply && mergedDec.action === "ignore") {
-      const strong = decisions.filter(function (d) { return d && d.action === "brain"; }).slice(-1)[0];
-      if (strong) {
-        mergedDec.action = strong.action;
-        mergedDec.verdict = strong.verdict;
-        mergedDec.tier = strong.tier;
-        mergedDec.reason = (mergedDec.reason || []).concat(["合并判定被逐条判定覆盖：这批里至少有一条要回"]);
-        observe({ kind: "merge_override", gid: batch.gid, merged: batch.count, verdict: strong.verdict });
-      }
-    }
+    // 【单一判定点】整批不再"再判一次"。以前一条消息会有三个结论互相打架（逐条 / 合并 / 覆盖），
+    // 每次修一处就动到另一处的平衡。现在只保留一条合成规则：这批里只要有一条判「回」，
+    // 就按**最近那条要回**的判定来；全都不回才不回。合并后的文本只作为**大脑的输入**（她看到完整一串），
+    // 不再参与"该不该回"的判定。
+    const replyOnes = decisions.filter(function (d) { return d && d.action === "brain"; });
+    const picked = replyOnes.length ? replyOnes[replyOnes.length - 1] : decisions[decisions.length - 1];
+    const mergedDec = Object.assign({}, picked || {}, { evt: mergedEvt, mergedFrom: decisions.length });
     const anchor = pickAnchor(decisions);
     const dec = mergedDec;
     // 降温标记要带到合并判定上 —— 大脑用的是 mergedDec（合并后重新判），不是逐条那个 dec
@@ -844,33 +832,14 @@ export function createRuntime(deps) {
       // 【空回复】模型可以选择不说 —— 但**被点名/被搭话时不该一声不吭**。
       // 处理方式只用大脑：催一次（明确要求结合上文回一句），还空就**真的不说话**。
       // 刻意不做本地短句兜底 —— 那会让她把"沉默"换成"嗯嗯啊啊"，等于用偷懒换另一种偷懒。
-      const aimedAtHer = !!(evt.atBot || evt.atAll || evt.replyId || dec.addressed === true || dec.verdict === "yes");
-      if (!String(text).trim() && aimedAtHer) {
+      // 【一次调用，一个结论】大脑只调一次。它输出空就是「这次不说」，不再催第二次
+      // （催第二次 = 让她为了凑话而凑话，用户明确不要）；
+      // 也不再拿本地句子兜底（那会把「沉默」换成「嗯嗯啊啊」）。
+      if (!String(text).trim()) {
         stats.brainSilent = (stats.brainSilent || 0) + 1;
-        const r2 = await askBrain({
-          promptText: prompt + String.fromCharCode(10, 10) +
-            "【对方在直接跟你说】上面那句是在跟你说话（点你名字或 @ 你）。" +
-            "结合上文的聊天内容，用你自己的口气回一句（可以接话、可以反问、可以吐槽），不要说不知道说什么。",
-          tier: dec.tier, decision: dec, evt: evt
-        });
-        if (r2 && r2.ok && String(r2.text || "").trim()) {
-          text = r2.text;
-          if (r2.usage) { const t2 = Number(r2.usage.totalTokens) || 0; budget.record(t2, at); stats.tokens += t2; usage = r2.usage; }
-          observe({ kind: "brain_retry", gid: batch.gid, uid: batch.uid, tier: dec.tier, ok: true, text: String(text).slice(0, 60) });
-        } else {
-          // 催了还是空 → 那就真的不说。不用本地短句兜底（否则"沉默"会退化成"嗯嗯啊啊"）。
-          // 记一笔便于事后核对：这次是被点名了、但模型两轮都没话。
-          observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "被点名但两轮都输出为空 → 不发言（不用本地兜底）" });
-          uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
-            { note: "被点名但她两轮都没话说（未用本地兜底）" });
-          return { gid: batch.gid, action: "brain_silent" };
-        }
-      } else if (!String(text).trim()) {
-        // 没人点她、她也没话 → 安静看着是合法的，只记一笔
-        stats.brainSilent = (stats.brainSilent || 0) + 1;
-        observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "模型选择不发言（输出为空，且不是对她在说）" });
+        observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "大脑输出为空 → 这次不说" });
         uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
-          { note: "她选择不说（不是对她在说）" });
+          { note: "她这次没说（大脑输出为空）" });
         return { gid: batch.gid, action: "brain_silent" };
       }
       const soft = softFlags(text);
