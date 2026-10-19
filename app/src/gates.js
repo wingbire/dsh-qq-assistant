@@ -224,7 +224,7 @@ export function createGates(opts) {
         || (auditGrey && verdict === "grey" && tierInfo.tier === "mid")) && auditAllow(evt.now);
       if (needAudit) {
         auditTimes.push(evt.now == null ? nowFn() : evt.now);
-        auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames });
+        auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames, recentMention: evt.recentBotMention === true });
         reason.push("外审（" + auditScope + "）：" + auditRes.verdict);
         if (auditRes.error) {
           // 外审坏了（超时/认证失败/通道不通）。这里要区分「这次是不是为了问外审才被补救上来的」：

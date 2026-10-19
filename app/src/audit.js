@@ -58,7 +58,13 @@ export function createAuditor(opts) {
     // 小助手的名字必须告诉外审员，否则「小肥鱼 这个报错怎么解」会被误判成没在叫人
     const names = ((ctx && ctx.botNames) || []).concat((ctx && ctx.nicknames) || []).filter(Boolean).slice(0, 6);
     const head = names.length ? "【小助手在这里叫】" + names.join("、") + String.fromCharCode(10) : "";
-    const promptText = head + "【待审消息】" + String.fromCharCode(10) + String(text || "").slice(0, 300);
+    // 指代对象提示：外审只看到单条消息，判断不了「她」指的是谁 —— 由运行时代为提供锚点。
+    // 注意措辞仍然是否定式的：有锚点也可能是在说别人（另一个女生/主播/角色），让外审自己分辨。
+    const hint = (ctx && ctx.recentMention)
+      ? "【上下文提示，仅供参考】最近几条里出现过小助手（有人叫过她，或她刚发过言）。" +
+        "自己判断这句是不是冲着她来的 —— 群里也可能正在聊别的女生、主播或角色。" + String.fromCharCode(10)
+      : "";
+    const promptText = head + hint + "【待审消息】" + String.fromCharCode(10) + String(text || "").slice(0, 300);
     let r = null;
     try { r = await runner({ promptText: promptText, profile: AUDIT_PROFILE_ID, personaText: rubric, timeoutMs: timeoutMs }); }
     catch (e) { r = { ok: false, error: String(e && e.message) }; }

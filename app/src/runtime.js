@@ -604,6 +604,18 @@ export function createRuntime(deps) {
             : base + " [语音转写：" + tr.text + "]";
         }
       }
+      // 「她」的指代锚点：最近几条里出现过小助手（有人叫她名字，或她自己刚发过言）→ 给外审一个提示。
+      // 只是提示、不是结论：外审仍要自己分辨是不是在说别人（另一个女生/主播/角色）。
+      try {
+        const hk2 = String(evt.gid);
+        const hArr2 = (history.get(hk2) || []).slice(-4);
+        const hNames = (evt.botNames || []).filter(Boolean);
+        evt.recentBotMention = hArr2.some(function (h) {
+          if (h.bot) return true;
+          const ht = String(h.text || "");
+          return hNames.some(function (n) { return n && ht.indexOf(n) >= 0; });
+        });
+      } catch (e2) { }
       const dec = await bot.handleEvent(evt);
       // 话题降温：这一条是不是"同一个话题今晚第 N 次"（她已经回过 ≥2 次了）
       const cool = coolingNow(evt.gid, evt.text);
@@ -654,6 +666,20 @@ export function createRuntime(deps) {
     });
     // learn:false —— 逐条判定时已经学过一遍，合并判定不能再学（修 IDF 学两次）
     const mergedDec = Object.assign({}, await bot.handleEvent(mergedEvt, { learn: false }), { evt: mergedEvt });
+    // 合并判定是"对整批再判一次"，而外审对同一句话并不稳定（同一段文字可能这次 short、下次 no）。
+    // 不能让它把**逐条**已经判过"该回"的结果推翻 —— 用户看到的"她明明想回却没回"就是这个：
+    // 09:18 「给小肥鱼的性格又调整了一下」逐条判了 brain（外审 short），整批再判外审给了 no，于是整批被丢掉。
+    const saidReply = decisions.some(function (d) { return d && d.action === "brain"; });
+    if (saidReply && mergedDec.action === "ignore") {
+      const strong = decisions.filter(function (d) { return d && d.action === "brain"; }).slice(-1)[0];
+      if (strong) {
+        mergedDec.action = strong.action;
+        mergedDec.verdict = strong.verdict;
+        mergedDec.tier = strong.tier;
+        mergedDec.reason = (mergedDec.reason || []).concat(["合并判定被逐条判定覆盖：这批里至少有一条要回"]);
+        observe({ kind: "merge_override", gid: batch.gid, merged: batch.count, verdict: strong.verdict });
+      }
+    }
     const anchor = pickAnchor(decisions);
     const dec = mergedDec;
     // 降温标记要带到合并判定上 —— 大脑用的是 mergedDec（合并后重新判），不是逐条那个 dec
