@@ -93,22 +93,7 @@ export function createBudget(opts) {
     arr.push(t); burstSends.set(g, arr); return arr.length;
   }
 
-  function groupAllow(gid, nowMs) {
-    if (!lim.groupHourlyLimit) return true;              // N23：默认关闭
-    const hk = hourKeyOf(nowMs == null ? nowFn() : nowMs);
-    const cur = groupCounters.get(String(gid));
-    if (!cur || cur.hk !== hk) { groupCounters.set(String(gid), { hk: hk, n: 0 }); return true; }
-    return cur.n < lim.groupHourlyLimit;
-  }
 
-  function countGroup(gid, nowMs) {
-    if (!lim.groupHourlyLimit) return 0;
-    const hk = hourKeyOf(nowMs == null ? nowFn() : nowMs);
-    const cur = groupCounters.get(String(gid));
-    if (!cur || cur.hk !== hk) { groupCounters.set(String(gid), { hk: hk, n: 1 }); return 1; }
-    cur.n += 1;
-    return cur.n;
-  }
 
   function load(file) {
     if (!file) return false;
@@ -136,7 +121,6 @@ export function createBudget(opts) {
   return {
     limits: lim, record: record, ratio: ratio, mode: mode,
     allowProactive: allowProactive, allowReply: allowReply, countBurst: countBurst,
-    groupAllow: groupAllow, countGroup: countGroup,
     status: status, load: load, save: save, flush: flush, file: file
   };
 }

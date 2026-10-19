@@ -82,17 +82,8 @@ export function createGates(opts) {
   }
 
   async function decide(evt, ctx) {
-    // 【两人对话硬闸·收窄版】别人在一来一往、她没在局里 → 不插嘴。
-    // 放行条件（任一）：点她名字 / @她 / 回复她 / 面向全群的问题（你们·大家·有人·谁·各位·在吗）。
-    if (evt && evt.twoPersonDialog) {
-      const tx0 = String(evt.text || "");
-      const nm0 = (evt.botNames || []).concat(evt.nicknames || []).filter(Boolean).some(function (x) { return tx0.indexOf(x) >= 0; });
-      const groupAsk = /你们|大家|有人|哪位|谁(知道|会|有|在)|各位|在吗|有没有人/.test(tx0);
-      const aimed0 = !!(evt.atBot || evt.atAll || evt.replyToBot || evt.replyId || nm0 || groupAsk);
-      if (!aimed0) {
-        return { action: "ignore", verdict: "no", pSay: 0, U: 0, tier: "low", maxChars: 20, reason: ["两人在对话，不插嘴"], bucket: "chat", search: 0, keywords: [], injected: false };
-      }
-    }
+    // 两人对话不再单独掐断：twoPerson 已经是概率模型的一个特征（权重 -1.6），
+    // 该不该说交给算法 + 带上下文的外审判断，而不是在这里直接 return。
     const context = ctx || {};
     const raw = evt.text || "";
     const text = maskUntrusted(raw);
@@ -167,11 +158,7 @@ export function createGates(opts) {
     else if (injected) reason.push("文本里有疑似指令的措辞，但这条是冲她说的 → 交外审/大脑自行处理");
     // 灌水拦截：单字符 / 纯标点（"?"、"。"、"哈"）不值得回 —— rubric 第 3 条
     const stripped = String(text || "").replace(/[\s\p{P}\p{S}]/gu, "");
-    // 重复同一字符（"哈哈哈哈哈哈"）也是灌水：以前只拦单字符，导致"纯笑声"会被算成边界判否、再被外审放进大脑
-    // 同样是「一刀切」的老问题：只删单字符，会把她被点名后的一句「？」「哈哈」也判死。
-    // 点她名字/@她 时不按灌水处理（她要回的是那句短话本身）。
-    if ((stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) && hard.strength <= 0) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
-    else if (stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) reason.push("看着像灌水，但这条是冲她说的 → 不按灌水拦");
+    if ((stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) && hard.strength <= 0) reason.push("像灌水（单字符/重复字），交给算法判断");
 
     const sem = signalOf(j.signals, "idfOverlapToMyWords").v;
     const cont = signalOf(j.signals, "continuation").v;
