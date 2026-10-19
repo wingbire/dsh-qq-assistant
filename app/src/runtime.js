@@ -861,6 +861,18 @@ export function createRuntime(deps) {
       uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); }, { quote: !!useQuoteReply });
     }
     if (sent.length) budget.countGroup(evt.gid, at);            // 记一次"这个群这一小时发过了"
+    if (sent.length) {
+      // 把她自己发出去的话也记进上下文，并标成「你（小肥鱼）」。
+      // 以前她的回复不进上下文 → 她既不知道自己刚说了什么，也分不清别人嘴里那个「她」就是自己
+      // （用户实测：「她选择不说；看来今天有点小情绪」明明在说她，她却当成第三个人）。
+      const hk = String(evt.gid);
+      const hArr = history.get(hk) || [];
+      const self = (evt.botNames && evt.botNames[0]) || "小肥鱼";
+      hArr.push({ speaker: "你（" + self + "）", text: sent.join(" / "), at: at, bot: true });
+      const hCap = Math.max(0, rc.contextWindow != null ? rc.contextWindow : 10);
+      while (hCap && hArr.length > hCap) hArr.shift();
+      history.set(hk, hArr);
+    }
     // N18：语音（默认关闭）—— 有标记才念，念不出来不影响正文
     let voiceInfo = null;
     if (voiced.voice) {
