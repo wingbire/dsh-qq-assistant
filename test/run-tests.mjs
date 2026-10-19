@@ -218,8 +218,8 @@ t("runtime: 引用回复——她指向别人的某条才用（@她 不算）", 
 });
 
 t("guard: 只硬拦信任与事实两类；语气类只记录不阻断（别把角色限死）", function () {
-  const bad1 = "刚聊的：5050本子双十一加国补五千上下，浅羽说联想溢价高，不如攒台式配轻薄本远程";
-  const bad2 = "浅羽，刚刚黑鸟wingbire说了，支持gemini的api，放心用吧～";
+  const bad1 = "刚聊的：5050本子双十一加国补五千上下，某人说联想溢价高，不如攒台式配轻薄本远程";
+  const bad2 = "某人，刚刚某群友说了，支持gemini的api，放心用吧～";
   for (const b of [bad1, bad2]) {
     const r = guardReply(b);
     eq(r.ok, false, "该拦：" + b.slice(0, 20));
@@ -279,7 +279,7 @@ t("runtime: 生成后兜底——会议纪要式回复会被打回重写一次",
     config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5 },
     store: { paths: {}, addObservation: function () {} },
     bot: fakeBot({ action: "brain", tier: "mid" }),
-    askBrain: async function () { call += 1; return { ok: true, text: call === 1 ? "刚聊的：浅羽说联想溢价高，不如攒台式" : "行啊，那就攒台式呗", usage: { totalTokens: 3 } }; },
+    askBrain: async function () { call += 1; return { ok: true, text: call === 1 ? "刚聊的：某人说联想溢价高，不如攒台式" : "行啊，那就攒台式呗", usage: { totalTokens: 3 } }; },
     send: function (g, t) { sent.push(t); }, sendImage: function () {}, now: function () { return 0; }, sleep: async function () {}, sendGapMs: 0
   });
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你觉得买哪个", now: 0 });
