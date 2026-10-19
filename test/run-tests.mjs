@@ -1,6 +1,7 @@
 import { classify, CLASSIFY_TABLE, extractKeywords, searchableKeywords } from "../app/src/classify.js";
 import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js";
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
+import { labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
@@ -3665,6 +3666,30 @@ t("runtime: 回复开头抄了原文（某人：…）会被清理掉", async fu
   await rt.tick(t0 + 500);
   ok(sent.length >= 1, "应该发出去");
   ok(sent.join("").indexOf("soocskya：") < 0, "正文开头抄的那行原文应被删掉");
+});
+t("corpus: 标注只接受三个值，非法值要报错", function () {
+  const items = [{ id: "a", text: "x", expect: "" }];
+  labelCorpus(items, "a", "该回");
+  eq(items[0].expect, "该回");
+  let threw = false;
+  try { labelCorpus(items, "a", "随便"); } catch (e) { threw = true; }
+  ok(threw, "非法标注必须被拒绝");
+  labelCorpus(items, "a", "");
+  eq(items[0].expect, "", "传空 = 清掉标注");
+});
+
+t("corpus: 重新拉取时，已标注的条目按「原文+时间」保留", function () {
+  const prev = [{ id: "old", at: "2026-10-19T00:00:00Z", text: "晚上啥时候", expect: "该不回" }];
+  const decs = [{ at: "2026-10-19T00:00:00Z", text: "晚上啥时候", action: "ignore" }, { at: "2026-10-19T00:01:00Z", text: "新的", action: "brain" }];
+  const out = fromDecisions(decs, prev, 10);
+  eq(out.length, 2);
+  eq(out[0].expect, "该不回", "老标注要保留");
+  eq(out[1].expect, "", "新条目没有标注");
+});
+
+t("corpus: 从判定依据里抠外审结论", function () {
+  eq(auditFromReason(["深度分档：U < 多讲线", "外审（灰区也审）：short"]), "short");
+  eq(auditFromReason(["本地判否 → 不回复、不进大脑"]), "");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

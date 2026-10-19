@@ -433,7 +433,8 @@
 
   /* ---------- 标注 / 图库 ---------- */
   function pageLabels() {
-    return api("/api/labels?limit=60").then(function (d) {
+    return Promise.all([api("/api/labels?limit=60"), api("/api/corpus").catch(function () { return {}; })]).then(function (arr) {
+      var d = arr[0]; var c = arr[1] || {};
       S.labels = d;
       var st = d.stats || {};
       var rows = (d.pending || []).map(function (r) {
@@ -451,8 +452,32 @@
         card("漏接率", Math.round((st.missedRate || 0) * 100) + "%", "该回却被判否") +
         '</div>' +
         '<div class="card"><div class="head">待标注队列</div><div class="body"><table><thead><tr><th>消息</th><th>本地判定</th><th>动作</th><th>p_say</th><th>标注</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="5" class="muted">队列是空的 —— 新群观察期会自动攒</td></tr>') + '</tbody></table></div></div>';
+        (rows || '<tr><td colspan="5" class="muted">队列是空的 —— 新群观察期会自动攒</td></tr>') + '</tbody></table></div></div>' +
+        corpusCard(c);
     });
+  }
+
+  // 回放语料：把真实群聊截下来人工标「该回 / 该不回 / 该短回」，改动前先跑一遍 tools/replay-corpus.mjs。
+  function corpusCard(c) {
+    var items = (c && c.items) || [];
+    var st = (c && c.stats) || {};
+    var body = items.map(function (it) {
+      var cls = it.expect === "该回" ? "good" : (it.expect === "该不回" ? "bad" : "");
+      return '<tr><td class="muted" style="white-space:nowrap">' + esc(String(it.at || "").slice(5, 16).replace("T", " ")) + '</td>' +
+        '<td style="white-space:nowrap">' + esc(it.speaker || "") + '</td>' +
+        '<td style="max-width:360px">' + esc(String(it.text || "").slice(0, 160)) + '</td>' +
+        '<td><span class="tag ' + esc(it.decided === "brain" ? "yes" : "no") + '">' + esc(it.decided === "brain" ? "回了" : "没回") + '</span></td>' +
+        '<td style="white-space:nowrap"><button class="btn-sm good" data-cid="' + esc(it.id) + '" data-expect="该回">该回</button> ' +
+        '<button class="btn-sm" data-cid="' + esc(it.id) + '" data-expect="该短回">短回</button> ' +
+        '<button class="btn-sm bad" data-cid="' + esc(it.id) + '" data-expect="该不回">不该回</button>' +
+        (it.expect ? ' <span class="tag ' + cls + '">' + esc(it.expect) + '</span>' : "") + '</td></tr>';
+    }).join("");
+    return '<div class="card"><div class="head">回放语料<span class="muted" style="font-size:12px">' +
+      '已标 ' + (st.labeled || 0) + ' / ' + (st.total || 0) + ' · 标完跑 tools/replay-corpus.mjs 做回归</span>' +
+      '<button class="btn-sm" data-corpus-rebuild="1" style="float:right">重新拉取最近 60 条</button></div>' +
+      '<div class="body"><table><thead><tr><th>时间</th><th>说话人</th><th>内容</th><th>当时的判定</th><th>你的标注</th></tr></thead><tbody>' +
+      (body || '<tr><td colspan="5" class="muted">还没有语料 —— 点右上角「重新拉取最近 60 条」</td></tr>') +
+      '</tbody></table></div></div>';
   }
 
   function pageMemes() {
@@ -1150,6 +1175,20 @@
         var dk = del.getAttribute("data-del"), dv = del.getAttribute("data-val");
         setPath(S.values, dk, (getPath(S.values, dk) || []).filter(function (x) { return x !== dv; }));
         markDirty(); render(); return;
+      }
+      var cbtn = e.target.closest("[data-cid]");
+      if (cbtn) {
+        api("/api/corpus/label", { id: cbtn.getAttribute("data-cid"), expect: cbtn.getAttribute("data-expect") }).then(function (r) {
+          toast(r.ok ? "已标注" : (r.error || "标注失败"), !r.ok); render();
+        });
+        return;
+      }
+      var crb = e.target.closest("[data-corpus-rebuild]");
+      if (crb) {
+        api("/api/corpus/rebuild", {}).then(function (r) {
+          toast(r.ok ? ("已拉取 " + ((r.stats || {}).total || 0) + " 条") : (r.error || "拉取失败"), !r.ok); render();
+        });
+        return;
       }
       var lab = e.target.closest("[data-label]");
       if (lab) {

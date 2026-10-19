@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath, REDACTED } from "./config.js";
 import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
+import { corpusFile, loadCorpus, saveCorpus, labelCorpus, corpusStats, fromDecisions } from "./corpus.js";
 import { buildProfilePrompt } from "./profile.js";
 import { moneyOfRows, costOf, isPeakTime, PRICE_MODEL, PRICE_NOTE } from "./cost.js";
 
@@ -468,6 +469,36 @@ export function createWebUi(deps) {
       if (!labels || !b || !b.id) return sendJson(res, 400, { ok: false, error: "缺少 id" });
       labels.label(b.id, b.human, b.labeler);
       return sendJson(res, 200, { ok: true, stats: labels.status() });
+    }
+
+    // ---------- 回放语料（标注后当回归测试用） ----------
+    if (p.startsWith("/api/corpus")) {
+      if (!store) return sendJson(res, 200, { ok: false, error: "没有数据目录" });
+      const file = corpusFile(path.dirname(store.paths.labels));
+      if (p === "/api/corpus" && req.method === "GET") {
+        const items = loadCorpus(file);
+        return sendJson(res, 200, { ok: true, items: items.slice().reverse(), stats: corpusStats(items) });
+      }
+      if (p === "/api/corpus/label" && req.method === "POST") {
+        const body = await readBody(req);
+        let b = null;
+        try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+        try {
+          const items = loadCorpus(file);
+          labelCorpus(items, b.id, b.expect);
+          saveCorpus(file, items);
+          return sendJson(res, 200, { ok: true, stats: corpusStats(items) });
+        } catch (e) { return sendJson(res, 400, { ok: false, error: String((e && e.message) || e) }); }
+      }
+      if (p === "/api/corpus/rebuild" && req.method === "POST") {
+        // 从观测日志里重新拉最近的判定记录（已标注的会按「原文+时间」保留）
+        const decs = store.readJsonl(store.paths.observe).filter(function (r) { return r && r.kind === "decision"; });
+        const prev = loadCorpus(file);
+        const items = fromDecisions(decs, prev, 60);
+        saveCorpus(file, items);
+        return sendJson(res, 200, { ok: true, stats: corpusStats(items) });
+      }
+      return sendJson(res, 405, { ok: false, error: "不支持的方法" });
     }
     if (p === "/api/observe") {
       if (!store) return sendJson(res, 200, { ok: true, rows: [] });
