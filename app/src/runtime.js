@@ -476,6 +476,25 @@ export function createRuntime(deps) {
   }
 
   // 上下文块 —— 按 N8 修订，它永远排在 prompt 的最后
+  // 删掉正文开头那行"某人：原文"—— 只有当这行内容确实是最近某条群消息的原文时才删（很窄）。
+  function stripEchoedQuote(text0, gid) {
+    const s = String(text0 || "");
+    const m = s.match(/^([^\s：:]{1,24})[：:]\s*([^\n]{2,80})\n+/);
+    if (!m) return s;
+    const said = String(m[2] || "").trim();
+    if (said.length < 2) return s;
+    const arr = history.get(String(gid)) || [];
+    const hit = arr.some(function (e) {
+      if (e.bot) return false;
+      const t = String(e.text || "").trim();
+      if (!t || t.length < 2) return false;
+      return t === said || (t.length >= 4 && said.indexOf(t) >= 0) || (said.length >= 4 && t.indexOf(said) >= 0);
+    });
+    if (!hit) return s;
+    observe({ kind: "echo_stripped", gid: gid, line: m[0].trim().slice(0, 60) });
+    return s.slice(m[0].length).replace(/^\s+/, "");
+  }
+
   function contextBlock(gid) {
     const arr = history.get(String(gid)) || [];
     if (!arr.length) return "";
@@ -860,6 +879,10 @@ export function createRuntime(deps) {
       return { gid: batch.gid, action: "noop" };
     }
 
+    // 【抄原文清理】模型会模仿上下文里「某人：内容」的聊天记录格式，把刚说的某条原话抄进正文，
+    // 群里就会出现"引用块 + 正文里又一模一样的一行"（用户实测两次：09:05 抄「黑鸟wingbire：…」，
+    // 18:28 抄「soocskya：晚上几点来」）。人设写了规则也拦不住，这里加一道很窄的确定性清理。
+    text = stripEchoedQuote(text, evt.gid);
     const quoted2 = parseQuoteMarker(text || "");    // [引用] → 这条做成引用回复
     text = quoted2.text;
     // 引用只用在一种情况：**她这条发言是在指向别人的某条具体消息**。

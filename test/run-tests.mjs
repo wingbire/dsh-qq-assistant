@@ -3650,6 +3650,22 @@ t("onebot: 连接失败说得出原因，不再是一句 [object ErrorEvent]", f
   eq(errorText(null), "未知错误");
 });
 
+t("runtime: 回复开头抄了原文（某人：…）会被清理掉", async function () {
+  const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid", addressed: true, verdict: "yes" }),
+    askBrain: async function () { return { ok: true, text: "soocskya：晚上几点来" + String.fromCharCode(10, 10) + "我看情况诶", usage: { totalTokens: 10 } }; },
+    send: function (gid, t) { sent.push(t); }, sendImage: function () {},
+    now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "soocskya", text: "晚上几点来", now: t0, atBot: true });
+  await rt.tick(t0 + 500);
+  ok(sent.length >= 1, "应该发出去");
+  ok(sent.join("").indexOf("soocskya：") < 0, "正文开头抄的那行原文应被删掉");
+});
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
 console.log("=== 骨架回归测试 ===");
