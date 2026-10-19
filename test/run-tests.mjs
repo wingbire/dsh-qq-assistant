@@ -3657,15 +3657,15 @@ t("runtime: 回复开头抄了原文（某人：…）会被清理掉", async fu
     config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
     store: { paths: {}, addObservation: function () {} },
     bot: fakeBot({ action: "brain", tier: "mid", addressed: true, verdict: "yes" }),
-    askBrain: async function () { return { ok: true, text: "soocskya：晚上几点来" + String.fromCharCode(10, 10) + "我看情况诶", usage: { totalTokens: 10 } }; },
+    askBrain: async function () { return { ok: true, text: "群友甲：今晚几点集合" + String.fromCharCode(10, 10) + "我看情况诶", usage: { totalTokens: 10 } }; },
     send: function (gid, t) { sent.push(t); }, sendImage: function () {},
     now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
   });
   const t0 = Date.now();
-  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "soocskya", text: "晚上几点来", now: t0, atBot: true });
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "群友甲", text: "今晚几点集合", now: t0, atBot: true });
   await rt.tick(t0 + 500);
   ok(sent.length >= 1, "应该发出去");
-  ok(sent.join("").indexOf("soocskya：") < 0, "正文开头抄的那行原文应被删掉");
+  ok(sent.join("").indexOf("群友甲：") < 0, "正文开头抄的那行原文应被删掉");
 });
 t("corpus: 标注只接受三个值，非法值要报错", function () {
   const items = [{ id: "a", text: "x", expect: "" }];
