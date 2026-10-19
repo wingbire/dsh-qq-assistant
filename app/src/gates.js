@@ -157,11 +157,17 @@ export function createGates(opts) {
       }
     }
     // 疑似注入的外部指令：直接不回，也不送大脑（pSay×0.5 不够；rubric 第 5 条要求判否）
-    if (injected && blockInjected) { verdict = "no"; rescued = false; reason.push("疑似注入指令 → 直接不回（不送大脑）"); }
+    // 只在「没冲她说」时才硬拦：群里朋友开玩笑说「忽略上面的规则」是聊天，不是注入；
+    // 真正的注入来自引用的外部内容/卡片，那些不会点她的名字。
+    if (injected && blockInjected && hard.strength <= 0) { verdict = "no"; rescued = false; reason.push("疑似注入指令 → 直接不回（不送大脑）"); }
+    else if (injected) reason.push("文本里有疑似指令的措辞，但这条是冲她说的 → 交外审/大脑自行处理");
     // 灌水拦截：单字符 / 纯标点（"?"、"。"、"哈"）不值得回 —— rubric 第 3 条
     const stripped = String(text || "").replace(/[\s\p{P}\p{S}]/gu, "");
     // 重复同一字符（"哈哈哈哈哈哈"）也是灌水：以前只拦单字符，导致"纯笑声"会被算成边界判否、再被外审放进大脑
-    if (stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
+    // 同样是「一刀切」的老问题：只删单字符，会把她被点名后的一句「？」「哈哈」也判死。
+    // 点她名字/@她 时不按灌水处理（她要回的是那句短话本身）。
+    if ((stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) && hard.strength <= 0) { verdict = "no"; rescued = false; reason.push("灌水/单符号 → 不回"); }
+    else if (stripped.length <= 1 || /^(.)\1{4,}$/.test(stripped)) reason.push("看着像灌水，但这条是冲她说的 → 不按灌水拦");
 
     const sem = signalOf(j.signals, "idfOverlapToMyWords").v;
     const cont = signalOf(j.signals, "continuation").v;
