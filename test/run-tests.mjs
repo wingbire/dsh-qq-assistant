@@ -3739,6 +3739,23 @@ t("gates: 两人对话硬闸放行——面向全群的问题 / 点她名字 / @
   const d3 = await g.decide(Object.assign({}, base, { text: "@小肥鱼 帮我看下" }), {});
   ok(d3.action !== "ignore", "点她名字/@ → 放行");
 });
+t("runtime: 刚说过几乎一样的话就不再重复（内容判断，不是数量限流）", async function () {
+  const sent = [];
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function () { return { ok: true, text: "行了行了，换个话题吧", usage: { totalTokens: 5 } }; },
+    send: function (g, t) { sent.push(t); }, sendImage: function () {},
+    now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "随便聊聊", now: t0 });
+  await rt.tick(t0 + 500);
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "再聊点别的", now: t0 + 3000 });
+  await rt.tick(t0 + 3600);
+  eq(sent.length, 1, "第二次几乎一样的回复不发");
+});
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
 console.log("=== 骨架回归测试 ===");

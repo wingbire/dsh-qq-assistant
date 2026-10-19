@@ -495,6 +495,26 @@ export function createRuntime(deps) {
     return s.slice(m[0].length).replace(/^\s+/, "");
   }
 
+  // 她最近说过的话（按群），用来挡「同一句话换个说法又说一遍」。
+  const recentSent = new Map();
+  function bigrams(s) {
+    const t = String(s || "").replace(/[\s\p{P}\p{S}]/gu, "");
+    const out = new Set();
+    for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
+    return out;
+  }
+  function almostSame(a, b) {
+    const A = bigrams(a), B = bigrams(b);
+    if (!A.size || !B.size) return false;
+    let hit = 0;
+    for (const x of A) if (B.has(x)) hit += 1;
+    return hit / Math.min(A.size, B.size) >= 0.8;
+  }
+  function duplicateOfLast(gid, text) {
+    const arr = recentSent.get(String(gid)) || [];
+    return arr.slice(-3).some(function (x) { return almostSame(x, text); });
+  }
+
   function contextBlock(gid) {
     const arr = history.get(String(gid)) || [];
     if (!arr.length) return "";
@@ -895,6 +915,15 @@ export function createRuntime(deps) {
     const chart = parseChart(drawn.text);            // 再摘 [图表: 路径]（archify 画的图）
     const parsed = parseMeme(chart.text);
     const segments = splitReply(parsed.text, dec.maxChars || 60, { maxSegments: rc.maxSegments });
+    // 【重复回复检测】刚说过几乎一样的话就不再发 —— 这是内容判断，不是数量限流。
+    // 用户实测的「只会瞎搭话」里，有一段是连续两次都在说「行了换个话题吧」这种同样的动作。
+    const joinedAll = segments.join("");
+    if (duplicateOfLast(evt.gid, joinedAll)) {
+      stats.dupSkipped = (stats.dupSkipped || 0) + 1;
+      observe({ kind: "duplicate_skip", gid: evt.gid, text: String(joinedAll).slice(0, 60) });
+      uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); }, { note: "和她刚说过的话几乎一样，这次不重复" });
+      return { gid: evt.gid, action: "duplicate_skip" };
+    }
     const sent = [];
     for (let i = 0; i < segments.length; i++) {
       if (!segments[i]) continue;
@@ -917,6 +946,10 @@ export function createRuntime(deps) {
       const hArr = history.get(hk) || [];
       const self = (evt.botNames && evt.botNames[0]) || "小肥鱼";
       hArr.push({ speaker: "你（" + self + "）", text: sent.join(" / "), at: at, bot: true });
+      const rs = recentSent.get(hk) || [];
+      rs.push(sent.join(" "));
+      while (rs.length > 5) rs.shift();
+      recentSent.set(hk, rs);
       const hCap = Math.max(0, rc.contextWindow != null ? rc.contextWindow : 10);
       while (hCap && hArr.length > hCap) hArr.shift();
       history.set(hk, hArr);
