@@ -554,20 +554,38 @@ t("配置合并：表单提交的字符串会按字段表扳回类型（踩过 b
   eq(m5.runtime.voice.enabled, false, "原值 false 时空串也保持 false");
 });
 
-t("runtime: 大脑输出空串 = 她选择不说，不能记成一次发送（实测踩过）", async function () {
+t("runtime: 没人点她时大脑空输出＝安静看着（不发）", async function () {
   const sent = [];
   const rt = createRuntime({
     config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
     store: { paths: {}, addObservation: function () {} },
-    bot: fakeBot({ action: "brain", tier: "mid" }),
-    askBrain: async function () { return { ok: true, text: "   ", usage: { totalTokens: 10 } }; },
+    bot: fakeBot({ action: "brain", tier: "mid", addressed: false, verdict: "grey" }),
+    askBrain: async function () { return { ok: true, text: "  ", usage: { totalTokens: 10 } }; },
     send: function (gid, t) { sent.push(t); }, sendImage: function () {},
     now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
   });
   const t0 = Date.now();
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "随便说点什么", now: t0 });
   await rt.tick(t0 + 500);
-  eq(sent.length, 0, "空回复不能发到群里（一次也不行）");
+  eq(sent.length, 0, "没人点她、她也没话 → 安静看着，不发");
+});
+
+t("runtime: 被点名时大脑空输出 → 先催一次，仍空就兜一句（不能装死）", async function () {
+  const sent = [];
+  let calls = 0;
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: { paths: {}, addObservation: function () {} },
+    bot: fakeBot({ action: "brain", tier: "mid", addressed: true, verdict: "yes" }),
+    askBrain: async function () { calls += 1; return { ok: true, text: "   ", usage: { totalTokens: 10 } }; },
+    send: function (gid, t) { sent.push(t); }, sendImage: function () {},
+    now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "戳戳小肥鱼", now: t0, atBot: true });
+  await rt.tick(t0 + 500);
+  ok(calls >= 2, "空回复要先催一次（实际调用 " + calls + " 次）");
+  ok(sent.length >= 1, "催完还空就要兜一句，不能一声不吭");
 });
 
 

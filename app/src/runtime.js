@@ -793,14 +793,37 @@ export function createRuntime(deps) {
         return { gid: batch.gid, action: "brain_error", error: err, fallback: fallback };
       }
       text = r.text || "";
-      // 【空回复】模型有权选择不说（人设里就有「没话说就安静看着」）。这是合法选择、不是错误。
-      // 以前它会一路走到发送流程：记成 sent、算一次回复，但群里一个字都没有 ——
-      // 用户实测「判定写了 brain、花了 15817 token，群里却什么都没看到」就是这个。
-      if (!String(text).trim()) {
+      // 【空回复】模型可以选择不说 —— 但**被点名/被搭话时不能一声不吭**。
+      // 事故：人设里「没话说就安静看着」被模型当成许可证，用户连戳三次、三次都是空输出，
+      // 群里看起来就是"她装死"。所以：直接对她说的话，空回复要先催一次，催完还空就兜一句短的。
+      const aimedAtHer = !!(evt.atBot || evt.atAll || evt.replyId || dec.addressed === true || dec.verdict === "yes");
+      if (!String(text).trim() && aimedAtHer) {
         stats.brainSilent = (stats.brainSilent || 0) + 1;
-        observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "模型选择不发言（输出为空）" });
+        const r2 = await askBrain({
+          promptText: prompt + String.fromCharCode(10, 10) +
+            "【对方在直接跟你说】上面这句是在跟你说话（点你名字或 @ 你）。用你自己的话说一句，别沉默；" +
+            "不知道说什么就接一句、回一下或反问一句都行。",
+          tier: dec.tier, decision: dec, evt: evt
+        });
+        if (r2 && r2.ok && String(r2.text || "").trim()) {
+          text = r2.text;
+          if (r2.usage) { const t2 = Number(r2.usage.totalTokens) || 0; budget.record(t2, at); stats.tokens += t2; usage = r2.usage; }
+          observe({ kind: "brain_retry", gid: batch.gid, uid: batch.uid, tier: dec.tier, ok: true, text: String(text).slice(0, 60) });
+        } else {
+          // 催了还是不说 → 兜一句最短的本地应答，保证被点名不会看起来像死机
+          const fb = localReplies.reply({ reason: ["被点名但大脑沉默"] }, { gid: batch.gid, text: evt.text || "", rng: rng, bucket: dec.bucket });
+          if (fb) { send(batch.gid, fb); stats.segments += 1; stats.brainFallbacks = (stats.brainFallbacks || 0) + 1; }
+          observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "被点名但两次都输出为空 → 已兜底应答", fallback: fb || null });
+          uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
+            { note: fb ? "她沉默后兜了一句短应答" : "她沉默（被点名）" });
+          return { gid: batch.gid, action: "brain_silent", fallback: fb || null };
+        }
+      } else if (!String(text).trim()) {
+        // 没人点她、她也没话 → 安静看着是合法的，只记一笔
+        stats.brainSilent = (stats.brainSilent || 0) + 1;
+        observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "模型选择不发言（输出为空，且不是对她在说）" });
         uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
-          { note: "她选择不说（模型输出为空）" });
+          { note: "她选择不说（不是对她在说）" });
         return { gid: batch.gid, action: "brain_silent" };
       }
       const soft = softFlags(text);
