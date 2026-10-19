@@ -517,8 +517,18 @@ export function createRuntime(deps) {
   function contextBlock(gid) {
     const arr = history.get(String(gid)) || [];
     if (!arr.length) return "";
-    return "【群里的上下文（越靠下越新）】" + String.fromCharCode(10)
-      + arr.map(function (e) { return (e.speaker ? e.speaker + "：" : "") + e.text; }).join(String.fromCharCode(10));
+    // 【源头治引用重复】以前这块是「说话人：内容」的聊天记录格式，模型会照抄一行进正文
+    // （实测两次：抄「某群友：…」「群友甲：今晚几点集合」）。现在：
+    //   ① 加时间戳前缀，让它一眼看出这是"日志"而不是"要写的话"；
+    //   ② 标题明说这只是背景、不要复制；
+    //   ③ 每条前面用「·」当条目符号（模型不会把带符号的日志行当正文抄）。
+    const head = "【以下是群聊记录，只是给你看的背景，不是你要说的话】" + String.fromCharCode(10)
+      + "（不要复制这里的任何一行，尤其不要写「某人：…」这种格式；要引用某条就在正文写 [引用]）" + String.fromCharCode(10);
+    const body = arr.map(function (e) {
+      const t = e.at ? new Date(e.at).toTimeString().slice(0, 5) + " " : "";
+      return "· " + t + (e.speaker ? e.speaker + "：" : "") + e.text;
+    }).join(String.fromCharCode(10));
+    return head + body;
   }
 
   // 被戳一戳：不进判定中枢（它不是消息，也不该吃观察期/预算那套），直接走零成本表达层

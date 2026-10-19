@@ -26,6 +26,8 @@ export function features(input) {
   const second = /你|您/.test(text);
   const nick = names.some(function (n) { return n && text.indexOf(n) >= 0; });
   const third = (text.match(/他|她|它/g) || []).length;
+  // 在求她办事（哪怕前面在转述别人说的）—— 这种应该回。
+  const requestMe = /能帮我|帮我看|帮我|你会|求你|教教我|教我|能不能帮|可不可以帮|麻烦你/.test(text);
   return {
     atMe: i.atBot ? 1 : 0,
     replyToMe: i.replyToBot ? 1 : 0,
@@ -36,17 +38,18 @@ export function features(input) {
     longText: plain.length >= 12 ? 1 : 0,
     thirdDense: third >= 2 ? 1 : 0,
     reporting: /他说|她说|听说|有人说|转述/.test(text) ? 1 : 0,
+    requestToMe: requestMe ? 1 : 0,
     twoPerson: i.twoPersonDialog ? 1 : 0,
     continuation: i.continuation ? 1 : 0
   };
 }
 
-export const FEATURE_KEYS = ["atMe", "replyToMe", "nickCall", "secondPerson", "question", "detailAsk", "longText", "thirdDense", "reporting", "twoPerson", "continuation"];
+export const FEATURE_KEYS = ["atMe", "replyToMe", "nickCall", "secondPerson", "question", "detailAsk", "longText", "thirdDense", "reporting", "requestToMe", "twoPerson", "continuation"];
 
 // 初始权重：保守的先验（标定脚本会用标注覆盖它）。
 export const PRIOR_WEIGHTS = {
   atMe: 2.2, replyToMe: 1.8, nickCall: 1.4, secondPerson: 0.5, question: 0.7, detailAsk: 0.6,
-  longText: 0.35, thirdDense: -0.9, reporting: -0.6, twoPerson: -1.6, continuation: 0.9, bias: -1.5
+  longText: 0.35, thirdDense: -0.9, reporting: -0.6, requestToMe: 1.6, twoPerson: -1.6, continuation: 0.9, bias: -1.5
 };
 
 export function pLocal(feat, w) {

@@ -1449,7 +1449,7 @@ t("N8：上下文窗口块排在 prompt 最后", async function () {
   const p = seen.prompts[0];
   ok(p.indexOf("【本轮任务】") >= 0, "应有本轮任务");
   const iTask = p.lastIndexOf("【本轮任务】");
-  const iCtx = p.lastIndexOf("【群里的上下文");
+  const iCtx = p.lastIndexOf("【以下是群聊记录");
   ok(iCtx > iTask, "上下文块必须在任务之后");
   ok(p.trim().endsWith("甲：第一句"), "prompt 应以最新的群消息收尾，实得：" + JSON.stringify(p.slice(-40)));
 });
@@ -1734,7 +1734,7 @@ t("runtime: 群档案块进 prompt，且仍在上下文之前", async function (
   const p = prompts[0];
   ok(p.includes("【本群画像】"), "应带群档案");
   ok(p.includes("报错"), "应带群兴趣");
-  ok(p.indexOf("【本群画像】") < p.indexOf("【群里的上下文"), "群档案要在上下文之前");
+  ok(p.indexOf("【本群画像】") < p.indexOf("【以下是群聊记录"), "群档案要在上下文之前");
 });
 
 // ===== P4：图库 / 主动搭话 / 指令框架 =====
@@ -2313,7 +2313,7 @@ t("runtime: 本群专属人设作为消息体进 prompt", async function () {
   ok(p.indexOf("【本群专属人设") >= 0, "应有本群专属人设块");
   ok(p.indexOf("叫我老鱼") >= 0, "内容要进去");
   ok(p.indexOf("【本群画像】") >= 0, "群档案也还在");
-  ok(p.indexOf("【本群专属人设") < p.indexOf("【群里的上下文"), "人设块要在上下文之前");
+  ok(p.indexOf("【本群专属人设") < p.indexOf("【以下是群聊记录"), "人设块要在上下文之前");
 });
 
 t("brain: 手写的全局人设整段覆盖字段拼装", function () {
@@ -3030,7 +3030,7 @@ t("prompt: 装配顺序按缓存优先级（专属人设/画像 → 兴趣词条
   const iFacts = p.indexOf("【本群画像】");
   const iInt = p.indexOf("【本群兴趣词条】");
   const iTask = p.indexOf("【本轮任务】");
-  const iCtx = p.indexOf("【群里的上下文");
+  const iCtx = p.indexOf("【以下是群聊记录");
   ok(iPersona >= 0 && iFacts > 0 && iInt > 0 && iTask > 0, "四块都得在：人设 / 画像 / 兴趣词条 / 本轮任务");
   ok(iPersona < iFacts, "本群专属人设（少变）在画像前");
   ok(iFacts < iInt, "画像（少变）在兴趣词条（多变）前");

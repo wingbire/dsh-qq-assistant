@@ -132,6 +132,7 @@ export function buildTaskText(depth, policy, keywords) {
   lines.push("字数：约 " + Math.round(policy.maxChars * 0.6) + "–" + policy.maxChars + " 字（软限制，想说的说不完可以到上限；别为了凑数硬挤）；说长了会按句号拆成两条发，不会吞掉你的话");
   lines.push("搜索次数：" + policy.search + (policy.search ? "；关键词：" + (keywords || []).join("、") : "（凭已有知识回答，不要编造实时信息）"));
   lines.push("要专门回某一条消息（而不是顺着聊）时，在正文里写 [引用]；别人 @ 你则不用。");
+  lines.push("【重要】上面那些带「·」和时间戳的行是聊天记录，只用来理解上下文 —— 不要复制它们，不要写「某人：…」这种格式，直接说你要说的话。");
   lines.push("直接输出要发到群里的正文，不要解释。");
   return lines.join(String.fromCharCode(10));
 }

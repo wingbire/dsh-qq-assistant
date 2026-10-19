@@ -49,6 +49,16 @@ function acc(w) {
 
 let bestThreshold = 0.5;
 const w = fit(X, Y, A, 0.02);
+// 语料里从未出现过的特征，学不到东西 —— 保持先验权重（否则会被压成 0，特征形同虚设）。
+const unused = [];
+FEATURE_KEYS.forEach(function (k, j) {
+  const seen = X.some(function (row) { return row[j] > 0; });
+  if (!seen) {
+    w[j + 1] = PRIOR_WEIGHTS[k] || 0;
+    unused.push(k);
+  }
+});
+if (unused.length) console.log("语料里未出现的特征（保持先验权重）：" + unused.join(", "));
 console.log("语料 " + items.length + " 条（该回 " + Y.filter(function (y) { return y === 1; }).length + " / 该不回 " + Y.filter(function (y) { return y === 0; }).length + "）");
 console.log("训练集符合率：" + Math.round(acc(w) * 100) + "%");
 
