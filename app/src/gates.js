@@ -79,6 +79,17 @@ export function createGates(opts) {
   }
 
   async function decide(evt, ctx) {
+    // 【两人对话硬闸·收窄版】别人在一来一往、她没在局里 → 不插嘴。
+    // 放行条件（任一）：点她名字 / @她 / 回复她 / 面向全群的问题（你们·大家·有人·谁·各位·在吗）。
+    if (evt && evt.twoPersonDialog) {
+      const tx0 = String(evt.text || "");
+      const nm0 = (evt.botNames || []).concat(evt.nicknames || []).filter(Boolean).some(function (x) { return tx0.indexOf(x) >= 0; });
+      const groupAsk = /你们|大家|有人|哪位|谁(知道|会|有|在)|各位|在吗|有没有人/.test(tx0);
+      const aimed0 = !!(evt.atBot || evt.atAll || evt.replyToBot || evt.replyId || nm0 || groupAsk);
+      if (!aimed0) {
+        return { action: "ignore", verdict: "no", pSay: 0, U: 0, tier: "low", maxChars: 20, reason: ["两人在对话，不插嘴"], bucket: "chat", search: 0, keywords: [], injected: false };
+      }
+    }
     const context = ctx || {};
     const raw = evt.text || "";
     const text = maskUntrusted(raw);
@@ -224,7 +235,7 @@ export function createGates(opts) {
         || (auditGrey && verdict === "grey" && tierInfo.tier === "mid")) && auditAllow(evt.now);
       if (needAudit) {
         auditTimes.push(evt.now == null ? nowFn() : evt.now);
-        auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames, recentMention: evt.recentBotMention === true });
+        auditRes = await auditFn(text, { botNames: botNames, nicknames: nicknames, recentMention: evt.recentBotMention === true, contextText: evt.auditContext });
         reason.push("外审（" + auditScope + "）：" + auditRes.verdict);
         if (auditRes.error) {
           // 外审坏了（超时/认证失败/通道不通）。这里要区分「这次是不是为了问外审才被补救上来的」：

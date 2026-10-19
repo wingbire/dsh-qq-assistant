@@ -635,6 +635,32 @@ export function createRuntime(deps) {
           return hNames.some(function (n) { return n && ht.indexOf(n) >= 0; });
         });
       } catch (e2) { }
+      // 外审只看到一句话，判不了『在跟谁说话』—— 把最近 6 条交给它（用户实测：她插进别人聊 VR 的对话就是这个原因）
+      try {
+        const hk3 = String(evt.gid);
+        const hArr3 = (history.get(hk3) || []).slice(-6);
+        evt.auditContext = hArr3.map(function (h) { return (h.speaker || "") + "：" + String(h.text || "").slice(0, 50); }).join(String.fromCharCode(10));
+      } catch (e3) { }
+      // 【两人对话硬闸·收窄版】只在「他们真的一来一往、而且她没在局里」时才拦：
+      //   · 最近 8 条（不含她自己）恰好 2 个人；
+      //   · 而且这两人的发言是交替出现的（A B A B 这种真对话，不是各自刷屏）；
+      //   · 而且她最近 5 分钟没说过话（她刚说完，对方不 @ 直接接一句是正常的）；
+      // 这条消息点她名字/@她/回复她 → 放行，且「你们/大家/谁」这种面向全群的问题也放行。
+      try {
+        const hk4 = String(evt.gid);
+        const hArr4 = (history.get(hk4) || []).filter(function (h) { return h && !h.bot; }).slice(-8);
+        const spk = hArr4.map(function (h) { return String(h.speaker || h.uid || ""); }).filter(Boolean);
+        const who = Array.from(new Set(spk));
+        let alt = 0;
+        for (let i = 1; i < spk.length; i++) if (spk[i] !== spk[i - 1]) alt += 1;
+        const swapped = alt >= 2 && who.length === 2;
+        let spokeRecently = false;
+        try {
+          const lastSelf = (history.get(hk4) || []).filter(function (h) { return h && h.bot; }).slice(-1)[0];
+          if (lastSelf && lastSelf.at && evt.now) spokeRecently = (evt.now - new Date(lastSelf.at).getTime()) < 300000;
+        } catch (e5) { }
+        evt.twoPersonDialog = hArr4.length >= 4 && swapped && !spokeRecently;
+      } catch (e4) { }
       const dec = await bot.handleEvent(evt);
       // 话题降温：这一条是不是"同一个话题今晚第 N 次"（她已经回过 ≥2 次了）
       const cool = coolingNow(evt.gid, evt.text);
@@ -721,7 +747,7 @@ export function createRuntime(deps) {
       return { gid: batch.gid, action: "ignore", merged: batch.count, verdict: dec.verdict, proactive: pro };
     }
 
-    if (!budget.allowReply(hard)) {
+    if (!budget.allowReply(hard, batch.gid, at)) {
       observe({ kind: "budget_block", gid: batch.gid, uid: batch.uid, hard: hard, budget: budget.status() });
       return { gid: batch.gid, action: "budget_block", budget: budget.status() };
     }
@@ -881,7 +907,8 @@ export function createRuntime(deps) {
       // 后台消息表标一下"这条是引用回复" —— 不然没法核对它到底有没有用起来
       uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); }, { quote: !!useQuoteReply });
     }
-    if (sent.length) budget.countGroup(evt.gid, at);            // 记一次"这个群这一小时发过了"
+    if (sent.length) budget.countGroup(evt.gid, at);
+    if (sent.length) budget.countBurst(evt.gid, at);            // 记一次"这个群这一小时发过了"
     if (sent.length) {
       // 把她自己发出去的话也记进上下文，并标成「你（小肥鱼）」。
       // 以前她的回复不进上下文 → 她既不知道自己刚说了什么，也分不清别人嘴里那个「她」就是自己

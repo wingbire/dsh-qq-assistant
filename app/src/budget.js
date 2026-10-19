@@ -70,14 +70,36 @@ export function createBudget(opts) {
 
   function allowProactive() { return mode() === "normal"; }
 
-  function allowReply(isHardTrigger) {
+  function allowReply(isHardTrigger, gid, nowMs) {
     const m = mode();
     if (m === "mentionOnly") {
       const okGo = !!isHardTrigger;
       if (!okGo) hardStops += 1;
       return okGo;
     }
+    return burstAllow(gid, nowMs, !!isHardTrigger);
+  }
+
+  // 【爆发闸】默认常开：同一个群 5 分钟内最多回 2 条、每小时最多 12 条（被点名的不受 5 分钟限制）。
+  // 起因：19:43-19:46 她在别人聊 VR 的对话里三分钟发了 7 条 —— 之前 allowReply 直接 return true，等于没有频率控制。
+  const burstSends = new Map();
+  const BURST = { per5min: 2, perHour: 12 };
+  function burstAllow(gid, nowMs, hard) {
+    const g = String(gid || "");
+    if (!g) return true;
+    const t = nowMs == null ? nowFn() : nowMs;
+    const arr = (burstSends.get(g) || []).filter(function (x) { return t - x < 3600000; });
+    burstSends.set(g, arr);
+    if (arr.length >= BURST.perHour) return false;
+    if (!hard && arr.filter(function (x) { return t - x < 300000; }).length >= BURST.per5min) return false;
     return true;
+  }
+  function countBurst(gid, nowMs) {
+    const g = String(gid || "");
+    if (!g) return 0;
+    const t = nowMs == null ? nowFn() : nowMs;
+    const arr = (burstSends.get(g) || []).filter(function (x) { return t - x < 3600000; });
+    arr.push(t); burstSends.set(g, arr); return arr.length;
   }
 
   function groupAllow(gid, nowMs) {
@@ -122,7 +144,7 @@ export function createBudget(opts) {
 
   return {
     limits: lim, record: record, ratio: ratio, mode: mode,
-    allowProactive: allowProactive, allowReply: allowReply,
+    allowProactive: allowProactive, allowReply: allowReply, countBurst: countBurst, burstAllow: burstAllow,
     groupAllow: groupAllow, countGroup: countGroup,
     status: status, load: load, save: save, flush: flush, file: file
   };

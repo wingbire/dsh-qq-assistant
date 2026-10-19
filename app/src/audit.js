@@ -64,7 +64,8 @@ export function createAuditor(opts) {
       ? "【上下文提示，仅供参考】最近几条里出现过小助手（有人叫过她，或她刚发过言）。" +
         "自己判断这句是不是冲着她来的 —— 群里也可能正在聊别的女生、主播或角色。" + String.fromCharCode(10)
       : "";
-    const promptText = head + hint + "【待审消息】" + String.fromCharCode(10) + String(text || "").slice(0, 300);
+    const ctxBlock = (ctx && ctx.contextText) ? "【最近的群聊（越靠下越新；判断『在跟谁说话』要看这个）】" + String.fromCharCode(10) + String(ctx.contextText).slice(-600) + String.fromCharCode(10) : "";
+    const promptText = head + ctxBlock + hint + "【待审消息】" + String.fromCharCode(10) + String(text || "").slice(0, 300);
     let r = null;
     try { r = await runner({ promptText: promptText, profile: AUDIT_PROFILE_ID, personaText: rubric, timeoutMs: timeoutMs }); }
     catch (e) { r = { ok: false, error: String(e && e.message) }; }

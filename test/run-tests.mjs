@@ -239,7 +239,7 @@ t("guard: 只硬拦信任与事实两类；语气类只记录不阻断（别把�
 t("runtime: 话题降温——同一话题被反复提起时改口风（别再自证）", async function () {
   const prompts = []; const seen = [];
   const rt = createRuntime({
-    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, coolWindowMs: 600000 },
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, coolWindowMs: 3600000 },
     store: { paths: {}, addObservation: function (r) { seen.push(r); } },
     bot: fakeBot({ action: "brain", tier: "mid" }),
     askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "行", usage: { totalTokens: 3 } }; },
@@ -247,8 +247,9 @@ t("runtime: 话题降温——同一话题被反复提起时改口风（别再�
   });
   const t0 = Date.now();
   for (let i = 0; i < 4; i++) {
-    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你的搜索怎么这么慢", now: t0 + i * 1000 });
-    await rt.tick(t0 + i * 1000 + 500);
+    const at = t0 + i * 400000;   // 6.6 分钟一条，避开爆发闸
+    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你的搜索怎么这么慢", now: at });
+    await rt.tick(at + 500);
   }
   const cooled = prompts.filter(function (p) { return String(p).indexOf("【这个话题够了】") >= 0; });
   ok(cooled.length >= 1, "反复提起后要出现收尾指令（出现 " + cooled.length + " 次）");
@@ -931,22 +932,27 @@ t("split: 按句号切多条且每条不超上限", function () {
   eq(segs.join(""), text);
 });
 
-t("split: 单句超长时在句末截断", function () {
+t("split: 软区间——不硬截断，超长按标点拆多条且内容不丢", function () {
   const long = "这是一个特别特别特别长的句子没有句号一直写下去写下去写下去";
   const segs = splitReply(long, 10);
-  ok(segs[0].length <= 10);
+  ok(segs.length <= 3, "最多拆成 3 条");
+  eq(segs.join(""), long, "内容必须一个字都不丢（软限制不是截断）");
+  const s2 = "先去朋友家或手机热点把steamvr下上，没网卡在这儿真干不了，要不你先拿串流线玩单机顶着。";
+  const segs2 = splitReply(s2, 30);
+  eq(segs2.join(""), s2, "带标点的长句也要整句保留");
+  ok(segs2.every(function (x) { return /[。！？!?…；;]$/.test(x) || x === segs2[segs2.length - 1]; }), "拆出来的每条都在标点处收尾");
 });
 
 t("split: 超过 maxSegments 时余下并入最后一条", function () {
   const text = "一。二。三。四。五。六。";
   const segs = splitReply(text, 2, { maxSegments: 2 });
   eq(segs.length, 2);
-  ok(segs[1].length <= 2, "并入后仍受上限约束");
+  ok(segs.join("") === text, "并入后内容不丢（软限制优先于「必须很短」）");
 });
 
 t("split: 句末标点切分本身正确", function () {
   eq(splitSentences("甲。乙！丙？"), ["甲。", "乙！", "丙？"]);
-  eq(cutAtSentence("甲乙丙丁戊", 3), "甲乙丙");
+  eq(cutAtSentence("甲乙丙丁戊", 3), "甲乙…");   // 硬切必须补省略号，别让词断在半截
 });
 
 t("coalesce: 窗口内同人连发合并成一批", function () {
@@ -3709,6 +3715,25 @@ t("corpus: 真实语料回放不低于基线（有本地语料时才跑）", asy
   }
   const rate = hitN / items.length;
   ok(rate >= 0.6, "符合率 " + hitN + "/" + items.length + "（" + Math.round(rate * 100) + "%）不应低于 60% —— 低了就是判定的严重回归");
+});
+t("gates: 两人对话硬闸——别人一来一往时她不出声，被点名才例外", async function () {
+  const g = createGates({ auditFn: async function () { return { verdict: "short", channel: "stub" }; }, audit: { scope: "灰区也审", noAudit: "边界或提问", maxPerHour: 999, timeoutMs: 1000, onTimeout: "降档" } });
+  const d1 = await g.decide({ gid: "T", uid: "u1", text: "网络啥的在你电脑上走", now: 0, botNames: ["小肥鱼"], nicknames: ["肥鱼"], twoPersonDialog: true }, {});
+  eq(d1.action, "ignore", "两人对话且没点她 → 不回");
+  const d2 = await g.decide({ gid: "T", uid: "u1", text: "小肥鱼你说说看", now: 0, botNames: ["小肥鱼"], nicknames: ["肥鱼"], twoPersonDialog: true }, {});
+  ok(d2.action !== "ignore", "点了她名字就不受这条硬闸限制");
+  const d3 = await g.decide({ gid: "T", uid: "u1", text: "你们谁知道这个怎么弄", now: 0, botNames: ["小肥鱼"], nicknames: ["肥鱼"], twoPersonDialog: true }, {});
+  ok(d3.action !== "ignore", "面向全群的问题要放行（你们/谁/有人）");
+});
+t("gates: 两人对话硬闸放行——面向全群的问题 / 点她名字 / @她", async function () {
+  const g = createGates({ auditFn: async function () { return { verdict: "short", channel: "stub" }; }, audit: { scope: "灰区也审", noAudit: "边界或提问", maxPerHour: 999, timeoutMs: 1000, onTimeout: "降档" } });
+  const base = { gid: "T", uid: "u1", now: 0, botNames: ["小肥鱼"], nicknames: ["肥鱼"], twoPersonDialog: true };
+  const d1 = await g.decide(Object.assign({}, base, { text: "这串流线又掉了" }), {});
+  eq(d1.action, "ignore", "纯陈述别人的事 → 不插");
+  const d2 = await g.decide(Object.assign({}, base, { text: "你们谁知道串流线怎么选" }), {});
+  ok(d2.action !== "ignore", "面向全群的问题 → 放行");
+  const d3 = await g.decide(Object.assign({}, base, { text: "@小肥鱼 帮我看下" }), {});
+  ok(d3.action !== "ignore", "点她名字/@ → 放行");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
