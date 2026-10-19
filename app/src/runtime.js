@@ -793,16 +793,16 @@ export function createRuntime(deps) {
         return { gid: batch.gid, action: "brain_error", error: err, fallback: fallback };
       }
       text = r.text || "";
-      // 【空回复】模型可以选择不说 —— 但**被点名/被搭话时不能一声不吭**。
-      // 事故：人设里「没话说就安静看着」被模型当成许可证，用户连戳三次、三次都是空输出，
-      // 群里看起来就是"她装死"。所以：直接对她说的话，空回复要先催一次，催完还空就兜一句短的。
+      // 【空回复】模型可以选择不说 —— 但**被点名/被搭话时不该一声不吭**。
+      // 处理方式只用大脑：催一次（明确要求结合上文回一句），还空就**真的不说话**。
+      // 刻意不做本地短句兜底 —— 那会让她把"沉默"换成"嗯嗯啊啊"，等于用偷懒换另一种偷懒。
       const aimedAtHer = !!(evt.atBot || evt.atAll || evt.replyId || dec.addressed === true || dec.verdict === "yes");
       if (!String(text).trim() && aimedAtHer) {
         stats.brainSilent = (stats.brainSilent || 0) + 1;
         const r2 = await askBrain({
           promptText: prompt + String.fromCharCode(10, 10) +
-            "【对方在直接跟你说】上面这句是在跟你说话（点你名字或 @ 你）。用你自己的话说一句，别沉默；" +
-            "不知道说什么就接一句、回一下或反问一句都行。",
+            "【对方在直接跟你说】上面那句是在跟你说话（点你名字或 @ 你）。" +
+            "结合上文的聊天内容，用你自己的口气回一句（可以接话、可以反问、可以吐槽），不要说不知道说什么。",
           tier: dec.tier, decision: dec, evt: evt
         });
         if (r2 && r2.ok && String(r2.text || "").trim()) {
@@ -810,13 +810,12 @@ export function createRuntime(deps) {
           if (r2.usage) { const t2 = Number(r2.usage.totalTokens) || 0; budget.record(t2, at); stats.tokens += t2; usage = r2.usage; }
           observe({ kind: "brain_retry", gid: batch.gid, uid: batch.uid, tier: dec.tier, ok: true, text: String(text).slice(0, 60) });
         } else {
-          // 催了还是不说 → 兜一句最短的本地应答，保证被点名不会看起来像死机
-          const fb = localReplies.reply({ reason: ["被点名但大脑沉默"] }, { gid: batch.gid, text: evt.text || "", rng: rng, bucket: dec.bucket });
-          if (fb) { send(batch.gid, fb); stats.segments += 1; stats.brainFallbacks = (stats.brainFallbacks || 0) + 1; }
-          observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "被点名但两次都输出为空 → 已兜底应答", fallback: fb || null });
+          // 催了还是空 → 那就真的不说。不用本地短句兜底（否则"沉默"会退化成"嗯嗯啊啊"）。
+          // 记一笔便于事后核对：这次是被点名了、但模型两轮都没话。
+          observe({ kind: "brain_silent", gid: batch.gid, uid: batch.uid, tier: dec.tier, reason: "被点名但两轮都输出为空 → 不发言（不用本地兜底）" });
           uiMessages.update(batch.gid, function (x) { return String(x.text || "") === String(evt.text || ""); },
-            { note: fb ? "她沉默后兜了一句短应答" : "她沉默（被点名）" });
-          return { gid: batch.gid, action: "brain_silent", fallback: fb || null };
+            { note: "被点名但她两轮都没话说（未用本地兜底）" });
+          return { gid: batch.gid, action: "brain_silent" };
         }
       } else if (!String(text).trim()) {
         // 没人点她、她也没话 → 安静看着是合法的，只记一笔

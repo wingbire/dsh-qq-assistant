@@ -570,7 +570,7 @@ t("runtime: 没人点她时大脑空输出＝安静看着（不发）", async fu
   eq(sent.length, 0, "没人点她、她也没话 → 安静看着，不发");
 });
 
-t("runtime: 被点名时大脑空输出 → 先催一次，仍空就兜一句（不能装死）", async function () {
+t("runtime: 被点名时大脑空输出 → 催一次让大脑结合上文再说；仍空就真不说（不本地兜底）", async function () {
   const sent = [];
   let calls = 0;
   const rt = createRuntime({
@@ -585,7 +585,7 @@ t("runtime: 被点名时大脑空输出 → 先催一次，仍空就兜一句（
   await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "戳戳小肥鱼", now: t0, atBot: true });
   await rt.tick(t0 + 500);
   ok(calls >= 2, "空回复要先催一次（实际调用 " + calls + " 次）");
-  ok(sent.length >= 1, "催完还空就要兜一句，不能一声不吭");
+  eq(sent.length, 0, "催完还空 → 真的不说，不用本地短句兜底");
 });
 
 
