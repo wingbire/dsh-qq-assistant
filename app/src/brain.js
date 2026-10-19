@@ -187,6 +187,10 @@ export function buildArgs(o) {
 export function brainEnv(o) {
   const opts = o || {};
   const env = Object.assign({}, process.env, opts.env || {});
+  // 【关键】官方 dsh.cmd 就是先 set ELECTRON_RUN_AS_NODE=1 再跑 DeepSeek Harness.exe。
+  // 少了这个变量，exe 会以 Electron GUI 启动 —— 每判定一条消息，DSH 窗口就弹到最前一次。
+  // 设上之后同一个 exe 以纯 Node 模式跑，完全无窗口（而且它读得到 app.asar 里的 cli.js）。
+  env.ELECTRON_RUN_AS_NODE = "1";
   env.DSH_HOME = opts.dshHome || DSH_HOME;          // N1：profile 与状态落工作区，零写入 ~/.dsh
   // apiKey 语义：undefined = 自动取（工作区文件 > 环境变量）；null = 明确不要；字符串 = 就用它
   const key = opts.apiKey === undefined ? pickApiKey() : opts.apiKey;
