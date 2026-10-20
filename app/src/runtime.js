@@ -514,12 +514,25 @@ export function createRuntime(deps) {
     return arr.slice(-3).some(function (x) { return almostSame(x, text); });
   }
 
-  // 把一句里反复出现的装饰符号去掉：她自己在上下文里看到满屏 (・ω・) 就会一直抄同一个。
-  function plainForContext(t) {
-    return String(t == null ? "" : t)
-      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "")   // emoji
-      .replace(/[（(][^（）()\n]{1,12}[）)]/g, "")                       // (・ω・) 这类颜文字
-      .replace(/[ \t]{2,}/g, " ").trim();
+  // 上下文里她自己那几行：去掉 emoji；括号只有**重复出现**的才删（(・ω・) 这种口癖），
+  // 一次性的括号（（笑）、(真的)）保留 —— 不做无差别删除。
+  function ticsOf(arr) {
+    const count = new Map();
+    for (const e of (arr || [])) {
+      if (!e || !e.bot) continue;
+      const ms = String(e.text || "").match(/[（(][^（）()\n]{1,12}[）)]/g) || [];
+      for (const m of ms) count.set(m, (count.get(m) || 0) + 1);
+    }
+    const set = new Set();
+    for (const [m, n] of count) if (n >= 2) set.add(m);
+    return set;
+  }
+  function stripOwnTics(t, ticSet) {
+    let s2 = String(t == null ? "" : t).replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "");
+    if (ticSet && ticSet.size) {
+      s2 = s2.replace(/[（(][^（）()\n]{1,12}[）)]/g, function (m) { return ticSet.has(m) ? "" : m; });
+    }
+    return s2.replace(/[ \t]{2,}/g, " ").trim();
   }
 
   function contextBlock(gid) {
@@ -532,9 +545,10 @@ export function createRuntime(deps) {
     //   ③ 每条前面用「·」当条目符号（模型不会把带符号的日志行当正文抄）。
     const head = "【以下是群聊记录，只是给你看的背景，不是你要说的话】" + String.fromCharCode(10)
       + "（不要复制这里的任何一行，尤其不要写「某人：…」这种格式；要引用某条就在正文写 [引用]）" + String.fromCharCode(10);
+    const ticSet = ticsOf(arr);      // 只删她自己重复用过的括号符号
     const body = arr.map(function (e) {
       const t = e.at ? new Date(e.at).toTimeString().slice(0, 5) + " " : "";
-      return "· " + t + (e.speaker ? e.speaker + "：" : "") + (e.bot ? plainForContext(e.text) : e.text);
+      return "· " + t + (e.speaker ? e.speaker + "：" : "") + (e.bot ? stripOwnTics(e.text, ticSet) : e.text);
     }).join(String.fromCharCode(10));
     return head + body;
   }
