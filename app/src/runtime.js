@@ -514,6 +514,14 @@ export function createRuntime(deps) {
     return arr.slice(-3).some(function (x) { return almostSame(x, text); });
   }
 
+  // 把一句里反复出现的装饰符号去掉：她自己在上下文里看到满屏 (・ω・) 就会一直抄同一个。
+  function plainForContext(t) {
+    return String(t == null ? "" : t)
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "")   // emoji
+      .replace(/[（(][^（）()\n]{1,12}[）)]/g, "")                       // (・ω・) 这类颜文字
+      .replace(/[ \t]{2,}/g, " ").trim();
+  }
+
   function contextBlock(gid) {
     const arr = history.get(String(gid)) || [];
     if (!arr.length) return "";
@@ -526,7 +534,7 @@ export function createRuntime(deps) {
       + "（不要复制这里的任何一行，尤其不要写「某人：…」这种格式；要引用某条就在正文写 [引用]）" + String.fromCharCode(10);
     const body = arr.map(function (e) {
       const t = e.at ? new Date(e.at).toTimeString().slice(0, 5) + " " : "";
-      return "· " + t + (e.speaker ? e.speaker + "：" : "") + e.text;
+      return "· " + t + (e.speaker ? e.speaker + "：" : "") + (e.bot ? plainForContext(e.text) : e.text);
     }).join(String.fromCharCode(10));
     return head + body;
   }
