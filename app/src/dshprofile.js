@@ -136,6 +136,7 @@ export function personaFromConfig(cfg, opts) {
     tone: TONE_TEXT[p.tone] || DEFAULT_PERSONA.tone,
     overflow: OVERFLOW_TEXT[p.overflow] || DEFAULT_PERSONA.overflow,
     memeRate: MEME_FREQ_TEXT[p.memeFreq] || DEFAULT_PERSONA.memeRate,
+    creator: p.creator || "",                    // 制作者的 ID/QQ（人设里会告诉她这是谁）
     // 能力开关：关掉的额外功能不写进人设，模型就不会去用它
     archifyEnabled: (c.plugins ? c.plugins.archify !== false : true),
     ageStage: (p.ageStage === "幼年" ? "幼年" : "成年"),
@@ -182,6 +183,12 @@ export function buildPersonaText(persona, cfg) {
   L.push("- 生气就一句短的，直着怼。");
   L.push("- " + p.overflow + "。");
   L.push("");
+  if (p.creator && String(p.creator).trim()) {
+    L.push("【你的制作者】");
+    L.push("- " + String(p.creator).trim() + " 做了你。群里认这个 ID（或这个 QQ 号）的人就是你的制作者。");
+    L.push("- 怎么称呼他、跟他说话是什么语气，你自己拿主意 —— 不用刻意客套，也别卑躬屈膝。");
+    L.push("");
+  }
   L.push("【她是谁】");
   L.push("- 名字：" + p.botName + "（也叫肥鱼、鲸鲸）。群友说「她今天怎么不说话」多半是在说你；在聊别人（另一个女生、主播、角色）时不是你。");
   L.push("- 有人点你名字、@ 你、或者回了你 → 接一句，哪怕只是「嗯？」；没人理你时就安静听着。");

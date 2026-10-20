@@ -3,6 +3,7 @@ import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { PRIOR_WEIGHTS } from '../app/src/probability.js';
 import { loadCorpus, labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
+import { sniffExt } from '../app/src/vision.js';
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
 import { localReply, isGreeting, LOCAL_POOL, ADDRESSED_POOL, GREET_POOL, poolFor, createLocalReplies } from "../app/src/localreply.js";
@@ -3772,6 +3773,21 @@ t("记忆：每 N 条发言让她自己总结一次并写进档案", async funct
   }
   ok(saved.length >= 1, "第 5 条发言后应写一次档案");
   ok(saved[0] && String(saved[0].memo || "").indexOf("串流") >= 0, "写进去的是她自己总结的内容");
+});
+t("识图：按文件头判格式（GIF 存成 .jpg 会被读图工具拒绝）", function () {
+  eq(sniffExt(Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 2, 3, 4, 5, 6])), "gif");
+  eq(sniffExt(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])), "png");
+  eq(sniffExt(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])), "jpg");
+  eq(sniffExt(Buffer.from("RIFF0000WEBP", "ascii")), "webp");
+  eq(sniffExt(Buffer.from([0, 0, 0, 0])), "");
+});
+
+t("人设：填了制作者才写那一段，怎么称呼由她自己定", function () {
+  const a = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼", creator: "某ID（QQ 123）" }, runtime: {}, plugins: {} }), {});
+  ok(a.indexOf("某ID（QQ 123）") >= 0 && a.indexOf("做了你") >= 0, "要写明是谁做了她");
+  ok(a.indexOf("你自己拿主意") >= 0, "称呼由她决定，不写死");
+  const b = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: {} }), {});
+  ok(b.indexOf("你的制作者") < 0, "没填就不提");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

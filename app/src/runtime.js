@@ -373,6 +373,12 @@ export function createRuntime(deps) {
     stats.proactiveSpoken += 1;
     stats.replies += 1;
     observe({ kind: "proactive_sent", gid: batch.gid, reason: p.reason, keywords: p.keywords, text: segs.join("") });
+    // 后台消息表标注：这条是「判定为不回、但她主动搭了一句」，避免看着像"记错了"
+    try {
+      const anchorText = String((batch.evt && batch.evt.text) || "");
+      if (anchorText) uiMessages.update(batch.gid, function (x) { return String(x.text || "") === anchorText; },
+        { note: "主动搭了一句：" + segs.join("").slice(0, 40) });
+    } catch (e) { }
     return { segments: segs, reason: p.reason };
   }
 

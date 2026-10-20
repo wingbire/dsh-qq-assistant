@@ -94,6 +94,18 @@ export function imageSegmentsOf(evt) {
   return out;
 }
 
+// 按文件头判真实格式：QQ 的图片 URL 几乎都以 .jpg 结尾，但实际可能是 GIF/PNG/WEBP。
+// 以前按 URL 猜扩展名 → 存成 .jpg → 按 JPEG 解码失败 → 用户看到的就是「她看不到图」。
+export function sniffExt(buf) {
+  if (!buf || buf.length < 12) return "";
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "gif";
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return "bmp";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "webp";
+  return "";
+}
+
 export function mimeOf(file) {
   const e = String(file || "").toLowerCase();
   if (e.endsWith(".png")) return "image/png";
@@ -128,7 +140,8 @@ export async function downloadImage(url, outDir, opts) {
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > (o.maxBytes || VISION_DEFAULTS.maxBytes)) return { ok: false, error: "图片过大 " + buf.length + " 字节" };
     fs.mkdirSync(outDir, { recursive: true });
-    const ext = (String(url).match(/\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i) || [null, "jpg"])[1].toLowerCase();
+    const urlExt = (String(url).match(/\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i) || [null, "jpg"])[1].toLowerCase();
+    const ext = sniffExt(buf) || urlExt;          // 文件头优先，URL 只作兜底
     const file = path.join(outDir, "img-" + Date.now() + "-" + Math.floor(Math.random() * 1e6) + "." + ext);
     fs.writeFileSync(file, buf);
     return { ok: true, path: file, bytes: buf.length, mime: mimeOf(file) };
