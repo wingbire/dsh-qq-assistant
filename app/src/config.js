@@ -187,6 +187,11 @@ export function runtimeConfig(cfg) {
     coalesceWindowMs: getPath(c, "runtime.coalesceWindowMs") != null ? getPath(c, "runtime.coalesceWindowMs") : 6000,  // N23
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
     maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 6,                    // N6：超长按标点拆成多条（不再合并压缩）
+    // 记忆：每 N 条发言，让她自己总结一次「想记住的事」，写进群档案（profiles/g-<gid>.json）
+    memory: {
+      enabled: getPath(c, "runtime.memory.enabled") !== false,
+      everyN: Math.max(5, Number(getPath(c, "runtime.memory.everyN")) || 30)
+    },
     uiMessageLimit: numOf(getPath(c, "runtime.uiMessageLimit"), 30),   // 配置端"收到的消息"每群保留多少条（满了丢最旧）
     // 语音转写侧车（tools/stt-server.py，OpenAI 兼容；默认端点就是本机，音频不出本机）
     stt: {

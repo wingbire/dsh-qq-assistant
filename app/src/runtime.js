@@ -376,6 +376,36 @@ export function createRuntime(deps) {
     return { segments: segs, reason: p.reason };
   }
 
+  // 【记忆】每 N 条发言，让她自己总结一次「想记住的事」，写进群档案（profiles/g-<gid>.json）。
+  // 记忆由她自己写，不是程序按反馈算 —— 用户要求的形态。
+  const memCount = new Map();
+  async function maybeMemo(gid, atMs) {
+    if (!askBrain) return null;
+    const mem = rc.memory || {};
+    if (mem.enabled === false) return null;
+    const everyN = Math.max(5, Number(mem.everyN) || 30);
+    const k = String(gid);
+    const c = (memCount.get(k) || 0) + 1;
+    memCount.set(k, c);
+    if (c % everyN !== 0) return null;
+    const arr = (history.get(k) || []).slice(-30);
+    if (arr.length < 5) return null;
+    const log = arr.map(function (e) { return (e.speaker || "") + "：" + String(e.text || "").slice(0, 80); }).join(String.fromCharCode(10));
+    const promptText = "【记忆整理】你在群里。下面是最近的聊天。写你想记住的东西：谁是谁、发生过什么事、你对谁有什么看法。"       + String.fromCharCode(10) + "每条一行，最多 5 条；没什么值得记的就只回「无」。不要客套，不要总结整段对话。"       + String.fromCharCode(10, 10) + log;
+    let out = null;
+    try { out = await askBrain({ promptText: promptText, tier: "low", memory: true }); } catch (e) { out = null; }
+    if (!out || !out.ok) { observe({ kind: "memo_fail", gid: gid, error: (out && out.error) || "无输出" }); return null; }
+    const txt = String(out.text || "").trim();
+    if (!txt || txt === "无" || txt.length < 2) { observe({ kind: "memo_empty", gid: gid }); return null; }
+    if (!store || typeof store.saveProfile !== "function") return null;
+    const prof = store.loadProfile(gid) || {};
+    prof.memo = txt.slice(0, 800);
+    prof.memoAt = new Date(atMs || now()).toISOString();
+    store.saveProfile(gid, prof);
+    observe({ kind: "memo_saved", gid: gid, chars: prof.memo.length });
+    return prof.memo;
+  }
+
   // N8 + 缓存优先级：群档案拆成两块 —— 少变的（概况 / 本群专属人设）在前，多变的（兴趣词条）在后。
   // 一块里混着放的话，兴趣词条一翻就把后面的"本轮任务"也一起打散。
   function profileFactsBlock(gid) {
@@ -387,6 +417,9 @@ export function createRuntime(deps) {
     // 而且一改就打散前缀缓存。放这里既好改又不影响缓存。
     if (prof.personaText && String(prof.personaText).trim()) {
       lines.push("【本群专属人设（在这个群里额外要遵守的）】" + String.fromCharCode(10) + String(prof.personaText).trim());
+    }
+    if (prof.memo && String(prof.memo).trim()) {
+      lines.push("【你自己记下的事（你之前写给自己看的，不是新消息）】" + String.fromCharCode(10) + String(prof.memo).trim());
     }
     if (prof.rounds > 0) {
       if (bot.profileFacts) { const t = bot.profileFacts(gid); if (t) lines.push(t); }
@@ -974,6 +1007,7 @@ export function createRuntime(deps) {
       rs.push(sent.join(" "));
       while (rs.length > 5) rs.shift();
       recentSent.set(hk, rs);
+      try { await maybeMemo(evt.gid, at); } catch (e6) { }
       const hCap = Math.max(0, rc.contextWindow != null ? rc.contextWindow : 10);
       while (hCap && hArr.length > hCap) hArr.shift();
       history.set(hk, hArr);

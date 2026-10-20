@@ -3741,6 +3741,38 @@ t("runtime: 刚说过几乎一样的话就不再重复（内容判断，不是�
   await rt.tick(t0 + 3600);
   eq(sent.length, 1, "第二次几乎一样的回复不发");
 });
+t("记忆：群档案里她自己写下的事会进 prompt", async function () {
+  const prompts = [];
+  const store = { addObservation: function () {}, loadProfile: function () { return { memo: "鲸鲸喜欢吃甜食；群友甲在学串流" }; } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 60, coalesceMaxBatch: 5, contextWindow: 10 },
+    store: store, bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "好", usage: { totalTokens: 3 } }; },
+    send: function () {}, sendImage: function () {}, now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "小肥鱼在吗", now: t0 });
+  await rt.tick(t0 + 500);
+  ok(prompts.some(function (p) { return String(p).indexOf("鲸鲸喜欢吃甜食") >= 0; }), "她自己的记忆要进 prompt");
+});
+
+t("记忆：每 N 条发言让她自己总结一次并写进档案", async function () {
+  const saved = [];
+  const store = { addObservation: function () {}, loadProfile: function () { return {}; }, saveProfile: function (gid, prof) { saved.push(prof); } };
+  const rt = createRuntime({
+    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 30, coalesceMaxBatch: 5, contextWindow: 10, memory: { enabled: true, everyN: 5 } },
+    store: store, bot: fakeBot({ action: "brain", tier: "mid" }),
+    askBrain: async function (o) { return { ok: true, text: String(o.promptText || "").indexOf("记忆整理") >= 0 ? "甲在学串流\n乙爱吃甜" : "好", usage: { totalTokens: 3 } }; },
+    send: function () {}, sendImage: function () {}, now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
+  });
+  const t0 = Date.now();
+  for (let i = 0; i < 5; i++) {
+    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "第" + i + "句", now: t0 + i * 1000 });
+    await rt.tick(t0 + i * 1000 + 500);
+  }
+  ok(saved.length >= 1, "第 5 条发言后应写一次档案");
+  ok(saved[0] && String(saved[0].memo || "").indexOf("串流") >= 0, "写进去的是她自己总结的内容");
+});
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
 console.log("=== 骨架回归测试 ===");
