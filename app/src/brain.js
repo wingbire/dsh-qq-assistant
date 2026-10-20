@@ -129,7 +129,8 @@ export function buildTaskText(depth, policy, keywords) {
   const lines = [];
   lines.push("【本轮任务】");
   lines.push("档位：" + (depth === "high" ? "详细" : depth === "mid" ? "总结" : "短评"));
-  lines.push("字数：约 " + Math.round(policy.maxChars * 0.6) + "–" + policy.maxChars + " 字（软限制，想说的说不完可以到上限；别为了凑数硬挤）；说长了会按句号拆成两条发，不会吞掉你的话");
+  // 不再给数字区间：数字会被当成"该写多少"的目标。长短由她自己判断。
+  lines.push("长短由你决定：一般一两句就够，对方明确要你展开时才展开。别为了凑数硬挤，也别把话截一半。");
   lines.push("搜索次数：" + policy.search + (policy.search ? "；关键词：" + (keywords || []).join("、") : "（凭已有知识回答，不要编造实时信息）"));
   lines.push("要专门回某一条消息（而不是顺着聊）时，在正文里写 [引用]；别人 @ 你则不用。");
   lines.push("【重要】上面那些带「·」和时间戳的行是聊天记录，只用来理解上下文 —— 不要复制它们，不要写「某人：…」这种格式，直接说你要说的话。");

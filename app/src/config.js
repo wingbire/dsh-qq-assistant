@@ -186,7 +186,7 @@ export function runtimeConfig(cfg) {
     searchPerTier: getPath(c, "runtime.searchPerTier") || [0, 1, 1],
     coalesceWindowMs: getPath(c, "runtime.coalesceWindowMs") != null ? getPath(c, "runtime.coalesceWindowMs") : 6000,  // N23
     coalesceMaxBatch: getPath(c, "runtime.coalesceMaxBatch") != null ? getPath(c, "runtime.coalesceMaxBatch") : 5,
-    maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 3,                    // N6
+    maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 6,                    // N6：超长按标点拆成多条（不再合并压缩）
     uiMessageLimit: numOf(getPath(c, "runtime.uiMessageLimit"), 30),   // 配置端"收到的消息"每群保留多少条（满了丢最旧）
     // 语音转写侧车（tools/stt-server.py，OpenAI 兼容；默认端点就是本机，音频不出本机）
     stt: {
