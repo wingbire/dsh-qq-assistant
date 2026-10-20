@@ -260,6 +260,18 @@ export function createWebUi(deps) {
       return sendJson(res, 200, napcatRevealFn());
     }
 
+    // 清空某个群的「她自己记下的事」（记忆由她每 N 次发言自己总结，这里只给管理员一个后悔药）
+    if (p === "/api/memo/clear" && req.method === "POST") {
+      const body = await readBody(req);
+      let b = null;
+      try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
+      if (!store || !b || !b.gid) return sendJson(res, 400, { ok: false, error: "缺少 gid" });
+      const prof = store.loadProfile(b.gid) || {};
+      prof.memo = "";
+      prof.memoAt = new Date().toISOString();
+      store.saveProfile(b.gid, prof);
+      return sendJson(res, 200, { ok: true });
+    }
     if (p === "/api/groups") {
       const seen = new Map();
       if (store) {

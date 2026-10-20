@@ -610,8 +610,19 @@
           '<div class="hint" style="margin-top:6px">群档案由大脑每 20 次回复（refN）自动重炼一次；你也可以直接在这里手写一份。</div>' +
           '<div class="ctl-row" style="margin-top:10px"><button class="btn-sm good" id="btn-create-profile">现在就建一份</button></div></div></div>';
       }
+      // 她自己记下的事（每 N 次发言总结一次）—— 管理员能看到她到底记住了什么、什么时候更新的
+      var everyN = (S.values && S.values.runtime && S.values.runtime.memory && S.values.runtime.memory.everyN) || 30;
+      var memoCard = '<div class="card"><div class="head">她记下的事' +
+        '<span class="muted" style="font-weight:400;font-size:12px;margin-left:8px">每 ' + everyN + ' 次发言她自己总结一次</span>' +
+        (p.memo ? '<button class="btn-sm" data-memo-clear="' + esc(S.gid) + '" style="float:right">清空</button>' : "") +
+        '</div><div class="body">' +
+        (p.memo
+          ? '<pre style="white-space:pre-wrap;margin:0;font-family:inherit">' + esc(p.memo) + '</pre>' +
+            '<div class="hint" style="margin-top:6px">第 ' + (p.memoVersion || 0) + ' 版　最后更新 ' + esc(p.memoAt || "—") + '</div>'
+          : '<div class="muted">还没有记忆 —— 攒够 ' + everyN + ' 次发言后，她会自己总结一次想记住的事。</div>') +
+        '</div></div>';
       var meta = '<div class="hint" style="margin:-2px 0 8px">重炼 ' + (p.rounds || 0) + ' 轮　最后更新 ' + esc(p.updatedAt || "—") + '　' + esc(p.updatedBy === "admin" ? "（管理员手改过）" : "（大脑自动提炼）") + '</div>';
-      return '<div class="card"><div class="head">群 ' + esc(S.gid) + ' 的群档案' +
+      return memoCard + '<div class="card"><div class="head">群 ' + esc(S.gid) + ' 的群档案' +
         '<span class="muted" style="font-size:12px">保存后立刻生效</span></div><div class="body">' + meta +
         '<div class="field"><div class="label">常聊、容易接话的话题</div><div class="hint">一行一个（也可用逗号/顿号分隔）</div>' +
           '<div class="ctrl"><textarea id="pf-interests" rows="4" style="width:420px">' + esc((p.interests || []).join("\n")) + '</textarea></div></div>' +
@@ -1180,6 +1191,13 @@
       if (cbtn) {
         api("/api/corpus/label", { id: cbtn.getAttribute("data-cid"), expect: cbtn.getAttribute("data-expect") }).then(function (r) {
           toast(r.ok ? "已标注" : (r.error || "标注失败"), !r.ok); render();
+        });
+        return;
+      }
+      var mc = e.target.closest("[data-memo-clear]");
+      if (mc) {
+        api("/api/memo/clear", { gid: mc.getAttribute("data-memo-clear") }).then(function (r) {
+          toast(r.ok ? "已清空她的记忆" : (r.error || "清空失败"), !r.ok); render();
         });
         return;
       }
