@@ -156,6 +156,8 @@ export function classify(text, ctx) {
 
   return {
     buckets: buckets, topicDepth: depth, keywords: keywords,
+    ...flags,                       // 兼容旧调用：gates 里读的是 cls.isQuestion / cls.explicitSearch 等；
+                                    // 以前只放在 flags 下，导致「帮我查一下」的 explicitSearch 恒为 undefined → 搜索从未触发
     interestHit: interest, hits: hits, flags: flags, length: t.length
   };
 }
