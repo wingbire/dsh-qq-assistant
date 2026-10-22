@@ -936,6 +936,8 @@ export function createRuntime(deps) {
             observe({ kind: "bili_watch", gid: evt.gid, bvid: w.bvid, shots: w.shots, ms: Date.now() - bt0 });
           } else if (w && !w.ok) {
             observe({ kind: "bili_fail", gid: evt.gid, error: w.error });
+            // 打不开就如实告诉她，别让她对着空气编内容
+            taskText = injectSummary(taskText, "【注意】这个视频没打开（" + String(w.error || "未知原因") + "）。别编视频内容，直接说打不开、让她换个链接或晚点再试。");
           }
         } catch (e) { }
       }

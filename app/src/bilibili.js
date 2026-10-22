@@ -89,9 +89,18 @@ export function createBilibili(opts) {
     // 短链（b23.tv/xxx）先跟一次重定向拿到真实地址，再从中取 BV 号
     if (!bvid && /b23\.tv|bilibili\.com\/video/i.test(String(link || ""))) {
       try {
-        const r = await fetchFn(link, { method: "GET", redirect: "follow", headers: { "User-Agent": UA, Referer: REF }, signal: AbortSignal.timeout(15000) });
-        const finalUrl = String(r && r.url || "");
-        bvid = resolveBvid(finalUrl);
+        // 关键是「不跟重定向」：跟下去会被 B 站风控丢到验证码页面，Location 头里才带着真实 BV
+        const r = await fetchFn(link, { method: "GET", redirect: "manual", headers: { "User-Agent": UA, Referer: REF }, signal: AbortSignal.timeout(15000) });
+        let loc = "";
+        try { loc = String((r && r.headers && r.headers.get && r.headers.get("location")) || ""); } catch (e2) { }
+        if (loc) {
+          if (loc.indexOf("http") !== 0) loc = new URL(loc, link).toString();
+          bvid = resolveBvid(loc);
+        }
+        if (!bvid) {      // 有的实现不给 Location，再兜底跟一次
+          const r2 = await fetchFn(link, { method: "GET", redirect: "follow", headers: { "User-Agent": UA, Referer: REF }, signal: AbortSignal.timeout(15000) });
+          bvid = resolveBvid(String((r2 && r2.url) || ""));
+        }
       } catch (e) { }
     }
     if (!bvid) return { ok: false, error: "没认出 BV 号（短链解析失败）" };
