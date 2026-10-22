@@ -66,6 +66,23 @@ export function createUiMessages(opts) {
     return false;
   }
 
+  // 兜底：超过 ms 还没有判定的行（程序重启、批处理异常）标记为过期，别永远显示「判定中」
+  function markStale(ms) {
+    const cut = Date.now() - (Number(ms) || 120000);
+    let k = 0;
+    for (const [gid, arr] of byGroup) {
+      for (const r of arr) {
+        if (r && !r.verdict && (Number(r.at) || 0) < cut) {
+          r.verdict = "expired";
+          r.note = "程序重启或处理异常，这条没判完";
+          k += 1;
+        }
+      }
+    }
+    if (k) save(false);
+    return k;
+  }
+
   function list(gid, limit) {
     const a = (byGroup.get(String(gid)) || []).slice();
     if (!limit) return a;
@@ -115,7 +132,7 @@ export function createUiMessages(opts) {
 
   load();
   return {
-    add: add, update: update, list: list, all: all,
+    add: add, update: update, list: list, all: all, markStale: markStale,
     groups: function () { return Array.from(byGroup.keys()); },
     perGroup: perGroup, maxGroups: maxGroups,
     flush: flush,

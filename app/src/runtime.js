@@ -661,16 +661,28 @@ export function createRuntime(deps) {
     return { action: "pending", pending: coalescer.size() };
   }
 
+  let lastStaleSweep = 0;
   async function tick(t) {
     const at = t == null ? now() : t;
     if (busy) return { skipped: "busy" };
+    if (at - lastStaleSweep > 60000) { lastStaleSweep = at; try { const k = uiMessages.markStale && uiMessages.markStale(180000); if (k) observe({ kind: "ui_stale_marked", count: k }); } catch (e) { } }
     settle(tracker.sweep(at), at);          // 窗口内没人接 → no_one_replied
     const batches = coalescer.flushDue(at);
     if (!batches.length) return { batches: 0, results: [] };
     busy = true;
     const results = [];
-    try { for (const b of batches) results.push(await handleBatch(b, at)); }
-    finally { busy = false; }
+    try {
+      for (const b of batches) {
+        try { results.push(await handleBatch(b, at)); }
+        catch (e) {
+          observe({ kind: "batch_fail", gid: b.gid, error: String((e && e.message) || e).slice(0, 120) });
+          // 这一批的 UI 行别永远挂在「判定中」
+          for (const ev of (b.evts || [])) {
+            try { uiMessages.update(b.gid, function (r) { return !r.verdict && String(r.text || "") === String(ev.text || ""); }, { verdict: "error", note: "处理时出错了，这条没判完" }); } catch (e2) { }
+          }
+        }
+      }
+    } finally { busy = false; }
     return { batches: batches.length, results: results };
   }
 
