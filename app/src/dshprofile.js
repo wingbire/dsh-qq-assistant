@@ -247,7 +247,7 @@ export function buildPersonaText(persona, cfg) {
   }
   if (p.archifyEnabled) {
     T.push("【画图】");
-    T.push("- 有人要流程图/架构图/时序图/步骤图时，在正文末尾写 [图表: 一句话说清画什么]。一条最多一张；画好了程序会发图。");
+    T.push("- 有人要流程图/架构图/时序图/步骤图时，就直接画：在正文末尾写 [图表: 一句话说清画什么]，画好了程序会把图发出去。别先回答我只会画什么，也别让画图占掉正文。");
     T.push("");
   }
   const sttOn = !!(cfg && ((cfg.runtime && cfg.runtime.stt && cfg.runtime.stt.enabled === true) || (cfg.stt && cfg.stt.enabled === true)));

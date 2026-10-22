@@ -775,7 +775,7 @@ export function createRuntime(deps) {
       if (evt.text) rawEvt.text = evt.text;
       observe({
         kind: "decision", gid: batch.gid, uid: batch.uid, speaker: evt.speaker,
-        text: evt.text, atBot: !!evt.atBot, replyToBot: !!evt.replyToBot, twoPerson: !!dec.twoPerson, continuation: Number(dec.continuation) || 0,
+        text: evt.text, atBot: !!evt.atBot, replyToBot: !!evt.replyToBot, replyId: evt.replyId || null, replyQuote: evt.replyQuote ? String(evt.replyQuote).slice(0, 60) : null, replyToOther: !!evt.replyToOther, twoPerson: !!dec.twoPerson, continuation: Number(dec.continuation) || 0,
         action: dec.action, verdict: dec.verdict, pSay: dec.pSay, U: dec.U,
         tier: dec.tier, maxChars: dec.maxChars, search: dec.search, keywords: dec.keywords,
         bucket: dec.bucket, arm: dec.arm, reason: dec.reason, injected: dec.injected
