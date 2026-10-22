@@ -3,7 +3,7 @@ import { splitReply } from "./split.js";
 import { createBudget } from "./budget.js";
 import { createBrakes } from "./brakes.js";
 import { createDefaultCommands } from "./commands.js";
-import { createMemeLibrary, shouldAttachMeme } from "./meme.js";
+import { createMemeLibrary, shouldAttachMeme, scoreRow } from "./meme.js";
 import { resolveLocalImage, downloadImage, injectVision } from "./vision.js";
 import { parseVoiceTag } from "./tts.js";
 import { parseIllustration, illustrationFor, parseChart } from "./dshprofile.js";
@@ -189,7 +189,7 @@ export function createRuntime(deps) {
   }
 
   // N15：情绪标记 → 去 dsh-meme 图库取图，按「关/少/中」与档位节制
-  async function attachMeme(gid, mood, tier) {
+  async function attachMeme(gid, mood, tier, replyText) {
     const key = String(gid);
     const since = repliesSinceMeme.get(key);
     const gate = shouldAttachMeme(tier, mood, {
@@ -202,10 +202,29 @@ export function createRuntime(deps) {
     if (!mood) return null;
     if (!gate.attach) { stats.memesSuppressed += 1; observe({ kind: "meme_suppressed", gid: key, mood: mood, reason: gate.reason }); return null; }
     if (!memes || !memes.ready || !sendImage) { stats.memesMissed += 1; return null; }
-    const hit = memes.find(mood);
-    // 只认「照菜单抄的整句描述」（90/40+ 分）；靠短关键词蒙到的 30 分一律不发
-    const memeTooWeak = !hit || Number(hit.score) < 40;
-    if (memeTooWeak) { stats.memesMissed += 1; observe({ kind: "meme_miss", gid: key, mood: mood, score: (hit && hit.score) || 0 }); return null; }
+    // 选图分两条路：
+    // ① 她写的是标签（angry/daily/…）→ 先锁标签，再在标签内部挑一张贴正文的（挑不到就随机）；
+    //    这样"跨语义乱配"（daily 里挑出生气脸）从结构上就不会发生。
+    // ② 否则按描述全局找，但必须 ≥40 分（整句描述命中），短关键词蒙到的 30 分一律不发。
+    let hit = null;
+    try {
+      const tagRows = (typeof memes.byTag === "function" && mood) ? memes.byTag(mood) : null;
+      if (tagRows && tagRows.length) {
+        let best = null, bestScore = 0;
+        for (const r of tagRows) {
+          const s = scoreRow(r, replyText || "");
+          if (s > bestScore) { bestScore = s; best = r; }
+        }
+        if (!best) best = tagRows[Math.floor(Math.random() * tagRows.length)];
+        hit = { tag: best.tag, file: best.file_name, path: best.path, score: bestScore };
+        observe({ kind: "meme_by_tag", gid: key, tag: best.tag, file: best.file_name, pool: tagRows.length, score: bestScore });
+      }
+    } catch (e) { hit = null; }
+    if (!hit) {
+      const found = memes.find(mood);
+      if (found && Number(found.score) >= 40) hit = found;
+      else { stats.memesMissed += 1; observe({ kind: "meme_miss", gid: key, mood: mood, score: (found && found.score) || 0 }); return null; }
+    }
     sendImage(key, hit.path);
     stats.memesSent += 1;
     repliesSinceMeme.set(key, 0);
@@ -1113,7 +1132,7 @@ export function createRuntime(deps) {
       }
     }
     // 图表和表情包是两回事，可以各发一张（图是图、表情是表情，用户也能接受两张）
-    const memeInfo = await attachMeme(evt.gid, parsed.mood, dec.tier);
+    const memeInfo = await attachMeme(evt.gid, parsed.mood, dec.tier, parsed.text || "");
     stats.replies += 1;
     {
       const gs = gstat(evt.gid);
