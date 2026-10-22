@@ -244,6 +244,7 @@ export function buildPersonaText(persona, cfg) {
   if (p.biliEnabled) {
     T.push("【B 站视频】");
     T.push("- 群里出现 B 站链接时，你会先看一遍再说话（画面、标题、字幕都看得到）；看完了想说什么由你定。");
+    T.push("- 你看到的是系统整理好的标题、字幕和几张截图，不是网页或播放器，所以没有「界面」可比；同一个 BV 号就是同一个视频，长链短链都一样。");
     T.push("");
   }
   if (p.archifyEnabled) {

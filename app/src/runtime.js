@@ -932,7 +932,8 @@ export function createRuntime(deps) {
           const wantFrames2 = Math.max(1, Math.min(12, Number(baseF2) + (/认真|仔细|好好看|仔细看/.test(t2) ? 4 : 0) - (/随便看|简单看|大概看/.test(t2) ? 2 : 0)));
           const w = await bili.watch(evt.text || "", { frames: wantFrames2, listenPerFrame: (rc.bili && rc.bili.listenPerFrame) || 0 });
           if (w && w.ok && w.text) {
-            taskText = injectSummary(taskText, "【这条消息里的 B 站视频（刚看了一眼）】" + String.fromCharCode(10) + w.text);
+            taskText = injectSummary(taskText, "【这条消息里的 B 站视频（刚看了一眼）】" + String.fromCharCode(10) + w.text + String.fromCharCode(10) +
+              "（说明：你拿到的是文字材料 + 几张截图，不是网页；同一个 BV 号就是同一个视频，长链短链没区别。）");
             observe({ kind: "bili_watch", gid: evt.gid, bvid: w.bvid, shots: w.shots, ms: Date.now() - bt0 });
           } else if (w && !w.ok) {
             observe({ kind: "bili_fail", gid: evt.gid, error: w.error });
