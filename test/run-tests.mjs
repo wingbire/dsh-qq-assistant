@@ -16,7 +16,7 @@ import { createStore } from "../app/src/store.js";
 import { createAddressee } from "../app/src/addressee.js";
 import { parseEvents, buildArgs, brainEnv, cacheHitRate, depthPolicy, PROFILE_DEFAULT, DEPTH_POLICY_DEFAULT, ensureBrainProfile } from "../app/src/brain.js";
 import { maskKey, parseRefsApiKey, pickApiKey, loadSecrets, saveSecrets } from "../app/src/secrets.js";
-import { buildPersonaText, renderProfilePatch, writeProfilePatch, writeTierOverlay, renderTierOverlay, writeAllTierOverlays, TIER_EFFORT, DEFAULT_PERSONA, PROFILE_ID } from "../app/src/dshprofile.js";
+import { buildPersonaText, buildChannelText, renderProfilePatch, writeProfilePatch, writeTierOverlay, renderTierOverlay, writeAllTierOverlays, TIER_EFFORT, DEFAULT_PERSONA, PROFILE_ID } from "../app/src/dshprofile.js";
 import { DATA_ROOT, DSH_HOME, APP_ROOT, BRAIN_TMP_DIR } from "../app/src/paths.js";
 import { splitReply, splitSentences, cutAtSentence } from "../app/src/split.js";
 import { createCoalescer, mergeBucket, pickAnchor } from "../app/src/coalesce.js";
@@ -249,7 +249,7 @@ t("人设：许可在前、禁令收敛（机制上防止规则把角色限死�
   ok(cans >= 8, "许可要多于禁令（可以 " + cans + " 处 vs 禁令 " + bans + " 处）");
   ok(t.indexOf("【我可以】") >= 0, "要有许可清单");
   ok(t.indexOf("【你的态度】") >= 0, "要有正面的态度引导（不用句型库：实测句子会被照抄）");
-  ok(t.indexOf("宁可像个活人说错一句话") >= 0, "要有总原则兜底");
+  ok(t.indexOf("你是 DeepSeek 的拟人形象") >= 0, "要有身份内核兜底");
   const never = t.slice(t.indexOf("【绝不】"), t.indexOf("【你的态度】")).split(String.fromCharCode(10))
     .filter(function (x) { return x.trim().indexOf("- ") === 0; });
   ok(never.length <= 4, "【绝不】最多 4 条，现在 " + never.length + " 条");
@@ -354,7 +354,7 @@ t("衔接性：页面引用的 key 必须在字段表里，表里的字段必须
   const ghosts = used.filter(function (k) { return allKeys.indexOf(k) < 0; });
   eq(ghosts.length, 0, "页面引用了表里不存在的字段（就是这次的 coalesceMaxBatch 那类漏项）：" + ghosts.join(","));
   // ② 每个字段要么在某个页面的 key 清单里，要么属于有归宿的分组
-  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "B站", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道", "外审"];
+  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "B站", "形象与立绘", "用户信息", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道", "外审"];
   const homeless = [];
   for (const g of table.分组) {
     if (pageGroups.indexOf(g.名) < 0) homeless.push(g.名 + "(整个分组没人渲染)");
@@ -370,11 +370,11 @@ t("衔接性：人设的能力声明跟着配置开关走", function () {
   on.runtime.voice = { enabled: true, voice: "Microsoft Huihui" };
   on.runtime.stt = { enabled: true };
   on.plugins = { meme: true, illustration: true, archify: true };
-  const t1 = buildPersonaText(personaFromConfig(on), on);
-  ok(t1.indexOf("【看图】") >= 0, "识图开着 → 人设要写【看图】");
-  ok(t1.indexOf("【语音】") >= 0, "语音开着 → 人设要写【语音】");
-  ok(t1.indexOf("【表情包】") >= 0 && t1.indexOf("【立绘（图片）】") >= 0 && t1.indexOf("【画图】") >= 0, "表达层开关开着 → 人设要写对应块");
-  ok(t1.indexOf("【引用回复】") >= 0, "引用回复块在");
+  const t1 = buildPersonaText(personaFromConfig(on), on) + "\n" + buildChannelText("group", personaFromConfig(on), on);
+  ok(t1.indexOf("看图") >= 0, "识图开着 → 要写看图");
+  ok(t1.indexOf("语音") >= 0, "语音开着 → 人设要写【语音】");
+  ok(t1.indexOf("表情包") >= 0 && t1.indexOf("立绘") >= 0 && t1.indexOf("画图") >= 0, "表达层开关开着 → 人设要写对应块");
+  ok(t1.indexOf("引用回复") >= 0, "引用回复块在");
   ok(t1.indexOf("【我可以】") >= 0 && t1.indexOf("【绝不】") >= 0 && t1.indexOf("【你的态度】") >= 0, "陪伴三段结构在（许可 / 底线 / 态度）");
 
   const off = JSON.parse(JSON.stringify(on));
@@ -382,7 +382,7 @@ t("衔接性：人设的能力声明跟着配置开关走", function () {
   off.runtime.voice = { enabled: false, voice: "Microsoft Huihui" };
   off.runtime.stt = { enabled: false };
   off.plugins = { meme: false, illustration: false, archify: false };
-  const t2 = buildPersonaText(personaFromConfig(off), off);
+  const t2 = buildPersonaText(personaFromConfig(off), off) + "\n" + buildChannelText("group", personaFromConfig(off), off);
   ok(t2.indexOf("【看图】") < 0, "识图关着 → 不能写【看图】");
   ok(t2.indexOf("【表情包】") < 0 && t2.indexOf("【立绘（图片）】") < 0 && t2.indexOf("【画图】") < 0, "表达层关着 → 不能写对应块");
   ok(t2.indexOf("听不了") >= 0 || t2.indexOf("【语音消息】") >= 0, "转写关着 → 要么说听不了，要么不提");
@@ -1945,7 +1945,7 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     const pageKeys = ["本地工具", "大脑模型"];
     for (const need of pageKeys.concat(["识图接口", "本地语音", "插件通道"])) ok(j1.table.分组.some(function (g) { return g.名 === need; }), "要有「" + need + "」这一分类");
     const names1 = j1.table.分组.map(function (g) { return g.名; });
-    ok(names1.length === 14, "分组数应为 14（新增 B站）");
+    ok(names1.length === 16, "分组数应为 16（新增 B站 + 形象与立绘 + 用户信息）");
     const localKeys = j1.table.分组.filter(function (g) { return g.名 === "本地工具"; })[0].字段.map(function (f) { return f.键; });
     ok(localKeys.indexOf("brain.dshCliPath") >= 0, "本地工具里要有 DSH 启动器路径");
     const brainKeys = j1.table.分组.filter(function (g) { return g.名 === "大脑模型"; })[0].字段.map(function (f) { return f.键; });
@@ -2469,7 +2469,7 @@ t("webui: 设置页两个接口能通", async function () {
 
 t("dshprofile: 额外功能开关会改写人设", function () {
   const off = personaFromConfig({ persona: { memeFreq: "关", botName: "小肥鱼" }, runtime: { voice: { enabled: false }, vision: { enabled: false } } });
-  const t1 = buildPersonaText(off);
+  const t1 = buildPersonaText(off) + String.fromCharCode(10) + buildChannelText("group", off, {});
   eq(t1.indexOf("【表情包】"), -1, "关掉表情包后人设里不该再提配图");
   eq(t1.indexOf("【语音】"), -1);
   eq(t1.indexOf("【看图】"), -1);
@@ -2537,8 +2537,8 @@ t("webui: 重连动作能通（改完接入设置不用重启）", async functio
 
 t("plugins: 社区插件开关会同步改写全局人设", function () {
   const on = personaFromConfig({ persona: { memeFreq: "中", botName: "小肥鱼" }, runtime: {}, plugins: { meme: true, archify: true, voice: false, vision: false } });
-  const t1 = buildPersonaText(on);
-  ok(t1.indexOf("【表情包】") >= 0, "开着 dsh-meme 就该写配图规则");
+  const t1 = buildPersonaText(on) + String.fromCharCode(10) + buildChannelText("group", on, {});
+  ok(t1.indexOf("表情包") >= 0, "开着 dsh-meme 就该写配图规则");
   ok(t1.indexOf("【画图】") >= 0, "开着 archify 就该写画图规则");
   ok(t1.indexOf("[图表:") >= 0, "要告诉它图表标记怎么写");
 
@@ -3060,12 +3060,12 @@ t("persona: 表达层都是可变块（关掉就不写进人设）", function ()
   const table = loadFieldTable();
   const on = deepMerge(defaultsFromTable(table), { plugins: { meme: true, illustration: true, archify: true }, runtime: { vision: { enabled: false } } });
   const off = deepMerge(defaultsFromTable(table), { plugins: { meme: false, illustration: false, archify: false }, persona: { memeFreq: "关" } });
-  const a = buildPersonaText(personaFromConfig(on, { ttsVoices: [] }), on);
-  ok(a.indexOf("【表情包】") >= 0, "开：有表情包段");
-  ok(a.indexOf("【立绘（图片）】") >= 0, "开：有立绘段");
-  ok(a.indexOf("【画图】") >= 0, "开：有画图段");
-  ok(a.indexOf("【当前形态】") >= 0, "形态描述始终在（只是哪一形态）");
-  const b = buildPersonaText(personaFromConfig(off, { ttsVoices: [] }), off);
+  const a = buildPersonaText(personaFromConfig(on, { ttsVoices: [] }), on) + "\n" + buildChannelText("group", personaFromConfig(on, { ttsVoices: [] }), on);
+  ok(a.indexOf("表情包") >= 0, "开：有表情包段");
+  ok(a.indexOf("立绘") >= 0, "开：有立绘段");
+  ok(a.indexOf("画图") >= 0, "开：有画图段");
+  ok(a.indexOf("【形象】") >= 0, "形象段始终在");
+  const b = buildPersonaText(personaFromConfig(off, { ttsVoices: [] }), off) + "\n" + buildChannelText("group", personaFromConfig(off, { ttsVoices: [] }), off);
   ok(b.indexOf("【表情包】") < 0, "关：不写表情包段");
   ok(b.indexOf("【立绘（图片）】") < 0, "关：不写立绘段");
   ok(b.indexOf("【画图】") < 0, "关：不写画图段");
@@ -3234,23 +3234,23 @@ t("persona: 可变段放最后 —— 开关只动尾巴，前面照样命中前
   const table = loadFieldTable();
   const cfgA = deepMerge(defaultsFromTable(table), { runtime: { vision: { enabled: false } }, plugins: { meme: true } });
   const cfgB = deepMerge(defaultsFromTable(table), { runtime: { vision: { enabled: true, mode: "dsh", model: "mimo-v2.6-flash-free" } }, plugins: { meme: false } });
-  const a = buildPersonaText(personaFromConfig(cfgA, { ttsVoices: [] }), cfgA);
-  const b = buildPersonaText(personaFromConfig(cfgB, { ttsVoices: [] }), cfgB);
-  ok(a.indexOf("【看图】") < 0, "关掉识图（或模型没视觉）就不写看图段");
-  ok(b.indexOf("【看图】") >= 0, "有视觉能力才写");
-  const tailMark = a.indexOf("【当前形态】");
-  ok(tailMark > 0, "可变段从「当前形态」开始");
+  const a = buildPersonaText(personaFromConfig(cfgA, { ttsVoices: [] }), cfgA) + "\n" + buildChannelText("group", personaFromConfig(cfgA, { ttsVoices: [] }), cfgA);
+  const b = buildPersonaText(personaFromConfig(cfgB, { ttsVoices: [] }), cfgB) + "\n" + buildChannelText("group", personaFromConfig(cfgB, { ttsVoices: [] }), cfgB);
+  ok(a.indexOf("看图") < 0, "关掉识图（或模型没视觉）就不写看图段");
+  ok(b.indexOf("看图") >= 0, "有视觉能力才写");
+  const tailMark = a.indexOf("【环境：QQ 群】");
+  ok(tailMark > 0, "可变段从「环境：QQ 群」开始");
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   ok(i >= tailMark, "稳定核心（前 " + tailMark + " 字节）必须逐字节一致，实际共同前缀 " + i);
-  ok(b.indexOf("【看图】") > b.indexOf("【安全底线】"), "可变段排在稳定段之后");
+  ok(b.indexOf("看图") > b.indexOf("【环境：QQ 群】"), "可变段排在稳定段之后");
   ok(a.indexOf("【语音消息】") > 0, "语音消息怎么处理要写进人设（常量，放稳定段）");
   ok(a.indexOf("【看不到图】") > 0, "没视觉能力时也要诚实（不猜图）");
   ok(b.indexOf("【看不到图】") < 0, "有视觉能力就不该写「看不到图」");
 
   const cfgC = deepMerge(defaultsFromTable(table), { runtime: { voice: { enabled: true } } });
-  ok(buildPersonaText(personaFromConfig(cfgC, { ttsVoices: [] }), cfgC).indexOf("【语音】") < 0, "本机没音色 → 不声明语音");
-  ok(buildPersonaText(personaFromConfig(cfgC, { ttsVoices: ["Microsoft Huihui"] }), cfgC).indexOf("【语音】") >= 0, "有音色 → 声明语音");
+  ok(buildChannelText("group", personaFromConfig(cfgC, { ttsVoices: [] }), cfgC).indexOf("【语音】") < 0, "本机没音色 → 不声明语音");
+  ok(buildChannelText("group", personaFromConfig(cfgC, { ttsVoices: ["Microsoft Huihui"] }), cfgC).indexOf("【语音】") >= 0, "有音色 → 声明语音");
 });
 
 t("onebot: 纯语音 / 纯图片消息带标记（不做转写，但也别让模型收到空消息）", function () {
@@ -3763,7 +3763,7 @@ t("识图：按文件头判格式（GIF 存成 .jpg 会被读图工具拒绝）"
 });
 
 t("人设：填了制作者才写那一段，怎么称呼由她自己定", function () {
-  const a = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼", creator: "某ID（QQ 123）" }, runtime: {}, plugins: {} }), {});
+  const a = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼", creatorName: "某ID（QQ 123）" }, runtime: {}, plugins: {} }), {});
   ok(a.indexOf("某ID（QQ 123）") >= 0 && a.indexOf("做了你") >= 0, "要写明是谁做了她");
   ok(a.indexOf("你自己拿主意") >= 0, "称呼由她决定，不写死");
   const b = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: {} }), {});
@@ -3777,10 +3777,10 @@ t("B站：从一段话里认出 BV 号 / av 号，普通链接不误判", functi
   ok(!hasBiliUrl("普通消息"), "普通消息不是 B 站链接");
 });
 t("B站：开关关掉时人设里不提看视频，开着才写", function () {
-  const on = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: true } }), { plugins: { bilibili: true } });
-  ok(on.indexOf("【B 站视频】") >= 0, "开着要有能力声明");
-  const off = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: false } }), { plugins: { bilibili: false } });
-  ok(off.indexOf("【B 站视频】") < 0, "关了就不提");
+  const on = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: true } }), { plugins: { bilibili: true } }) + "\n" + buildChannelText("group", personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: true } }), { plugins: { bilibili: true } });
+  ok(on.indexOf("B 站链接") >= 0, "开着要有能力声明");
+  const off = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: false } }), { plugins: { bilibili: false } }) + "\n" + buildChannelText("group", personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: false } }), { plugins: { bilibili: false } });
+  ok(off.indexOf("B 站链接") < 0, "关了就不提");
 });
 t("B站抽帧：数量对、落在视频内、中间密两头疏", function () {
   eq(sampleTimes(600, 0).length, 0);

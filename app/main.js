@@ -386,6 +386,7 @@ log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入�
 const runtime = createRuntime({
   config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt, bili: bili, diagram: diagram,
   getQuote: fetchQuote,          // 引用原文：runtime 靠它把被引用的内容拼进本轮 prompt
+  persona: persona,              // L2 环境层要用：外号/群昵称/主人身份都在这里面
   voiceDir: path.join(BRAIN_TMP_DIR, "voice"),
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },

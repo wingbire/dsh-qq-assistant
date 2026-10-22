@@ -559,16 +559,22 @@
       '<div class="hint" style="margin:-2px 0 6px">这一整段会写进大脑 profile 的 <code>personaPrefix</code>（排在所有工具说明之前，吃满前缀缓存）。**留空**则用下面的字段自动拼装。</div>' +
       renderGroupFields("人设") +
       '</div></details>';
-    var groupCardHtml = '<details class="card" open><summary>群聊专属人设' +
+    var userCard = '<details class="card dsh-fold" id="persona-user"><summary>用户信息' +
+      '<span class="muted" style="font-weight:400;font-size:12px">她怎么认出你 / 怎么称呼你（填给她看的，不是公开信息）</span></summary><div class="body">' +
+      renderGroupFields('用户信息') + '</div></details>';
+    var lookCard = '<details class="card dsh-fold" id="persona-look"><summary>形象与立绘' +
+      '<span class="muted" style="font-weight:400;font-size:12px">名字 / 年龄 / 外形 / 立绘</span></summary><div class="body">' +
+      renderGroupFields('形象与立绘') + '</div></details>';
+var groupCardHtml = '<details class="card" open><summary>群聊专属人设' +
       '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">只对这个群生效</span></summary><div class="body" id="group-persona-body">' +
       '<div class="muted">加载中…</div></div></details>';
     if (!S.gid) {
-      return Promise.resolve(head + '<div class="card"><div class="body"><div class="muted">想写「某个群专属的人设」？先在右上角选一个群。</div>' +
+      return Promise.resolve(head + lookCard + userCard + '<div class="card"><div class="body"><div class="muted">想写「某个群专属的人设」？先在右上角选一个群。</div>' +
         '<div class="hint" style="margin-top:6px">说明：全局人设走系统提示词（可缓存）；每群专属人设只能走消息体 —— 否则每个群都要一份 profile，一改就打散缓存。</div></div></div>');
     }
     return api("/api/profile?gid=" + encodeURIComponent(S.gid)).then(function (d) {
       var pt = (d.profile && d.profile.personaText) || "";
-      return head + '<details class="card" open><summary>群聊专属人设' +
+      return head + lookCard + userCard + '<details class="card" open><summary>群聊专属人设' +
         '<span class="muted" style="font-weight:400;font-size:12px;margin-left:auto">群 ' + esc(S.gid) + ' 只对这个群生效</span></summary><div class="body">' +
         '<textarea id="persona-group" rows="5" placeholder="在这个群里额外要遵守的（语气/称呼/忌讳），留空则不额外加">' + esc(pt) + '</textarea>' +
         '<div class="ctl-row"><button class="btn-sm good" id="btn-save-group-persona">保存本群人设</button>' +

@@ -6,7 +6,7 @@ import { createDefaultCommands } from "./commands.js";
 import { createMemeLibrary, shouldAttachMeme, scoreRow } from "./meme.js";
 import { resolveLocalImage, downloadImage, injectVision } from "./vision.js";
 import { parseVoiceTag } from "./tts.js";
-import { parseIllustration, illustrationFor, parseChart } from "./dshprofile.js";
+import { parseIllustration, illustrationFor, parseChart, buildChannelText } from "./dshprofile.js";
 import { resolveChartFile, cleanupChart } from "./chart.js";
 import { WORKSPACE_ROOT } from "./paths.js";
 import fs from "node:fs";
@@ -954,6 +954,8 @@ export function createRuntime(deps) {
       if (pFacts) blocks.push(pFacts);
       const pInterests = profileInterestsBlock(evt.gid);
       if (pInterests) blocks.push(pInterests);
+      // L2 环境层：告诉她在哪个环境、能用什么（QQ群/私聊/B站）
+      try { const ch = buildChannelText(evt.channel || "group", persona || d.persona || {}, rc); if (ch) blocks.push(ch); } catch (e) { }
       blocks.push(taskText);
       const pMemo = memoBlock(evt.gid);
       if (pMemo) blocks.push(pMemo);
