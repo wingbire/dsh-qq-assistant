@@ -301,7 +301,9 @@ export function createRuntime(deps) {
     if (!budget.allowProactive()) { stats.proactiveBlocked += 1; return null; }
     if (!askBrain || !bot.considerProactive) return null;
     const interests = groupInterests(batch.gid).concat(evtDefaults.interests || []);
-    const p = bot.considerProactive(evtLike, { action: "ignore" }, { interests: interests });
+    let gi = [];
+    try { gi = (store && store.loadProfile && (store.loadProfile(evtLike.gid) || {}).interestWords) || []; } catch (e) { gi = []; }
+    const p = bot.considerProactive(evtLike, { action: "ignore" }, { interests: interests, groupInterests: gi });
     if (!p || !p.speak) return null;
     stats.proactiveTried += 1;
     const NL = String.fromCharCode(10);

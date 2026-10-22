@@ -3791,6 +3791,16 @@ t("B站抽帧：数量对、落在视频内、中间密两头疏", function () {
   ok(ts[0] < 600 * 0.2, "第一帧要早");
   ok(ts[ts.length - 1] > 600 * 0.8, "最后一帧要晚");
 });
+t("主动搭话：全局兴趣 1.0 倍、只命中群档案兴趣打 0.4 折", function () {
+  const mk = function (rngVal) { return createProactive({ config: { enabled: true, requireInterest: true, rate: 0.8, cooldownAfterBotReplySec: 0, minGapSec: 0, maxPerHour: 99 }, rng: function () { return rngVal; }, now: function () { return 1e9; } }); };
+  const evt = { gid: "g1", text: "电脑硬件又涨价了", now: 1e9, uid: "u1" };
+  // 只命中群档案：rng=0.5 → 0.5 > 0.32(0.8*0.4) → 不搭话
+  const g1 = mk(0.5).consider(evt, { action: "ignore" }, { interests: [], groupInterests: ["电脑硬件"] });
+  ok(g1.speak === false, "群档案命中要打折，0.5 不应过 0.32");
+  // 命中全局：rng=0.5 → 0.5 <= 0.8 → 搭话
+  const g2 = mk(0.5).consider(evt, { action: "ignore" }, { interests: ["电脑硬件"], groupInterests: [] });
+  ok(g2.speak === true, "全局兴趣命中应正常按 rate 判定");
+});
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);
 console.log("=== 骨架回归测试 ===");

@@ -38,10 +38,18 @@ export function createProactive(opts) {
     if (s.recent.length >= cfg.maxPerHour) return { speak: false, reason: "本群本小时配额用尽(" + s.recent.length + "/" + cfg.maxPerHour + ")", gid: s.gid };
     if (s.lastSpokeAt && now - s.lastSpokeAt < cfg.minGapSec * 1000) return { speak: false, reason: "本群主动冷却中", gid: s.gid };
 
-    const cls = classify(evt.text || "", { interests: (ctx && ctx.interests) || [] });
+    // 兴趣池 = 全局人设的兴趣 + 这个群档案里她自己提炼的兴趣；
+    // 但群档案的命中只按 cfg.groupRateFactor 打折（默认 0.4）—— 全局人设永远更重。
+    const globalW = (ctx && ctx.interests) || [];
+    const groupW = (ctx && ctx.groupInterests) || [];
+    const cls = classify(evt.text || "", { interests: globalW.concat(groupW) });
     const hit = cls.interestHit;
     if (cfg.requireInterest && hit.length === 0) return { speak: false, reason: "未命中兴趣", keywords: cls.keywords, gid: s.gid };
-    if (rng() > cfg.rate) return { speak: false, reason: "概率未过(" + cfg.rate + ")", keywords: cls.keywords, gid: s.gid };
+    const globalHit = hit.filter(function (w) { return globalW.indexOf(w) >= 0; });
+    const groupHit = hit.filter(function (w) { return globalW.indexOf(w) < 0; });
+    const factor = globalHit.length ? 1 : (groupHit.length ? (Number(cfg.groupRateFactor) || 0.4) : 1);
+    const rate = Number(cfg.rate) * factor;
+    if (rng() > rate) return { speak: false, reason: "概率未过(" + rate.toFixed(2) + ")", keywords: cls.keywords, gid: s.gid };
 
     return {
       speak: true, tier: cfg.tier, maxChars: cfg.maxChars, gid: s.gid,
@@ -51,6 +59,7 @@ export function createProactive(opts) {
     };
   }
 
+  // 默认参数：群档案兴趣命中的打折系数（0.4 ≈ 全局的 40%）
   function markSpoken(now, gid) { const s = st(gid); s.lastSpokeAt = Number(now) || Date.now(); s.recent.push(s.lastSpokeAt); }
   function markBotReply(now, gid) { st(gid).lastBotReplyAt = Number(now) || Date.now(); }
   function state(gid) {
