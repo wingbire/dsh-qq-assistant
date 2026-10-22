@@ -157,9 +157,19 @@ QQ 消息 → NapCat(WS:3001) → onebot 客户端 → runtime.handleEvent
 - 本地语音转写一直是坏的（模型只有元数据、缺 model.bin）→ 用 hf-mirror + HF_HUB_DISABLE_XET=1 下全 tiny/small，重启服务。
 - 「没网查不了」→ 搜索闸门从未触发（见上）→ 修好后搜索正常。
 
+**2026-10 下旬（画图 / 表情 / 引用 三连修）**
+- 画图发出来的是表情包 → 图其实画了（chart.converted=true），但 sendImage 没 await 就 cleanupChart，
+  文件在 NapCat 读取前就被删 → 改成 await 发送结果 + 再等 1.5 秒才清理。
+- 表情包不贴语境 → 合并图库（24→162 张、标签重叠）后，「全局关键词打分 + 并列取第一个」变成按包顺序掷骰子；
+  改成：她写标签 → byTag 锁标签、标签内按正文挑；否则要求描述命中 ≥40 分；自编词（鲸鱼探头 32 分）一律不发。
+- 引用取不到原文 → main.js 里定义了 getQuote 但只传给了 OneBot 客户端，没传给 runtime（d.getQuote 恒为 null，
+  判定记录里 replyId 有值、replyQuote 永远为空）→ 抽成模块级 fetchQuote 并注入 runtime 依赖。
+- 同类教训：**「定义了没接线」**已经出现过两次（搜索标志 flags 层级、getQuote 没进依赖）。
+  改完功能先确认「调用方真的拿到了这个函数/字段」。
 ## 10. 已知问题 / 待办
 
 1. **B站 AI 字幕**：接口 need_login_subtitle=true，需要小号 SESSDATA（配置端已加字段）。填上后应优先用字幕，失败回退音频转写。
+   注意：`fetchQuote` 修好后，引用原文会拼进 prompt；但 OneBot 若不给 reply 段，仍然拿不到（看判定里的 replyId）。
 2. **B站发评论**：bili_jct 字段已加，评论链路未实现；实现时要先 dry-run + 频率限制 + 默认关。
 3. **群档案兴趣词**：目前只在记忆整理时提炼「趣：领域词」，权重 ×0.4（主动搭话）/×1（B站取词，全局 ×3）。观察是否跑偏成具体名词。
 4. **立绘**：plugins.illustration 已关（没图）。给了图记得打开并填 persona.youngPic/adultPic。

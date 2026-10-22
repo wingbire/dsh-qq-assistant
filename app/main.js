@@ -200,6 +200,24 @@ const bot = createBot({
 });
 const cli = resolveDshCli();
 const quoteCache = new Map();   // 被引用消息原文（10 分钟）
+// 取被引用消息的原文（get_msg，本机 OneBot 调用，0 token）。以前只传给了 OneBot 客户端，
+// 没传给 runtime —— 所以 runtime 里 d.getQuote 恒为 null，引用原文永远是空的（这是 C 的根因）。
+async function fetchQuote(messageId) {
+  const id = String(messageId || "");
+  if (!id || !link.ob) return { ok: false };
+  const hit = quoteCache.get(id);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
+  const r = await link.ob.callActionAsync("get_msg", { message_id: Number(id) || id }, 4000);
+  const value = (r && r.ok && r.data) ? {
+    ok: true,
+    text: String(r.data.message == null ? (r.data.raw_message || "") : (typeof r.data.message === "string" ? r.data.message : JSON.stringify(r.data.message))).slice(0, 300),
+    uid: r.data.user_id != null ? String(r.data.user_id) : "",
+    speaker: (r.data.sender && (r.data.sender.card || r.data.sender.nickname)) || ""
+  } : { ok: false };
+  if (value.ok && value.text) quoteCache.set(id, { at: Date.now(), value: value });
+  if (quoteCache.size > 200) { const first = quoteCache.keys().next().value; quoteCache.delete(first); }
+  return value;
+}
 const OFM_PROBE_FILE = path.join(DATA_ROOT, "ofm-models.json");   // 免费模型真机检测结果
 let ofmProbing = false;
 
@@ -229,23 +247,7 @@ function buildOneBot(c) {
   return createOneBot({
     url: o.url, token: o.token, reconnectMs: o.reconnectMs,
     onEvent: function (evt) { runtime.onEvent(evt); },
-    // 引用原文：get_msg 取一次并缓存（同一条引用可能被反复引用；OneBot 调用是本机的，0 token）
-    getQuote: async function (messageId) {
-      const id = String(messageId || "");
-      if (!id || !link.ob) return { ok: false };
-      const hit = quoteCache.get(id);
-      if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
-      const r = await link.ob.callActionAsync("get_msg", { message_id: Number(id) || id }, 4000);
-      const value = (r && r.ok && r.data) ? {
-        ok: true,
-        text: String(r.data.message == null ? (r.data.raw_message || "") : (typeof r.data.message === "string" ? r.data.message : (Array.isArray(r.data.message) ? r.data.message.filter(function (s) { return s && s.type === "text"; }).map(function (s) { return String((s.data || {}).text || ""); }).join("") : ""))).slice(0, 300),
-        uid: r.data.user_id != null ? String(r.data.user_id) : "",
-        speaker: (r.data.sender && (r.data.sender.card || r.data.sender.nickname)) || ""
-      } : { ok: false };
-      if (value.ok && value.text) quoteCache.set(id, { at: Date.now(), value: value });
-      if (quoteCache.size > 200) { const first = quoteCache.keys().next().value; quoteCache.delete(first); }
-      return value;
-    },
+    getQuote: fetchQuote,
     // 回戳：动作名因实现而异，先 group_poke 再退 send_poke
     sendPoke: async function (gid, uid) {
       if (!link.ob) return { ok: false };
@@ -376,6 +378,7 @@ log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入�
 
 const runtime = createRuntime({
   config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt, bili: bili, diagram: diagram,
+  getQuote: fetchQuote,          // 引用原文：runtime 靠它把被引用的内容拼进本轮 prompt
   voiceDir: path.join(BRAIN_TMP_DIR, "voice"),
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },
