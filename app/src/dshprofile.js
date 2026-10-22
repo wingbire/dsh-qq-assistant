@@ -247,7 +247,7 @@ export function buildPersonaText(persona, cfg) {
   }
   if (p.archifyEnabled) {
     T.push("【画图】");
-    T.push("- 有人要流程图/架构图/时序图时，用 archify 技能渲染成 HTML，在正文末尾写 [图表: 那个 HTML 的绝对路径]。一条最多一张。");
+    T.push("- 有人要流程图/架构图/时序图/步骤图时，在正文末尾写 [图表: 一句话说清画什么]。一条最多一张；画好了程序会发图。");
     T.push("");
   }
   const sttOn = !!(cfg && ((cfg.runtime && cfg.runtime.stt && cfg.runtime.stt.enabled === true) || (cfg.stt && cfg.stt.enabled === true)));

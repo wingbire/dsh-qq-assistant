@@ -49,8 +49,11 @@ export function htmlToPng(htmlPath, opts) {
   const png = o.outFile || path.join(outDir, path.basename(src, path.extname(src)) + ".png");
   try { if (fs.existsSync(png)) fs.unlinkSync(png); } catch (e) {}
 
+  // 用独立的临时 profile：不然会抢用户正在用的 Edge 主配置，容易锁住/报 QQBrowser 之类的噪音错误
+  const profileDir = o.profileDir || path.join(outDir, ".browser-profile");
   const opts2 = [
     "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+    "--user-data-dir=" + profileDir,
     "--force-device-scale-factor=" + (o.scale || CHART_DEFAULTS.scale),
     "--window-size=" + (o.width || CHART_DEFAULTS.width) + "," + (o.height || CHART_DEFAULTS.height),
     "--screenshot=" + png,

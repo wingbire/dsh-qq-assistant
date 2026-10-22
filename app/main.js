@@ -12,6 +12,7 @@ import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
 import { createBilibili } from "./src/bilibili.js";
+import { createDiagram } from "./src/diagram.js";
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA, modelHasVision, listVisionModels } from "./src/vision.js";
@@ -324,6 +325,10 @@ log("图库：" + (memes.ready ? memes.rows.length + " 张 / " + memes.tags().le
 // N18 识图：独立一次多模态调用（http 直连 / dsh 跑 Our Free Model）
 const biliEnabled = !(rc.plugins && rc.plugins.bilibili === false);
 const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: (rc.bili && rc.bili.frames), maxMinutes: (rc.bili && rc.bili.maxMinutes), listenPerFrame: (rc.bili && rc.bili.listenPerFrame), sessdata: (rc.plugins && rc.plugins.biliSessdata) || "", uid: (rc.plugins && rc.plugins.biliUid) || "" }) : null;   // vision 在建好之后补上
+// 画图：大脑写一句话，这里负责生成图表规格 + archify 渲染（PNG 转换在发送时做）
+const diagram = createDiagram({ outDir: path.join(BRAIN_TMP_DIR, "charts"),
+  // 图表规格由大脑生成；渲染失败会把报错喂回去修一版
+  askBrain: async function (req) { return runBrain({ cliPath: cli, profile: "qq-brain", promptText: req.promptText, timeoutMs: 90000 }); } });
 const vision = createVision({
   // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
   config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
@@ -370,7 +375,7 @@ log("能力声明 · 看图：" + (visionCap.enabled ? (visionCap.capable ? "会
 log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入口）");
 
 const runtime = createRuntime({
-  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt, bili: bili,
+  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt, bili: bili, diagram: diagram,
   voiceDir: path.join(BRAIN_TMP_DIR, "voice"),
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },

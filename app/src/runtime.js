@@ -44,6 +44,7 @@ export function createRuntime(deps) {
   const memes = d.memes || createMemeLibrary({});
   const vision = d.vision || null;              // N18：识图（独立一次多模态调用）
   const bili = d.bili || null;                  // B 站看视频：标题/字幕 + 抽帧识图
+  const diagram = d.diagram || null;            // 画图：大脑写一句话 → archify 渲染 → PNG
   const tts = d.tts || null;                    // N18：TTS → NapCat 发语音
   const sendRecord = d.sendRecord || null;
   const imageDir = d.imageDir || null;          // 下载下来的图片落哪儿
@@ -1082,14 +1083,21 @@ export function createRuntime(deps) {
         artInfo = { error: "找不到立绘：" + pick.rel };
       }
     }
-    // 图表：archify 画完把 PNG 路径写在 [图表: …] 里，程序发出去；按配置发完就删（群聊里不留图）
+    // 图表：大脑只写「[图表: 一句话说明画什么]」，程序负责生成图表规格 → archify 渲染 → 转 PNG 发出去
     let chartInfo = null;
     if (chart.wanted && (!rc.plugins || rc.plugins.archify !== false)) {
-      // archify 产出的是 HTML，先转成 PNG 再发（找不到浏览器就如实失败）
-      const conv = resolveChartFile(chart.file, {
+      let target = chart.file;
+      let drew = null;
+      try {
+        if (diagram && (!target || !fs.existsSync(path.resolve(WORKSPACE_ROOT, target)))) {
+          drew = await diagram.draw(target);
+          target = drew && drew.ok ? drew.html : null;
+        }
+      } catch (e) { drew = { ok: false, error: String(e && e.message) }; }
+      const conv = target ? resolveChartFile(target, {
         root: WORKSPACE_ROOT,
         outDir: path.join(WORKSPACE_ROOT, "app", "dsh-data", "charts")
-      });
+      }) : { ok: false, error: (drew && drew.error) || "没有可用的图表文件" };
       if (conv.ok) {
         if (sendImage) sendImage(evt.gid, conv.file);
         stats.chartsSent += 1;
