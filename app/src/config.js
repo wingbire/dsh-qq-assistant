@@ -190,7 +190,8 @@ export function runtimeConfig(cfg) {
     autoTrainAt: Math.max(0, Number(getPath(c, "runtime.autoTrainAt")) || 30),   // 已标 N 条就自动训练一轮（0=关）
     bili: {
       frames: Math.min(12, Math.max(0, numOf(getPath(c, "runtime.bili.frames"), 4))),
-      maxMinutes: Math.max(0, numOf(getPath(c, "runtime.bili.maxMinutes"), 30))
+      maxMinutes: Math.max(0, numOf(getPath(c, "runtime.bili.maxMinutes"), 30)),
+      listenSec: Math.max(0, Math.min(120, numOf(getPath(c, "runtime.bili.listenSec"), 0)))   // 0 = 不听声音；20~60 = 抽几段音频转写
     },
     // 记忆：每 N 条发言，让她自己总结一次「想记住的事」，写进群档案（profiles/g-<gid>.json）
     memory: {

@@ -323,7 +323,7 @@ log("图库：" + (memes.ready ? memes.rows.length + " 张 / " + memes.tags().le
 
 // N18 识图：独立一次多模态调用（http 直连 / dsh 跑 Our Free Model）
 const biliEnabled = !(rc.plugins && rc.plugins.bilibili === false);
-const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: (rc.bili && rc.bili.frames), maxMinutes: (rc.bili && rc.bili.maxMinutes) }) : null;   // vision 在建好之后补上
+const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: (rc.bili && rc.bili.frames), maxMinutes: (rc.bili && rc.bili.maxMinutes), listenSec: (rc.bili && rc.bili.listenSec) }) : null;   // vision 在建好之后补上
 const vision = createVision({
   // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
   config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
@@ -332,13 +332,28 @@ const vision = createVision({
     // 配置端改完立刻生效（人设是保存时就重写的，通道也别等到重启）
     const liveCfgNow = runtimeConfig(liveCfg);
     const live = visionCapability(liveCfgNow.vision, { brainVision: brainVisionOf(liveCfg), brainModel: (channelModel("brain", liveCfg) || {}).model });
-try { if (bili) bili.setVision(vision); } catch (e) { }   // 抽帧的识图走同一个 vision 实例
+try { if (bili) bili.setVision(vision); } catch (e) { }
+try { if (bili) bili.setStt(stt); } catch (e) { }   // 抽到的音频走本地语音转写   // 抽帧的识图走同一个 vision 实例
     if (!live.capable) return { ok: false, error: "当前识图模型没有视觉能力（" + live.source + "）" };
     ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA, model: visionModelOf(liveCfgNow) });
     return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
   }
 });
 // N18 语音：TTS 走 Windows 自带 SAPI（离线、零依赖）
+// 本地语音转写服务：配置里 autoStart 打开、且 8910 没响应时，自动拉起 tools/stt-server.py
+async function ensureSttServer() {
+  const sc = (rc.stt && typeof rc.stt === "object") ? rc.stt : {};
+  if (sc.autoStart === false) return;
+  const ep = String(sc.endpoint || "http://127.0.0.1:8910/v1/audio/transcriptions");
+  const health = ep.replace(/\/v1\/.*$/, "/health");
+  try { const r = await fetch(health, { signal: AbortSignal.timeout(1500) }); if (r) return; } catch (e) { }
+  try {
+    const { spawn } = await import("node:child_process");
+    const py = spawn("python", ["tools/stt-server.py", "--model", String(sc.model || "small"), "--port", String(sc.port || 8910)], { cwd: WORKSPACE_ROOT, detached: true, stdio: "ignore", windowsHide: true });
+    py.unref();
+    log("已在后台拉起本地语音转写服务");
+  } catch (e) { log("拉起语音服务失败：" + (e && e.message)); }
+}
 const stt = createStt({ config: rc.stt });          // 语音转写：本机 STT 侧车（tools/stt-server.py）
 const tts = createTts({ config: Object.assign({}, rc.voice, { enabled: rc.voice.enabled && voiceCap.capable }), outDir: path.join(DATA_ROOT, "voice") });
 log("识图：" + (rc.vision.enabled ? rc.vision.mode + " / " + rc.vision.model : "关闭") + "；语音：" + (rc.voice.enabled ? rc.voice.voice : "关闭"));
@@ -656,6 +671,7 @@ if (rc.webuiEnabled) {
     .catch(function (e) { log("配置端启动失败：" + e.message); });
 }
 
+try { void ensureSttServer(); } catch (e) { }
 const timer = setInterval(function () { runtime.tick().catch(function (e) { log("tick 失败：" + e.message); }); }, tickMs);
 if (timer.unref) timer.unref();
 setInterval(function () {

@@ -45,6 +45,8 @@ export function createBilibili(opts) {
   const o = opts || {};
   const fetchFn = o.fetch || fetch;
   let vision = o.vision || null;
+  let stt = o.stt || null;                 // 本地语音转写：抽一段音频听
+  const listenSec = Math.max(0, Math.min(120, Number(o.listenSec || 0)));   // 0 = 不听
   const tmpDir = o.tmpDir || null;
   const frames = Math.max(0, Number(o.frames == null ? 4 : o.frames));
   const maxMinutes = Math.max(0, Number(o.maxMinutes == null ? 30 : o.maxMinutes));
@@ -66,6 +68,15 @@ export function createBilibili(opts) {
           resolve(!err && fs.existsSync(out));
         });
       } catch (e) { resolve(false); }
+    });
+  }
+
+  // 从视频里抽一段音频（给语音转写听）
+  function grabAudio(url, sec, durSec, out) {
+    return new Promise(function (resolve) {
+      const args = ["-y", "-loglevel", "error", "-headers", "Referer: " + REF + "\r\n", "-user_agent", UA,
+        "-ss", String(sec), "-t", String(durSec), "-i", url, "-vn", "-ac", "1", "-ar", "16000", out];
+      try { execFile("ffmpeg", args, { timeout: 60000, windowsHide: true }, function (err) { resolve(!err && fs.existsSync(out)); }); } catch (e) { resolve(false); }
     });
   }
 
@@ -94,12 +105,18 @@ export function createBilibili(opts) {
       }
     } catch (e) { }
     const shots = [];
+    let mediaUrl = "";
+    if ((frames > 0 || listenSec > 0) && !longVideo) {
+      try {
+        const pu = await fetchJson("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=16&fnval=1&platform=html5");
+        mediaUrl = (pu && pu.data && pu.data.durl && pu.data.durl[0] && pu.data.durl[0].url) || "";
+      } catch (e) { }
+    }
     const longVideo = !!(maxMinutes && Number(d.duration) > maxMinutes * 60);
     const wantFrames = Math.max(0, Math.min(12, Number(opts && opts.frames != null ? opts.frames : frames)));
     if (vision && tmpDir && wantFrames > 0 && !longVideo) {
       try {
-        const pu = await fetchJson("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=16&fnval=1&platform=html5");
-        const url = (pu && pu.data && pu.data.durl && pu.data.durl[0] && pu.data.durl[0].url) || "";
+        const url = mediaUrl;
         if (url) {
           const dur = Math.max(10, Number(d.duration) || 60);
           for (const sec of sampleTimes(dur, wantFrames)) {
@@ -115,6 +132,23 @@ export function createBilibili(opts) {
       } catch (e) { }
     }
     if (shots.length) lines.push("画面（抽了几帧看了下）：" + shots.join(" ／ "));
+    // 听声音：从片子中段抽 1~2 段音频交给本地语音转写（每段约 20 秒）
+    if (stt && tmpDir && listenSec > 0 && mediaUrl && !longVideo) {
+      const heard = [];
+      const clips = listenSec >= 40 ? 2 : 1;
+      const each = Math.max(10, Math.floor(listenSec / clips));
+      for (let ci = 0; ci < clips; ci++) {
+        const start = Math.floor(dur * (clips === 1 ? 0.4 : (ci === 0 ? 0.25 : 0.7)));
+        const af = path.join(tmpDir, "bili-a-" + bvid + "-" + start + ".wav");
+        const okA = await grabAudio(mediaUrl, start, each, af);
+        if (!okA) continue;
+        let tr = null;
+        try { tr = await stt.transcribe(af); } catch (e) { tr = null; }
+        try { fs.unlinkSync(af); } catch (e) { }
+        if (tr && tr.ok && tr.text) heard.push(String(tr.text).slice(0, 220));
+      }
+      if (heard.length) lines.push("声音（听了几段）：" + heard.join(" ／ "));
+    }
     return { ok: true, bvid: bvid, title: d.title, shots: shots.length, text: lines.join(String.fromCharCode(10)) };
   }
 
@@ -138,5 +172,6 @@ export function createBilibili(opts) {
   }
 
   function setVision(v) { vision = v; }
-  return { watch: watch, findAndWatch: findAndWatch, resolveBvid: resolveBvid, setVision: setVision };
+  function setStt(v) { stt = v; }
+  return { watch: watch, findAndWatch: findAndWatch, resolveBvid: resolveBvid, setVision: setVision, setStt: setStt };
 }
