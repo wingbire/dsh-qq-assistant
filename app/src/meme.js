@@ -105,7 +105,9 @@ export function scoreRow(row, desc) {
     else if (d.includes(k) || k.includes(d)) score = Math.max(score, 30 + k.length);
   }
   if (cap) {
-    if (d.includes(cap) || cap.includes(d)) score = Math.max(score, 20 + cap.length);
+    // 她照菜单抄的整句描述 = 最准的命中（关键词命中只有 30 分，别让短词抢赢整句）
+    if (cap === d) score = Math.max(score, 90);
+    else if (d.includes(cap) || cap.includes(d)) score = Math.max(score, 40 + cap.length);
     // 逐字兜底：必须又长又像才算（至少 3 个字重合、且重合率 ≥60%），
     // 而且分数封顶在 12 —— 任何关键词命中（≥30）都必须赢过它。
     let hit = 0;
@@ -164,14 +166,16 @@ export function createMemeLibrary(opts) {
     for (const r of rows) {
       const t = String(r.tag || "");
       if (!t) continue;
-      const cur = byTag.get(t) || { n: 0, sample: "" };
+      const cur = byTag.get(t) || { n: 0, samples: [] };
       cur.n += 1;
-      if (!cur.sample && r.caption) cur.sample = String(r.caption).slice(0, 24);
+      const cap = String(r.caption || "").slice(0, 16);
+      if (cap && cur.samples.length < 2 && cur.samples.indexOf(cap) < 0) cur.samples.push(cap);
       byTag.set(t, cur);
     }
     const list = Array.from(byTag.entries()).sort(function (a, b) { return b[1].n - a[1].n; });
+    // 每个标签给 1~2 句真实描述：她抄描述比抄标签准得多（标签只是分类，描述才是那张图的表情）
     return list.slice(0, Math.max(1, maxTags || 24))
-      .map(function (x) { return x[0] + "(" + x[1].n + ")" + (x[1].sample ? "「" + x[1].sample + "」" : ""); })
+      .map(function (x) { return x[0] + "(" + x[1].n + ")" + (x[1].samples.length ? "「" + x[1].samples.join("」「") + "」" : ""); })
       .join(" · ");
   }
 
