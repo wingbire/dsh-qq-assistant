@@ -191,7 +191,7 @@ export function runtimeConfig(cfg) {
     bili: {
       frames: Math.min(12, Math.max(0, numOf(getPath(c, "runtime.bili.frames"), 4))),
       maxMinutes: Math.max(0, numOf(getPath(c, "runtime.bili.maxMinutes"), 30)),
-      listenSec: Math.max(0, Math.min(120, numOf(getPath(c, "runtime.bili.listenSec"), 0)))   // 0 = 不听声音；20~60 = 抽几段音频转写
+      listenPerFrame: Math.max(0, Math.min(30, numOf(getPath(c, "runtime.bili.listenPerFrame"), 0)))   // 0 = 不听；每个画面配多少秒声音（6~10 比较合适）
     },
     // 记忆：每 N 条发言，让她自己总结一次「想记住的事」，写进群档案（profiles/g-<gid>.json）
     memory: {

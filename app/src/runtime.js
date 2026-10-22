@@ -893,7 +893,7 @@ export function createRuntime(deps) {
         biliBusy = true;
         const bt1 = Date.now();
         try {
-          const w = await bili.findAndWatch(kw, { frames: wantFrames, listenSec: (rc.bili && rc.bili.listenSec) || 0 });
+          const w = await bili.findAndWatch(kw, { frames: wantFrames, listenPerFrame: (rc.bili && rc.bili.listenPerFrame) || 0 });
           if (w && w.ok && w.text) {
             taskText = injectSummary(taskText, "【你刚在 B 站自己找了个视频看（材料在下面，别照念标题）】" + String.fromCharCode(10) + w.text);
             observe({ kind: "bili_browse", gid: evt.gid, bvid: w.bvid, keyword: kw, shots: w.shots, ms: Date.now() - bt1 });
@@ -908,7 +908,7 @@ export function createRuntime(deps) {
           const baseF2 = (rc.bili && rc.bili.frames != null) ? rc.bili.frames : 4;
           const t2 = String(evt.text || "");
           const wantFrames2 = Math.max(1, Math.min(12, Number(baseF2) + (/认真|仔细|好好看|仔细看/.test(t2) ? 4 : 0) - (/随便看|简单看|大概看/.test(t2) ? 2 : 0)));
-          const w = await bili.watch(evt.text || "", { frames: wantFrames2, listenSec: (rc.bili && rc.bili.listenSec) || 0 });
+          const w = await bili.watch(evt.text || "", { frames: wantFrames2, listenPerFrame: (rc.bili && rc.bili.listenPerFrame) || 0 });
           if (w && w.ok && w.text) {
             taskText = injectSummary(taskText, "【这条消息里的 B 站视频（刚看了一眼）】" + String.fromCharCode(10) + w.text);
             observe({ kind: "bili_watch", gid: evt.gid, bvid: w.bvid, shots: w.shots, ms: Date.now() - bt0 });

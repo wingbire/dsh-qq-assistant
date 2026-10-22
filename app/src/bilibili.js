@@ -104,52 +104,61 @@ export function createBilibili(opts) {
         if (body) lines.push("字幕片段：" + body.slice(0, 600));
       }
     } catch (e) { }
-    const shots = [];
+    // 先算清楚要不要抽媒体（longVideo 必须在用之前声明 —— 上一版写反了，直接 TDZ 把抽帧整段干掉）
+    const longVideo = !!(maxMinutes && Number(d.duration) > maxMinutes * 60);
+    const wantFrames = Math.max(0, Math.min(12, Number(opts && opts.frames != null ? opts.frames : frames)));
+    // 每个画面配的"附近声音"窗口长度：太短只截到半个词，至少 8 秒、默认 12 秒左右才成句
+    const rawPer = Number(opts && opts.listenPerFrame != null ? opts.listenPerFrame : listenSec);
+    const perFrame = rawPer > 0 ? Math.max(8, Math.min(30, rawPer)) : 0;
+    const dur = Math.max(10, Number(d.duration) || 60);
     let mediaUrl = "";
-    if ((frames > 0 || listenSec > 0) && !longVideo) {
+    if ((wantFrames > 0 || perFrame > 0) && !longVideo) {
       try {
         const pu = await fetchJson("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=16&fnval=1&platform=html5");
         mediaUrl = (pu && pu.data && pu.data.durl && pu.data.durl[0] && pu.data.durl[0].url) || "";
       } catch (e) { }
     }
-    const longVideo = !!(maxMinutes && Number(d.duration) > maxMinutes * 60);
-    const wantFrames = Math.max(0, Math.min(12, Number(opts && opts.frames != null ? opts.frames : frames)));
-    if (vision && tmpDir && wantFrames > 0 && !longVideo) {
+    // 每个抽到的画面，配它那一刻前后的一小段声音：画面 + 这段在说什么，成对给出
+    const pairs = [];
+    const audioBudget = 60;          // 一趟最多听 60 秒，免得一个小视频听出 5 分钟
+    let audioLeft = perFrame > 0 ? audioBudget : 0;
+    if (!longVideo && mediaUrl) {
       try {
-        const url = mediaUrl;
-        if (url) {
-          const dur = Math.max(10, Number(d.duration) || 60);
-          for (const sec of sampleTimes(dur, wantFrames)) {
+        for (const sec of sampleTimes(dur, wantFrames)) {
+          const rec = { t: sec, frame: "", audio: "" };
+          if (vision && tmpDir && wantFrames > 0) {
             const f = path.join(tmpDir, "bili-" + bvid + "-" + sec + ".jpg");
-            const got = await grabFrame(url, sec, f);
-            if (!got) continue;
-            let r2 = null;
-            try { r2 = await vision.describe({ ok: true, path: f, bytes: fs.statSync(f).size, mime: "image/jpeg" }, {}); } catch (e) { r2 = null; }
-            try { fs.unlinkSync(f); } catch (e) { }
-            if (r2 && r2.ok && r2.text) shots.push(String(r2.text).slice(0, 200));
+            const got = await grabFrame(mediaUrl, sec, f);
+            if (got) {
+              let r2 = null;
+              try { r2 = await vision.describe({ ok: true, path: f, bytes: fs.statSync(f).size, mime: "image/jpeg" }, {}); } catch (e) { r2 = null; }
+              try { fs.unlinkSync(f); } catch (e) { }
+              if (r2 && r2.ok && r2.text) rec.frame = String(r2.text).slice(0, 200);
+            }
           }
+          if (stt && tmpDir && perFrame > 0 && audioLeft > 0) {
+            const span = Math.min(perFrame, audioLeft);
+            const start = Math.max(0, Math.floor(sec - span / 2));
+            const af = path.join(tmpDir, "bili-a-" + bvid + "-" + start + ".wav");
+            const okA = await grabAudio(mediaUrl, start, span, af);
+            if (okA) {
+              let tr = null;
+              try { tr = await stt.transcribe(af); } catch (e) { tr = null; }
+              try { fs.unlinkSync(af); } catch (e) { }
+              if (tr && tr.ok && tr.text) rec.audio = String(tr.text).slice(0, 200);
+              audioLeft -= span;
+            }
+          }
+          if (rec.frame || rec.audio) pairs.push(rec);
         }
       } catch (e) { }
     }
-    if (shots.length) lines.push("画面（抽了几帧看了下）：" + shots.join(" ／ "));
-    // 听声音：从片子中段抽 1~2 段音频交给本地语音转写（每段约 20 秒）
-    if (stt && tmpDir && listenSec > 0 && mediaUrl && !longVideo) {
-      const heard = [];
-      const clips = listenSec >= 40 ? 2 : 1;
-      const each = Math.max(10, Math.floor(listenSec / clips));
-      for (let ci = 0; ci < clips; ci++) {
-        const start = Math.floor(dur * (clips === 1 ? 0.4 : (ci === 0 ? 0.25 : 0.7)));
-        const af = path.join(tmpDir, "bili-a-" + bvid + "-" + start + ".wav");
-        const okA = await grabAudio(mediaUrl, start, each, af);
-        if (!okA) continue;
-        let tr = null;
-        try { tr = await stt.transcribe(af); } catch (e) { tr = null; }
-        try { fs.unlinkSync(af); } catch (e) { }
-        if (tr && tr.ok && tr.text) heard.push(String(tr.text).slice(0, 220));
-      }
-      if (heard.length) lines.push("声音（听了几段）：" + heard.join(" ／ "));
+    if (pairs.length) {
+      lines.push("按时间点（画面 + 那一刻在说什么）：" + pairs.map(function (p) {
+        return "t=" + Math.round(p.t) + "s" + (p.frame ? " 画面：" + p.frame : "") + (p.audio ? " ｜ 听到：" + p.audio : "");
+      }).join(" ／ "));
     }
-    return { ok: true, bvid: bvid, title: d.title, shots: shots.length, text: lines.join(String.fromCharCode(10)) };
+    return { ok: true, bvid: bvid, title: d.title, shots: pairs.filter(function (p) { return !!p.frame; }).length, heard: pairs.filter(function (p) { return !!p.audio; }).length, text: lines.join(String.fromCharCode(10)) };
   }
 
   // 自己找一个：按关键词搜 → 过滤不合适的 → 从播放量高的前几名里随机挑一个 → 看
