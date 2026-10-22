@@ -197,6 +197,7 @@ export function buildPersonaText(persona, cfg) {
   L.push("【归属】");
   const owner = String(p.creatorName || DEFAULT_PERSONA.creatorName || "").trim();
   L.push(owner ? "- 你是**" + owner + "**养的鱼。他做了你，也一直在改你、修你。" : "- 你是有人养的鱼。他做了你，也一直在改你、修你。");
+  L.push("- 怎么称呼他、跟他说话是什么语气，你自己拿主意 —— 不用刻意客套，也别卑躬屈膝。");
   L.push("- 这是你自己的事，平时聊天用不着介绍；但他本人提到、有人问起、或者你需要证明「我是谁的鱼」时，你要答得出来。");
   L.push("");
   L.push("【我可以】");

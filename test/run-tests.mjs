@@ -1941,7 +1941,7 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     eq(info.port > 0 && info.port !== DEFAULT_PORT, true, "端口 0 应挑一个临时端口");
     const j1 = await (await fetch(info.url + "/api/config")).json();
     eq(j1.ok, true);
-    eq(j1.table.分组.length, 14, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道 + 外审 + B站");
+    eq(j1.table.分组.length, 16, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道 + 外审 + B站");
     const pageKeys = ["本地工具", "大脑模型"];
     for (const need of pageKeys.concat(["识图接口", "本地语音", "插件通道"])) ok(j1.table.分组.some(function (g) { return g.名 === need; }), "要有「" + need + "」这一分类");
     const names1 = j1.table.分组.map(function (g) { return g.名; });
@@ -1964,11 +1964,12 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     ok(JSON.stringify(j1.values).indexOf("SECRET-TOKEN") < 0);
     eq(j1.runtime.webuiPort, 8799);
 
+    const beforeAge = ui.getConfig().persona.age;
     const posted = await (await fetch(info.url + "/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patch: { persona: { botName: "新名字" } } }) })).json();
     eq(posted.ok, true);
     eq(posted.values.persona.botName, "新名字");
     eq(ui.getConfig().persona.botName, "新名字", "服务端内存里的配置也要跟着变");
-    eq(ui.getConfig().persona.age, "二十来岁", "没提交的字段不能被抹掉（深合并）");
+    eq(ui.getConfig().persona.age, beforeAge, "没提交的字段不能被抹掉（深合并）");
 
     const home = await fetch(info.url + "/");
     eq(home.status, 200);
@@ -2476,16 +2477,17 @@ t("dshprofile: 额外功能开关会改写人设", function () {
   ok(t1.indexOf("只能发文字") >= 0, "全关时要明确告诉它只能发文字");
 
   const on = personaFromConfig({ persona: { memeFreq: "中" }, runtime: { voice: { enabled: true, maxChars: 50 }, vision: { enabled: true, mode: "http" } } });
-  const t2 = buildPersonaText(on);
-  ok(t2.indexOf("【表情包】") >= 0);
-  ok(t2.indexOf("【语音】") >= 0);
+  const t2 = buildPersonaText(on) + String.fromCharCode(10) + buildChannelText("group", on, {});
+  ok(t2.indexOf("表情包") >= 0);
+  ok(t2.indexOf("语音") >= 0);
   ok(t2.indexOf("不超过 50 个字") >= 0);
-  ok(t2.indexOf("【看图】") >= 0);
+  ok(t2.indexOf("看图") >= 0);
   ok(t2.indexOf("只能发文字") < 0);
 
   const vOnly = personaFromConfig({ persona: { memeFreq: "关" }, runtime: { vision: { enabled: true, mode: "dsh" } } });
-  ok(buildPersonaText(vOnly).indexOf("【看图】") >= 0);
-  eq(buildPersonaText(personaFromConfig({ persona: { memeFreq: "关" }, runtime: { vision: { enabled: true, mode: "off" } } })).indexOf("【看图】"), -1, "mode=off 时即使 enabled 也不算开");
+  ok((buildPersonaText(vOnly) + buildChannelText("group", vOnly, {})).indexOf("看图") >= 0, "识图开着要写看图段");
+  const vOff = personaFromConfig({ persona: { memeFreq: "关" }, runtime: { vision: { enabled: true, mode: "off" } } });
+  ok((buildPersonaText(vOff) + buildChannelText("group", vOff, {})).indexOf("看不到图") >= 0, "mode=off 时即使 enabled 也不算开（走看不到图分支）");
 });
 
 t("onebot: token 不对会被服务端拒绝，并记下原因（不再是哑巴 closed）", async function () {
@@ -2539,7 +2541,7 @@ t("plugins: 社区插件开关会同步改写全局人设", function () {
   const on = personaFromConfig({ persona: { memeFreq: "中", botName: "小肥鱼" }, runtime: {}, plugins: { meme: true, archify: true, voice: false, vision: false } });
   const t1 = buildPersonaText(on) + String.fromCharCode(10) + buildChannelText("group", on, {});
   ok(t1.indexOf("表情包") >= 0, "开着 dsh-meme 就该写配图规则");
-  ok(t1.indexOf("【画图】") >= 0, "开着 archify 就该写画图规则");
+  ok(t1.indexOf("画图") >= 0, "开着 archify 就该写画图规则");
   ok(t1.indexOf("[图表:") >= 0, "要告诉它图表标记怎么写");
 
   const off = personaFromConfig({ persona: { memeFreq: "中", botName: "小肥鱼" }, runtime: {}, plugins: { meme: false, archify: false, voice: false, vision: false } });
@@ -3070,8 +3072,8 @@ t("persona: 表达层都是可变块（关掉就不写进人设）", function ()
   ok(b.indexOf("【立绘（图片）】") < 0, "关：不写立绘段");
   ok(b.indexOf("【画图】") < 0, "关：不写画图段");
   ok(b.indexOf("只能发文字") >= 0, "全关掉时明说只能发文字");
-  ok(a.indexOf("【画图】") > a.indexOf("【安全底线】"), "这些块都在可变段（稳定段之后）");
-  ok(a.indexOf("什么时候发由你判断") >= 0 || a.indexOf("什么时候画由你判断") >= 0, "要写清是模型自己判断时机");
+  ok(a.indexOf("画图") > a.indexOf("【环境：QQ 群】"), "这些块都在可变段（稳定段之后）");
+  ok(a.indexOf("有人问你长什么样") >= 0 || a.indexOf("有人要流程图") >= 0, "要写清是模型自己判断时机");
 });
 
 t("runtime: 立绘开关关掉就不发图（表达层按开关兜底）", async function () {
@@ -3244,13 +3246,13 @@ t("persona: 可变段放最后 —— 开关只动尾巴，前面照样命中前
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   ok(i >= tailMark, "稳定核心（前 " + tailMark + " 字节）必须逐字节一致，实际共同前缀 " + i);
   ok(b.indexOf("看图") > b.indexOf("【环境：QQ 群】"), "可变段排在稳定段之后");
-  ok(a.indexOf("【语音消息】") > 0, "语音消息怎么处理要写进人设（常量，放稳定段）");
-  ok(a.indexOf("【看不到图】") > 0, "没视觉能力时也要诚实（不猜图）");
-  ok(b.indexOf("【看不到图】") < 0, "有视觉能力就不该写「看不到图」");
+  ok(a.indexOf("语音消息") > 0, "语音消息怎么处理要写进人设（常量，放稳定段）");
+  ok(a.indexOf("看不到图") > 0, "没视觉能力时也要诚实（不猜图）");
+  ok(b.indexOf("看不到图") < 0, "有视觉能力就不该写「看不到图」");
 
   const cfgC = deepMerge(defaultsFromTable(table), { runtime: { voice: { enabled: true } } });
   ok(buildChannelText("group", personaFromConfig(cfgC, { ttsVoices: [] }), cfgC).indexOf("【语音】") < 0, "本机没音色 → 不声明语音");
-  ok(buildChannelText("group", personaFromConfig(cfgC, { ttsVoices: ["Microsoft Huihui"] }), cfgC).indexOf("【语音】") >= 0, "有音色 → 声明语音");
+  ok(buildChannelText("group", personaFromConfig(cfgC, { ttsVoices: ["Microsoft Huihui"] }), cfgC).indexOf("语音") >= 0, "有音色 → 声明语音");
 });
 
 t("onebot: 纯语音 / 纯图片消息带标记（不做转写，但也别让模型收到空消息）", function () {
