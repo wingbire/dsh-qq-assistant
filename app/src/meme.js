@@ -157,8 +157,26 @@ export function createMemeLibrary(opts) {
     };
   }
 
+  // 给大脑看的图库菜单：每个标签 + 张数 + 一句样例（该标签第一张的描述）。
+  // 她照着菜单写 [表情: 标签] 或 [表情: 某句描述]，应用就能精确匹配，不再靠猜关键词。
+  function indexText(maxTags) {
+    const byTag = new Map();
+    for (const r of rows) {
+      const t = String(r.tag || "");
+      if (!t) continue;
+      const cur = byTag.get(t) || { n: 0, sample: "" };
+      cur.n += 1;
+      if (!cur.sample && r.caption) cur.sample = String(r.caption).slice(0, 24);
+      byTag.set(t, cur);
+    }
+    const list = Array.from(byTag.entries()).sort(function (a, b) { return b[1].n - a[1].n; });
+    return list.slice(0, Math.max(1, maxTags || 24))
+      .map(function (x) { return x[0] + "(" + x[1].n + ")" + (x[1].sample ? "「" + x[1].sample + "」" : ""); })
+      .join(" · ");
+  }
+
   return {
-    ready: rows.length > 0, packDir: packDir, manifest: manifest, rows: rows,
+    ready: rows.length > 0, packDir: packDir, manifest: manifest, rows: rows, indexText: indexText,
     packs: packs, find: find, byTag: byTag, tags: function () { return Array.from(new Set(rows.map(function (r) { return r.tag; }))); },
     stats: function () { return Object.assign({ rows: rows.length, packDir: packDir, freq: null }, stats); },
     _internal: { scoreRow: scoreRow }
