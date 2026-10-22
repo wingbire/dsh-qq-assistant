@@ -1109,7 +1109,14 @@ export function createRuntime(deps) {
         chartInfo = { error: conv.error };
       }
     }
-    const memeInfo = await attachMeme(evt.gid, parsed.mood, dec.tier);
+    // 这一轮已经发了图表（正经图）就别再配表情包了：一张图配一张图，群里看着太吵
+    let memeInfo = null;
+    if (chartInfo && chartInfo.file) {
+      stats.memesSuppressed += 1;
+      observe({ kind: "meme_skipped", gid: evt.gid, reason: "本轮已经发了图表" });
+    } else {
+      memeInfo = await attachMeme(evt.gid, parsed.mood, dec.tier);
+    }
     stats.replies += 1;
     {
       const gs = gstat(evt.gid);
