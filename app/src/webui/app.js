@@ -656,6 +656,13 @@
   }
 
   /* 额外功能页 */
+  // B 站登录行：点按钮弹浏览器，用户扫码，程序自己把 cookie 存好
+  function biliLoginRow() {
+    return '<div class="field"><div class="label">用小号登录 B 站</div>' +
+      '<div class="ctrl"><button class="btn-sm good" data-bili-login="1">点我登录（会弹一个浏览器窗口）</button> ' +
+      '<span class="hint" id="bili-login-hint">没登录也能看视频，只是没有字幕可用</span></div></div>';
+  }
+
   function renderExtra() {
     var intro = '<div class="card"><div class="body"><div class="hint" style="margin:0">' +
       '这里的开关不只控制程序行为，<b>还会重新生成人设</b>：关掉的功能不会出现在人设里，模型就不会去用它；打开才写进去。保存后下一轮大脑调用生效。</div></div></div>';
@@ -700,7 +707,7 @@
       var logBox = S.pluginLog ? '<pre class="pre">' + esc(S.pluginLog) + '</pre>' : "";
       return intro +
         '<details class="card"><summary>B 站看视频<span class="muted" style="font-weight:400;font-size:12px">群里出现 B 站链接时，她先看一遍再说话</span></summary><div class="body">' +
-        renderGroupFields("B站") + '</div></details>' +
+        biliLoginRow() + renderGroupFields("B站") + '</div></details>' +
         '<div class="sec-title">内置额外功能</div>' + builtin +
         '<div class="sec-title">社区插件兼容</div>' +
         '<div class="card"><div class="body"><div class="hint" style="margin:0">下面是社区做的 DSH 插件。本程序<b>不打包</b>它们（体积、许可证，而且本该由 DSH 那边管），只做兼容与接线：没装的点「一键安装」，装好就能用；没装或关掉就退回内置实现。<b>任何开关改动保存后都会重新生成全局人设</b>——关掉的能力不会写进人设，模型也就不会去用。</div>' + logBox + '</div></div>' +
@@ -1224,6 +1231,32 @@
       if (cbtn) {
         api("/api/corpus/label", { id: cbtn.getAttribute("data-cid"), expect: cbtn.getAttribute("data-expect") }).then(function (r) {
           toast(r.ok ? "已标注" : (r.error || "标注失败"), !r.ok); render();
+        });
+        return;
+      }
+      var btnBiliLogin = e.target.closest("[data-bili-login]");
+      if (btnBiliLogin) {
+        var hintEl = document.getElementById("bili-login-hint");
+        if (hintEl) hintEl.textContent = "正在打开浏览器…请在这个窗口里扫码登录";
+        api("/api/bili/login", {}).then(function () {
+          if (hintEl) hintEl.textContent = "等你扫码…登录成功后会自动保存";
+          var tries = 0;
+          var timer = setInterval(function () {
+            tries += 1;
+            api("/api/bili/login").then(function (r) {
+              if (r && r.done) {
+                clearInterval(timer);
+                if (hintEl) hintEl.textContent = "已登录 ✓（SESSDATA 已保存）";
+                toast("B 站登录成功，走字幕的通道已就绪");
+                render();
+              } else if (tries >= 60) {
+                clearInterval(timer);
+                if (hintEl) hintEl.textContent = "还没登录（可以关掉浏览器重试）";
+              }
+            }).catch(function () { });
+          }, 2000);
+        }, function (err) {
+          if (hintEl) hintEl.textContent = "打开失败：" + (err && err.message ? err.message : "未知错误");
         });
         return;
       }

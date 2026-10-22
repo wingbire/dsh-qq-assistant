@@ -283,6 +283,26 @@ function maybeAutoTrain() {
       return sendJson(res, 200, napcatRevealFn());
     }
 
+    // ---------- 一键登录 B 站（弹 Edge，用户自己扫码，程序取 cookie）----------
+    if (p === "/api/bili/login" && req.method === "POST") {
+      const bl = d.biliLogin;
+      if (!bl) return sendJson(res, 400, { ok: false, error: "登录模块不可用" });
+      return sendJson(res, 200, await bl.start());
+    }
+    if (p === "/api/bili/login" && req.method === "GET") {
+      const bl = d.biliLogin;
+      if (!bl) return sendJson(res, 400, { ok: false, error: "登录模块不可用" });
+      const r = await bl.readCookies();
+      if (!r.ok) return sendJson(res, 200, { ok: true, waiting: true, hint: r.error });
+      if (!r.sessdata) return sendJson(res, 200, { ok: true, waiting: true, hint: "还没登录（没读到 SESSDATA）" });
+      cfg.plugins = cfg.plugins || {};
+      cfg.plugins.biliSessdata = r.sessdata;
+      if (r.jct) cfg.plugins.biliJct = r.jct;
+      if (configFile) { try { saveConfig(cfg, configFile); } catch (e) { } }
+      try { if (d.bili && d.bili.setAuth) d.bili.setAuth(r.sessdata); } catch (e) { }
+      try { bl.close(); } catch (e) { }
+      return sendJson(res, 200, { ok: true, done: true });
+    }
     // ---------- 训练（用标注语料拟合开口概率模型）----------
     if (p === "/api/train" && req.method === "GET") {
       const items = loadCorpus(corpusFile(path.dirname(store.paths.labels)));

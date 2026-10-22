@@ -12,6 +12,7 @@ import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
 import { createBilibili } from "./src/bilibili.js";
+import { createBiliLogin } from "./src/bililogin.js";
 import { createDiagram } from "./src/diagram.js";
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
@@ -331,6 +332,8 @@ const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR,
 const diagram = createDiagram({ outDir: path.join(BRAIN_TMP_DIR, "charts"),
   // 图表规格由大脑生成；渲染失败会把报错喂回去修一版
   askBrain: async function (req) { return runBrain({ cliPath: cli, profile: "qq-brain", promptText: req.promptText, timeoutMs: 90000 }); } });
+// 一键登录 B 站：弹 Edge → 用户扫码 → 程序取 cookie
+const biliLogin = createBiliLogin({ profileDir: path.join(BRAIN_TMP_DIR, "bili-login-profile") });
 const vision = createVision({
   // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
   config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
@@ -549,7 +552,7 @@ async function doPluginInstall(id) {
 }
 
 const webui = createWebUi({
-  config: cfg, table: table, store: store, memes: memes, runtime: runtime, labels: runtime.labels,
+  config: cfg, table: table, store: store, memes: memes, runtime: runtime, labels: runtime.labels, bili: bili, biliLogin: biliLogin,
   plugins: async function () { return pluginProbe.probe(); }, installPlugin: doPluginInstall,
   configFile: CONFIG_FILE, probeOnebot: probeOnebot, listGroups: listGroups, onConfigSaved: onConfigSaved,
   shutdown: function () { gracefulExit("配置端请求停机"); },
