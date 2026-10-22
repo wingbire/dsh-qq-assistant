@@ -3,7 +3,7 @@ import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { PRIOR_WEIGHTS } from '../app/src/probability.js';
 import { loadCorpus, labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
-import { resolveBvid, hasBiliUrl } from '../app/src/bilibili.js';
+import { resolveBvid, hasBiliUrl, sampleTimes } from '../app/src/bilibili.js';
 import { sniffExt } from '../app/src/vision.js';
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
@@ -3781,6 +3781,15 @@ t("B站：开关关掉时人设里不提看视频，开着才写", function () {
   ok(on.indexOf("【B 站视频】") >= 0, "开着要有能力声明");
   const off = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: false } }), { plugins: { bilibili: false } });
   ok(off.indexOf("【B 站视频】") < 0, "关了就不提");
+});
+t("B站抽帧：数量对、落在视频内、中间密两头疏", function () {
+  eq(sampleTimes(600, 0).length, 0);
+  eq(sampleTimes(600, 1).length, 1);
+  const ts = sampleTimes(600, 6);
+  eq(ts.length, 6);
+  ok(ts.every(function (t) { return t >= 0 && t <= 600; }), "抽帧点要在时长内");
+  ok(ts[0] < 600 * 0.2, "第一帧要早");
+  ok(ts[ts.length - 1] > 600 * 0.8, "最后一帧要晚");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

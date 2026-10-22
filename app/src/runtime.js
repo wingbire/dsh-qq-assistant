@@ -842,10 +842,16 @@ export function createRuntime(deps) {
           && /看(个|看)?视频|找个视频|刷刷|去看(看|一眼)|B站.{0,4}看/i.test(String(evt.text || ""))) {
         const interests = (evt.interests && evt.interests.length) ? evt.interests : ["热门"];
         const kw = interests[Math.floor(Math.random() * interests.length)];
+        // 对方说“认真看/仔细看” → 多抽几帧；说“随便看看/简单看” → 少抽几帧。是参数，不是闸门。
+        const baseF = (rc.bili && rc.bili.frames != null) ? rc.bili.frames : 4;
+        const txt0 = String(evt.text || "");
+        const more = /认真|仔细|好好看|看细一点|看仔细|仔细看/.test(txt0);
+        const less = /随便看|简单看|大概看|扫一眼|不用太认真/.test(txt0);
+        const wantFrames = Math.max(1, Math.min(12, Number(baseF) + (more ? 4 : 0) - (less ? 2 : 0)));
         biliBusy = true;
         const bt1 = Date.now();
         try {
-          const w = await bili.findAndWatch(kw);
+          const w = await bili.findAndWatch(kw, { frames: wantFrames });
           if (w && w.ok && w.text) {
             taskText = injectSummary(taskText, "【你刚在 B 站自己找了个视频看（材料在下面，别照念标题）】" + String.fromCharCode(10) + w.text);
             observe({ kind: "bili_browse", gid: evt.gid, bvid: w.bvid, keyword: kw, shots: w.shots, ms: Date.now() - bt1 });
@@ -857,7 +863,10 @@ export function createRuntime(deps) {
       if (bili && /b23\.tv|bilibili\.com\/video|BV[0-9A-Za-z]{10}/i.test(String(evt.text || ""))) {
         const bt0 = Date.now();
         try {
-          const w = await bili.watch(evt.text || "");
+          const baseF2 = (rc.bili && rc.bili.frames != null) ? rc.bili.frames : 4;
+          const t2 = String(evt.text || "");
+          const wantFrames2 = Math.max(1, Math.min(12, Number(baseF2) + (/认真|仔细|好好看|仔细看/.test(t2) ? 4 : 0) - (/随便看|简单看|大概看/.test(t2) ? 2 : 0)));
+          const w = await bili.watch(evt.text || "", { frames: wantFrames2 });
           if (w && w.ok && w.text) {
             taskText = injectSummary(taskText, "【这条消息里的 B 站视频（刚看了一眼）】" + String.fromCharCode(10) + w.text);
             observe({ kind: "bili_watch", gid: evt.gid, bvid: w.bvid, shots: w.shots, ms: Date.now() - bt0 });

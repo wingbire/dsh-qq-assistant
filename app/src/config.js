@@ -189,7 +189,7 @@ export function runtimeConfig(cfg) {
     maxSegments: getPath(c, "runtime.maxSegments") != null ? getPath(c, "runtime.maxSegments") : 6,                    // N6：超长按标点拆成多条（不再合并压缩）
     autoTrainAt: Math.max(0, Number(getPath(c, "runtime.autoTrainAt")) || 30),   // 已标 N 条就自动训练一轮（0=关）
     bili: {
-      frames: Math.min(6, Math.max(0, numOf(getPath(c, "runtime.bili.frames"), 4))),
+      frames: Math.min(12, Math.max(0, numOf(getPath(c, "runtime.bili.frames"), 4))),
       maxMinutes: Math.max(0, numOf(getPath(c, "runtime.bili.maxMinutes"), 30))
     },
     // 记忆：每 N 条发言，让她自己总结一次「想记住的事」，写进群档案（profiles/g-<gid>.json）

@@ -20,6 +20,27 @@ export function resolveBvid(text) {
 
 export function hasBiliUrl(text) { return !!resolveBvid(text) || /b23\.tv|bilibili\.com\/video/i.test(String(text || "")); }
 
+// 抽帧时间点：片头片尾各留一帧（看包装/结尾），剩下的向中间聚拢 ——
+// 因为视频的干货通常在中间，片头多是 logo/开场白、片尾多是结束语/广告。
+// 用 Box-Muller 造标准正态，截到 ±2σ 再映射到 [0.08, 0.92] 的时长区间。
+export function sampleTimes(durationSec, count) {
+  const dur = Math.max(10, Number(durationSec) || 60);
+  const k = Math.max(0, Math.floor(Number(count) || 0));
+  if (!k) return [];
+  if (k === 1) return [Math.floor(dur * 0.5)];
+  const out = [Math.floor(dur * 0.12)];                       // 早段一帧
+  const mid = k - 2;                                          // 中间的正态帧
+  for (let i = 0; i < mid; i++) {
+    const u1 = Math.max(1e-9, Math.random()), u2 = Math.random();
+    let z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    z = Math.max(-2, Math.min(2, z));
+    const t = 0.5 + z * 0.16;                                 // 中间 ±2σ(0.16) → 0.18~0.82
+    out.push(Math.floor(dur * Math.max(0.18, Math.min(0.82, t))));
+  }
+  out.push(Math.floor(dur * 0.9));                           // 尾段一帧
+  return out;
+}
+
 export function createBilibili(opts) {
   const o = opts || {};
   const fetchFn = o.fetch || fetch;
@@ -48,7 +69,7 @@ export function createBilibili(opts) {
     });
   }
 
-  async function watch(link) {
+  async function watch(link, opts) {
     const bvid = resolveBvid(link);
     if (!bvid) return { ok: false, error: "没认出 BV 号" };
     let v;
@@ -74,14 +95,14 @@ export function createBilibili(opts) {
     } catch (e) { }
     const shots = [];
     const longVideo = !!(maxMinutes && Number(d.duration) > maxMinutes * 60);
-    if (vision && tmpDir && frames > 0 && !longVideo) {
+    const wantFrames = Math.max(0, Math.min(12, Number(opts && opts.frames != null ? opts.frames : frames)));
+    if (vision && tmpDir && wantFrames > 0 && !longVideo) {
       try {
         const pu = await fetchJson("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=16&fnval=1&platform=html5");
         const url = (pu && pu.data && pu.data.durl && pu.data.durl[0] && pu.data.durl[0].url) || "";
         if (url) {
           const dur = Math.max(10, Number(d.duration) || 60);
-          for (let i = 1; i <= frames; i++) {
-            const sec = Math.floor(dur * i / (frames + 1));
+          for (const sec of sampleTimes(dur, wantFrames)) {
             const f = path.join(tmpDir, "bili-" + bvid + "-" + sec + ".jpg");
             const got = await grabFrame(url, sec, f);
             if (!got) continue;
@@ -98,7 +119,7 @@ export function createBilibili(opts) {
   }
 
   // 自己找一个：按关键词搜 → 过滤不合适的 → 从播放量高的前几名里随机挑一个 → 看
-  async function findAndWatch(keyword) {
+  async function findAndWatch(keyword, opts) {
     const kw = String(keyword || "").trim();
     if (!kw) return { ok: false, error: "没有关键词" };
     let list = [];
@@ -109,7 +130,7 @@ export function createBilibili(opts) {
     const cands = list.filter(function (x) { return x && x.bvid && !BAD_TITLE.test(String(x.title || "")); }).slice(0, 10);
     if (!cands.length) return { ok: false, error: "没搜到合适的视频" };
     const pick = cands[Math.floor(Math.random() * cands.length)];
-    const r = await watch(pick.bvid);
+    const r = await watch(pick.bvid, opts);
     if (!r.ok) return r;
     r.keyword = kw;
     r.pickedFrom = cands.length;
