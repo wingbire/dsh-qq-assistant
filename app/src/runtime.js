@@ -43,6 +43,7 @@ export function createRuntime(deps) {
   const searchSvc = d.search || null;
   const memes = d.memes || createMemeLibrary({});
   const vision = d.vision || null;              // N18：识图（独立一次多模态调用）
+  const bili = d.bili || null;                  // B 站看视频：标题/字幕 + 抽帧识图
   const tts = d.tts || null;                    // N18：TTS → NapCat 发语音
   const sendRecord = d.sendRecord || null;
   const imageDir = d.imageDir || null;          // 下载下来的图片落哪儿
@@ -833,6 +834,19 @@ export function createRuntime(deps) {
         if (sr.usage) { const st2 = Number(sr.usage.totalTokens) || 0; budget.record(st2, at); stats.tokens += st2; stats.searchTokens += st2; }
         stats.searches += 1;
         if (sr.cached) stats.searchCacheHits += 1;
+      }
+      // B 站链接：她先看一眼（画面 + 字幕），结果作为材料进正文；没有链接就完全不触发
+      if (bili && /b23\.tv|bilibili\.com\/video|BV[0-9A-Za-z]{10}/i.test(String(evt.text || ""))) {
+        const bt0 = Date.now();
+        try {
+          const w = await bili.watch(evt.text || "");
+          if (w && w.ok && w.text) {
+            taskText = injectSummary(taskText, "【这条消息里的 B 站视频（刚看了一眼）】" + String.fromCharCode(10) + w.text);
+            observe({ kind: "bili_watch", gid: evt.gid, bvid: w.bvid, shots: w.shots, ms: Date.now() - bt0 });
+          } else if (w && !w.ok) {
+            observe({ kind: "bili_fail", gid: evt.gid, error: w.error });
+          }
+        } catch (e) { }
       }
       // 缓存优先级（默认生效，无需配置）：**少变的在前，易变的在后** ——
       //   ① 群档案概况（本群专属人设 +【本群画像】）      每 refN 次提炼才变

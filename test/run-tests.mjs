@@ -3,6 +3,7 @@ import { utilityScore, UTILITY_WEIGHTS, gateFactor } from "../app/src/utility.js
 import { valve, depthTier, searchPlan, clampBounds, adaptBounds } from "../app/src/gatescore.js";
 import { PRIOR_WEIGHTS } from '../app/src/probability.js';
 import { loadCorpus, labelCorpus, fromDecisions, auditFromReason } from '../app/src/corpus.js';
+import { resolveBvid, hasBiliUrl } from '../app/src/bilibili.js';
 import { sniffExt } from '../app/src/vision.js';
 import { createGates } from "../app/src/gates.js";
 import { TIERS } from "../app/src/utility.js";
@@ -3766,6 +3767,13 @@ t("人设：填了制作者才写那一段，怎么称呼由她自己定", funct
   ok(a.indexOf("你自己拿主意") >= 0, "称呼由她决定，不写死");
   const b = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: {} }), {});
   ok(b.indexOf("你的制作者") < 0, "没填就不提");
+});
+t("B站：从一段话里认出 BV 号 / av 号，普通链接不误判", function () {
+  eq(resolveBvid("这个不错 https://www.bilibili.com/video/BV1GJ411x7h7 你看看"), "BV1GJ411x7h7");
+  eq(resolveBvid("av170001"), "av170001");
+  eq(resolveBvid("今晚吃啥"), null);
+  ok(hasBiliUrl("https://b23.tv/abc123"), "b23 短链要认得");
+  ok(!hasBiliUrl("普通消息"), "普通消息不是 B 站链接");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

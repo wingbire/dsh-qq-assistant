@@ -5,8 +5,8 @@ import { DATA_ROOT, ensureDir } from "./paths.js";
 export const SCHEMA_VERSION = 1;
 
 export const STORE_LIMITS = {
-  jsonlMaxLines: 5000,
-  jsonlMaxBytes: 4 * 1024 * 1024,
+  jsonlMaxLines: 2000,   // 约 3-4 天的判定/发送记录（够查错，不会无限长）
+  jsonlMaxBytes: 2 * 1024 * 1024,
   profileMaxGroups: 200,
   brainTempMaxAgeMin: 60,
   keepGenerations: 1

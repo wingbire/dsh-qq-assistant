@@ -11,6 +11,7 @@ import { tierOverlayPath , nameVariants } from "./src/dshprofile.js";
 import { personaFromConfig } from "./src/dshprofile.js";
 import { createAuditor, setAuditChannel, loadRubric } from "./src/audit.js";
 import { createSearch, SEARCH_PROFILE_ID, SEARCH_PERSONA } from "./src/search.js";
+import { createBilibili } from "./src/bilibili.js";
 import { createMemeLibrary } from "./src/meme.js";
 import { createWebUi } from "./src/webui.js";
 import { createVision, VISION_PERSONA, modelHasVision, listVisionModels } from "./src/vision.js";
@@ -321,6 +322,8 @@ const memes = createMemeLibrary({});
 log("图库：" + (memes.ready ? memes.rows.length + " 张 / " + memes.tags().length + " 个情绪标签 @ " + memes.packDir : "没找到（配图会跳过）"));
 
 // N18 识图：独立一次多模态调用（http 直连 / dsh 跑 Our Free Model）
+const biliEnabled = !(rc.plugins && rc.plugins.bilibili === false);
+const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: 4 }) : null;   // vision 在建好之后补上
 const vision = createVision({
   // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
   config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
@@ -329,6 +332,7 @@ const vision = createVision({
     // 配置端改完立刻生效（人设是保存时就重写的，通道也别等到重启）
     const liveCfgNow = runtimeConfig(liveCfg);
     const live = visionCapability(liveCfgNow.vision, { brainVision: brainVisionOf(liveCfg), brainModel: (channelModel("brain", liveCfg) || {}).model });
+try { if (bili) bili.setVision(vision); } catch (e) { }   // 抽帧的识图走同一个 vision 实例
     if (!live.capable) return { ok: false, error: "当前识图模型没有视觉能力（" + live.source + "）" };
     ensureBrainProfile({ cliPath: cli, profile: req.profile, personaText: VISION_PERSONA, model: visionModelOf(liveCfgNow) });
     return runBrain({ cliPath: cli, profile: req.profile, promptText: req.promptText, timeoutMs: req.timeoutMs });
@@ -351,7 +355,7 @@ log("能力声明 · 看图：" + (visionCap.enabled ? (visionCap.capable ? "会
 log("NapCat 配置页：" + rc.napcatWebui + "（配置端右上角有快捷入口）");
 
 const runtime = createRuntime({
-  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt,
+  config: cfg, runtime: rc, store: store, bot: bot, search: searchSvc, memes: memes, vision: vision, tts: tts, stt: stt, bili: bili,
   voiceDir: path.join(BRAIN_TMP_DIR, "voice"),
   imageDir: path.join(BRAIN_TMP_DIR, "images"),
   sendRecord: function (gid, file) { log("→语音 " + gid + " : " + path.basename(file)); return link.ob ? link.ob.sendGroupRecord(gid, file) : false; },
