@@ -1729,7 +1729,7 @@ t("meme: 图库加载（sqlite index.db）并匹配情绪描述", function () {
   for (const c of cases) {
     const hit = lib.find(c[0]);
     ok(hit, c[0] + " 应能匹配到图");
-    ok(hit.path && hit.tag, c[0] + " 应匹配到一张带标签的图（实得 "" + (hit && hit.tag) + """);
+    ok(hit.path && hit.tag, c[0] + " 应匹配到一张带标签的图");
   }
   eq(lib.find("完全不相干的火星词"), null);
 });
