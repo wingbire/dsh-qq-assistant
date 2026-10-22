@@ -29,6 +29,7 @@ export function resolveMemeRoots(env, dshHome) {
       if (typeof cfg[k] === "string" && cfg[k]) out.push(cfg[k]);
     }
   } catch (err) {}
+  out.push(path.join(home, "meme-packs"));        // 用户自己加的图库（~/dsh/meme-packs/<包名>/）
   const profileRoots = [path.join(home, "profiles")];
   if (dshHome) profileRoots.push(path.join(path.resolve(dshHome), "profiles"));
   for (const root of profileRoots) {
@@ -125,15 +126,13 @@ export function createMemeLibrary(opts) {
 
   const rows = [];
   let packDir = null, manifest = null;
+  // 合并所有包（以前遇到第一个有内容的包就 break，用户新加的包全被忽略）
   for (const p of packs) {
     const idx = loadIndexRows(p, sqliteLoader);
     const r = idx && idx.length ? idx : scanPack(p);
-    if (r.length) {
-      packDir = p; manifest = readManifest(p);
-      // index.db 里存的是相对路径，统一补成绝对路径
-      for (const row of r) rows.push(Object.assign({}, row, { path: path.isAbsolute(row.path) ? row.path : path.join(p, row.path) }));
-      break;
-    }
+    if (!r.length) continue;
+    if (!packDir) { packDir = p; manifest = readManifest(p); }
+    for (const row of r) rows.push(Object.assign({}, row, { path: path.isAbsolute(row.path) ? row.path : path.join(p, row.path), pack: path.basename(p) }));
   }
 
   function byTag(tag) {
