@@ -836,6 +836,24 @@ export function createRuntime(deps) {
         if (sr.cached) stats.searchCacheHits += 1;
       }
       // B 站链接：她先看一眼（画面 + 字幕），结果作为材料进正文；没有链接就完全不触发
+      let biliBusy = false;
+      // 自己找：消息里让她去看视频（且没带链接）→ 用她的兴趣搜一个、挑一个、看，然后回来聊
+      if (bili && !biliBusy && !/b23\.tv|bilibili\.com|BV[0-9A-Za-z]{10}/i.test(String(evt.text || ""))
+          && /看(个|看)?视频|找个视频|刷刷|去看(看|一眼)|B站.{0,4}看/i.test(String(evt.text || ""))) {
+        const interests = (evt.interests && evt.interests.length) ? evt.interests : ["热门"];
+        const kw = interests[Math.floor(Math.random() * interests.length)];
+        biliBusy = true;
+        const bt1 = Date.now();
+        try {
+          const w = await bili.findAndWatch(kw);
+          if (w && w.ok && w.text) {
+            taskText = injectSummary(taskText, "【你刚在 B 站自己找了个视频看（材料在下面，别照念标题）】" + String.fromCharCode(10) + w.text);
+            observe({ kind: "bili_browse", gid: evt.gid, bvid: w.bvid, keyword: kw, shots: w.shots, ms: Date.now() - bt1 });
+          } else {
+            observe({ kind: "bili_browse_fail", gid: evt.gid, keyword: kw, error: (w && w.error) || "未知" });
+          }
+        } catch (e) { } finally { biliBusy = false; }
+      }
       if (bili && /b23\.tv|bilibili\.com\/video|BV[0-9A-Za-z]{10}/i.test(String(evt.text || ""))) {
         const bt0 = Date.now();
         try {
