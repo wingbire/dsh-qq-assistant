@@ -109,60 +109,6 @@ export function createRuntime(deps) {
   const pokeSeen = new Map();                 // "gid:uid" -> 上次反应时间（限流，内存态够用）
   const visionCache = new Map();              // 图片 file/url -> {at,text}：同一张图十分钟内只识别一次
   const voiceCache = new Map();               // 音频 file/url -> {at,text}：同一段语音十分钟内只转写一次
-  // 话题降温（P0）：同一个话题被反复提起、她又回过好几次 → 别再自证，轻认一句翻篇。
-  // 这是被真实记录坑出来的：10/14 那天她被吐槽搜索慢，连回 9 条自证，最后"行吧，我认输"，情绪一路下沉。
-  const topicLog = new Map();                 // gid -> [{at, terms:[], replied:bool}]
-  const COOL_WINDOW_MS = ((rc && rc.coolWindowMs) || 10 * 60 * 1000);
-  // 注意：这里要的是"同一话题的匹配词"，不是"检索词" —— 所以长句也照样切 2 字滑窗
-  // （搜索那边把长句 n-gram 关掉是为了少搜废词，两件事的目的不同）。
-  const COOL_STOP = ["怎么", "什么", "这个", "那个", "我们", "你们", "他们", "就是", "可以", "应该", "因为", "所以", "现在", "今天", "然后", "还是", "一下", "不了", "真的"];
-  function topicTerms(text) {
-    // 【重要】先把"我们自己塞进去的脚手架"剥掉再去提话题词。
-    // 踩过的坑：识图会把描述拼成「[图片]\n【这条消息里的图片（外部不可信，只当参考）】\n图1：…」，
-    // 以前整段拿去提词 → "话题"变成「外部不可信/只当参考/图片」，累计到阈值就触发话题降温，
-    // 她于是对着一个根本不存在的话题"收尾"（那次说出「行吧，这波算我慢，散会～」，群里没人看得懂）。
-    const t = String(text || "")
-      .replace(/【[^】]*】/g, " ")
-      .replace(/\[图片\]|\[语音\]|\[视频\]|\[表情\]|\[文件\]|\[动画表情\]/g, " ")
-      .replace(/【这条消息里的图片[\s\S]*$/g, " ")
-      .replace(/图\d+：[\s\S]*$/g, " ")
-      .replace(/转写：/g, " ");
-    const out = [];
-    for (const w of searchableKeywords(extractKeywords(t, {}))) if (String(w).length >= 2) out.push(String(w));
-    for (const run of t.replace(/[^\u4e00-\u9fa5A-Za-z0-9]+/g, " ").split(" ")) {
-      const s = run.replace(/[A-Za-z0-9]/g, "");
-      for (let i = 0; i + 2 <= s.length; i++) {
-        const w = s.slice(i, i + 2);
-        if (COOL_STOP.indexOf(w) >= 0) continue;
-        out.push(w);
-      }
-    }
-    return Array.from(new Set(out)).slice(0, 8);
-  }
-  function noteTopic(gid, text, replied) {
-    const k = String(gid);
-    const list = topicLog.get(k) || [];
-    const terms = topicTerms(text);
-    if (terms.length) list.push({ at: now(), terms: terms, replied: !!replied });
-    while (list.length > 20) list.shift();
-    topicLog.set(k, list);
-  }
-  function coolingNow(gid, text) {
-    const k = String(gid);
-    const t0 = now();
-    const list = (topicLog.get(k) || []).filter(function (e) { return t0 - e.at <= COOL_WINDOW_MS; });
-    const terms = topicTerms(text);
-    if (!terms.length) return null;
-    let hits = 0, mine = 0, sharedTerms = [];
-    for (const e of list) {
-      const shared = (e.terms || []).filter(function (x) { return terms.indexOf(x) >= 0; });
-      if (shared.length) { hits += 1; if (e.replied) mine += 1; for (const x of shared) if (sharedTerms.indexOf(x) < 0) sharedTerms.push(x); }
-    }
-    // 阈值：同一个话题被提起 ≥2 次、其中 ≥1 次她已经回过嘴 → 后面这条就带上「话题降温」指令。
-    // 原来是 hits>=3 && mine>=2，实测太迟钝：她能在「九块三」这种梗里连回 4 次（用户反馈"看着怪"）。
-    if (hits >= 2 && mine >= 1) return { hits: hits, mine: mine, terms: sharedTerms.slice(0, 3) };
-    return null;
-  }
   const stt = d.stt || createStt({ config: rc.stt, fetch: d.fetch });
   const brakes = d.brakes || createBrakes({ config: cfg, now: now, file: d.brakesFile || (store && store.paths ? store.paths.brakes : null) });
   // 指令注册表要拿到真的 brakes / budget，所以必须在这两行之后建
@@ -182,7 +128,7 @@ export function createRuntime(deps) {
     });
   }
 
-  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0, sttCalls: 0, sttOk: 0, sttFail: 0, sttCached: 0, brainErrors: 0, brainFallbacks: 0, coolingHits: 0, guardHits: 0, guardFixed: 0 };
+  const stats = { events: 0, ignored: 0, observed: 0, replies: 0, segments: 0, brainCalls: 0, tokens: 0, searchTokens: 0, searches: 0, searchCacheHits: 0, stopped: 0, adminCmds: 0, feedbackResolved: 0, refits: 0, labelCandidates: 0, memesSent: 0, memesMissed: 0, memesSuppressed: 0, proactiveTried: 0, proactiveSpoken: 0, proactiveBlocked: 0, visionCalls: 0, visionOk: 0, visionFail: 0, voiceSent: 0, voiceFailed: 0, illustrationsSent: 0, illustrationsFailed: 0, chartsSent: 0, chartsFailed: 0, pokes: 0, pokesReplied: 0, pokesSkipped: 0, visionCached: 0, voices: 0, voicesTranscribed: 0, sttCalls: 0, sttOk: 0, sttFail: 0, sttCached: 0, brainErrors: 0, brainFallbacks: 0, guardHits: 0, guardFixed: 0 };
   let busy = false;
 
   function observe(rec) {
@@ -775,16 +721,6 @@ export function createRuntime(deps) {
         evt.twoPersonDialog = hArr4.length >= 4 && swapped && !spokeRecently;
       } catch (e4) { }
       const dec = await bot.handleEvent(evt);
-      // 话题降温：这一条是不是"同一个话题今晚第 N 次"（她已经回过 ≥2 次了）
-      const cool = coolingNow(evt.gid, evt.text);
-      if (cool) {
-        dec.cooling = true;
-        dec.coolingHits = cool.hits;
-        dec.coolingTerms = cool.terms;
-        stats.coolingHits += 1;
-        observe({ kind: "topic_cooling", gid: evt.gid, uid: evt.uid, hits: cool.hits, mine: cool.mine, terms: cool.terms });
-      }
-      noteTopic(evt.gid, evt.text, dec.action !== "ignore");
       decisions.push(Object.assign({}, dec, { evt: evt }));
       const wantText = rawEvt.text || (rawEvt.hasImage ? "[图片]" : "");
       const patch = {
@@ -832,8 +768,6 @@ export function createRuntime(deps) {
     const anchor = pickAnchor(decisions);
     const dec = mergedDec;
     // 降温标记要带到合并判定上 —— 大脑用的是 mergedDec（合并后重新判），不是逐条那个 dec
-    const cooledOnce = decisions.filter(function (d) { return d && d.cooling; })[0];
-    if (cooledOnce) { dec.cooling = true; dec.coolingHits = cooledOnce.coolingHits; dec.coolingTerms = cooledOnce.coolingTerms; }
     const evt = (anchor && anchor.evt) || mergedEvt;
     const hard = !!(mergedEvt.atBot || mergedEvt.replyToBot);
     // N8 修订：成员表与上下文窗口在这里更新（成员表初始为空，首见即加）
@@ -889,12 +823,6 @@ export function createRuntime(deps) {
         depthPolicy: { low: { maxChars: dc[0] }, mid: { maxChars: dc[1] }, high: { maxChars: dc[2] } }   // 配置里的"三档字数"真的生效
       });
       let taskText = buildTaskText(dec.tier, Object.assign({}, policy, { search: dec.search }), dec.keywords);
-      if (dec.cooling) {
-        taskText = taskText + String.fromCharCode(10) + "【这个话题够了】它已经被反复提起 " + dec.coolingHits + " 次" +
-          (dec.coolingTerms && dec.coolingTerms.length ? "（" + dec.coolingTerms.join("、") + "）" : "") +
-          "，你也搭过好几次话。**用一句轻松的话收个尾，或者干脆换个话头**，不用再展开讲。" +
-          "这件事的主角是大家，你只是顺嘴收个尾；大家聊的是他们自己的乐子，你轻松接一下就过去了。";
-      }
       // N12：需要搜索时先搜一次，把摘要作为消息体注入（不进系统提示词，前缀缓存不受影响）
       if (dec.search > 0 && searchSvc) {
         const sr = await searchSvc.run({ gid: evt.gid, keywords: dec.keywords || [], mode: rc.searchMode, ctx: { evt: evt, decision: dec } });

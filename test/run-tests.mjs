@@ -238,28 +238,6 @@ t("guard: 只硬拦信任与事实两类；语气类只记录不阻断（别把�
   eq(guardReply("").ok, true);
 });
 
-t("runtime: 话题降温——同一话题被反复提起时改口风（别再自证）", async function () {
-  const prompts = []; const seen = [];
-  const rt = createRuntime({
-    config: {}, runtime: { observe: false, stageMode: "live", coalesceWindowMs: 100, coalesceMaxBatch: 5, coolWindowMs: 3600000 },
-    store: { paths: {}, addObservation: function (r) { seen.push(r); } },
-    bot: fakeBot({ action: "brain", tier: "mid" }),
-    askBrain: async function (o) { prompts.push(o.promptText); return { ok: true, text: "行", usage: { totalTokens: 3 } }; },
-    send: function () {}, sendImage: function () {}, now: function () { return Date.now(); }, sleep: async function () {}, sendGapMs: 0
-  });
-  const t0 = Date.now();
-  for (let i = 0; i < 4; i++) {
-    const at = t0 + i * 400000;   // 6.6 分钟一条，避开爆发闸
-    await rt.onEvent({ gid: "G1", uid: "u1", speaker: "甲", text: "你的搜索怎么这么慢", now: at });
-    await rt.tick(at + 500);
-  }
-  const cooled = prompts.filter(function (p) { return String(p).indexOf("【这个话题够了】") >= 0; });
-  ok(cooled.length >= 1, "反复提起后要出现收尾指令（出现 " + cooled.length + " 次）");
-  ok(cooled.every(function (p) { return p.indexOf("用一句轻松的话收个尾") >= 0; }), "给的是怎么做，不是一串不许（正面措辞，且不拿「算我慢」当例子）");
-  ok(cooled.every(function (p) { return p.indexOf("算我慢") < 0; }), "收尾指令里不能再出现自我归咎的样板句（实测她照抄过）");
-  ok(seen.some(function (x) { return x.kind === "topic_cooling"; }), "降温要记进观测，便于排查");
-  ok(rt.stats().coolingHits >= 1, "统计里有 coolingHits");
-});
 
 t("人设：许可在前、禁令收敛（机制上防止规则把角色限死）", function () {
   const cfg = { persona: { botName: "小肥鱼" }, runtime: {}, plugins: {} };
