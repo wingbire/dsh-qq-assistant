@@ -25,6 +25,7 @@ export function createBilibili(opts) {
   let vision = o.vision || null;   // main 里 vision 建得晚，后面用 setVision 补
   const tmpDir = o.tmpDir || null;
   const frames = Math.max(0, Number(o.frames == null ? 4 : o.frames));
+  const maxMinutes = Math.max(0, Number(o.maxMinutes == null ? 30 : o.maxMinutes));
   const timeoutMs = Number(o.timeoutMs) || 60000;
 
   async function getJson(url) {
@@ -75,7 +76,8 @@ export function createBilibili(opts) {
 
     // 抽帧 + 识图（临时文件，识完即删）
     const shots = [];
-    if (vision && tmpDir && frames > 0) {
+    const longVideo = !!(maxMinutes && Number(d.duration) > maxMinutes * 60);
+    if (vision && tmpDir && frames > 0 && !longVideo) {
       try {
         const pu = await getJson("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&qn=16&fnval=1&platform=html5");
         const url = (pu && pu.data && pu.data.durl && pu.data.durl[0] && pu.data.durl[0].url) || "";

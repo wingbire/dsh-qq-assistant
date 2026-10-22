@@ -354,7 +354,7 @@ t("衔接性：页面引用的 key 必须在字段表里，表里的字段必须
   const ghosts = used.filter(function (k) { return allKeys.indexOf(k) < 0; });
   eq(ghosts.length, 0, "页面引用了表里不存在的字段（就是这次的 coalesceMaxBatch 那类漏项）：" + ghosts.join(","));
   // ② 每个字段要么在某个页面的 key 清单里，要么属于有归宿的分组
-  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道", "外审"];
+  const pageGroups = ["人设", "判定", "主动与节流", "QQ 接入", "群档案", "运行时", "额外功能", "B站", "本地工具", "大脑模型", "识图接口", "本地语音", "插件通道", "外审"];
   const homeless = [];
   for (const g of table.分组) {
     if (pageGroups.indexOf(g.名) < 0) homeless.push(g.名 + "(整个分组没人渲染)");
@@ -1941,11 +1941,11 @@ t("webui: 配置端 API 读写、遮蔽 secret、挡目录穿越", async functio
     eq(info.port > 0 && info.port !== DEFAULT_PORT, true, "端口 0 应挑一个临时端口");
     const j1 = await (await fetch(info.url + "/api/config")).json();
     eq(j1.ok, true);
-    eq(j1.table.分组.length, 13, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道 + 外审");
+    eq(j1.table.分组.length, 14, "原有 7 组 + 本地工具/大脑模型/识图接口/本地语音/插件通道 + 外审 + B站");
     const pageKeys = ["本地工具", "大脑模型"];
     for (const need of pageKeys.concat(["识图接口", "本地语音", "插件通道"])) ok(j1.table.分组.some(function (g) { return g.名 === need; }), "要有「" + need + "」这一分类");
     const names1 = j1.table.分组.map(function (g) { return g.名; });
-    ok(names1.length === 13, "分组数应为 13");
+    ok(names1.length === 14, "分组数应为 14（新增 B站）");
     const localKeys = j1.table.分组.filter(function (g) { return g.名 === "本地工具"; })[0].字段.map(function (f) { return f.键; });
     ok(localKeys.indexOf("brain.dshCliPath") >= 0, "本地工具里要有 DSH 启动器路径");
     const brainKeys = j1.table.分组.filter(function (g) { return g.名 === "大脑模型"; })[0].字段.map(function (f) { return f.键; });
@@ -3775,6 +3775,12 @@ t("B站：从一段话里认出 BV 号 / av 号，普通链接不误判", functi
   eq(resolveBvid("今晚吃啥"), null);
   ok(hasBiliUrl("https://b23.tv/abc123"), "b23 短链要认得");
   ok(!hasBiliUrl("普通消息"), "普通消息不是 B 站链接");
+});
+t("B站：开关关掉时人设里不提看视频，开着才写", function () {
+  const on = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: true } }), { plugins: { bilibili: true } });
+  ok(on.indexOf("【B 站视频】") >= 0, "开着要有能力声明");
+  const off = buildPersonaText(personaFromConfig({ persona: { botName: "小肥鱼" }, runtime: {}, plugins: { bilibili: false } }), { plugins: { bilibili: false } });
+  ok(off.indexOf("【B 站视频】") < 0, "关了就不提");
 });
 // === 汇总（新增测试请插在这一行之前，否则异步测试不会被等待）===
 await Promise.all(pendingTests);

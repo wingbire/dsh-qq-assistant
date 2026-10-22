@@ -699,6 +699,8 @@
 
       var logBox = S.pluginLog ? '<pre class="pre">' + esc(S.pluginLog) + '</pre>' : "";
       return intro +
+        '<details class="card"><summary>B 站看视频<span class="muted" style="font-weight:400;font-size:12px">群里出现 B 站链接时，她先看一遍再说话</span></summary><div class="body">' +
+        renderGroupFields("B站") + '</div></details>' +
         '<div class="sec-title">内置额外功能</div>' + builtin +
         '<div class="sec-title">社区插件兼容</div>' +
         '<div class="card"><div class="body"><div class="hint" style="margin:0">下面是社区做的 DSH 插件。本程序<b>不打包</b>它们（体积、许可证，而且本该由 DSH 那边管），只做兼容与接线：没装的点「一键安装」，装好就能用；没装或关掉就退回内置实现。<b>任何开关改动保存后都会重新生成全局人设</b>——关掉的能力不会写进人设，模型也就不会去用。</div>' + logBox + '</div></div>' +

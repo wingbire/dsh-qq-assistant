@@ -147,7 +147,8 @@ export function personaFromConfig(cfg, opts) {
     illustrationEnabled: (c.plugins ? c.plugins.illustration !== false : true),   // 立绘（图片）开关
     voiceEnabled: voiceOn,
     voiceMaxChars: (rt.voice && rt.voice.maxChars) || 60,
-    visionEnabled: visionOn
+    visionEnabled: visionOn,
+    biliEnabled: !!(cfg && cfg.plugins && cfg.plugins.bilibili !== false)
   };
 }
 
@@ -237,6 +238,11 @@ export function buildPersonaText(persona, cfg) {
   if (p.quoteReply !== "关") {
     T.push("【引用回复】");
     T.push("- 你的发言在指向别人的某一条具体消息时，在正文里写 [引用]；别人 @ 你时不用。被引用的原文客户端会自己显示，别抄进正文。");
+    T.push("");
+  }
+  if (p.biliEnabled) {
+    T.push("【B 站视频】");
+    T.push("- 群里出现 B 站链接时，你会先看一遍再说话（画面、标题、字幕都看得到）；看完了想说什么由你定。");
     T.push("");
   }
   if (p.archifyEnabled) {

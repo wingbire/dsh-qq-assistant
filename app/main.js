@@ -323,7 +323,7 @@ log("图库：" + (memes.ready ? memes.rows.length + " 张 / " + memes.tags().le
 
 // N18 识图：独立一次多模态调用（http 直连 / dsh 跑 Our Free Model）
 const biliEnabled = !(rc.plugins && rc.plugins.bilibili === false);
-const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: 4 }) : null;   // vision 在建好之后补上
+const bili = biliEnabled ? createBilibili({ vision: null, tmpDir: BRAIN_TMP_DIR, frames: (rc.bili && rc.bili.frames), maxMinutes: (rc.bili && rc.bili.maxMinutes) }) : null;   // vision 在建好之后补上
 const vision = createVision({
   // 判定为"没有视觉能力"时直接关掉这条通道：省一次没意义的调用，也避免"看了但没看到"的幻觉
   config: Object.assign({}, rc.vision, { mode: visionCap.capable ? rc.vision.mode : "off" }),
