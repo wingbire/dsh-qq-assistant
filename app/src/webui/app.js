@@ -915,6 +915,21 @@
   }
 
   /* ---------- 渲染 ---------- */
+  // 所有折叠卡统一：默认收起，只在用户手动点开后才展开（状态按卡片标题存 localStorage）
+  function applyFoldState() {
+    var list = document.querySelectorAll("#page details.card");
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!el.id) {
+        var sm = el.querySelector("summary");
+        var t = String((sm && sm.textContent) || "card").replace(/\s+/g, "-").replace(/[^\w\u4e00-\u9fa5\-]/g, "").slice(0, 32);
+        el.id = "fold-" + (t || ("card-" + i));
+      }
+      el.classList.add("dsh-fold");
+      el.open = foldOpen(el.id, false);     // 默认全收起；用户点开过才保持打开
+    }
+  }
+
   function render() {
     renderGroupSelect();
     $("#nav").innerHTML = PAGES.map(function (p) {
@@ -938,6 +953,7 @@
     else job = Promise.resolve(renderGroupFields(meta.group));
     job.then(function (html) {
       $("#page").innerHTML = html;
+      applyFoldState();
       if (S.page === "settings") loadSettings();
       // 进「额外功能」且识图已配好地址 → 自动载入模型列表，用户点下拉就能选
       if (S.page === "extra" && !S.visionModels && String(getPath(S.values, "runtime.vision.endpoint") || "")) {
