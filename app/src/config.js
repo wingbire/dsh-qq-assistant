@@ -179,7 +179,7 @@ export function runtimeConfig(cfg) {
     stageMode: getPath(c, "runtime.stageMode") || (getPath(c, "runtime.observe") === true ? "observe" : getPath(c, "runtime.observe") === false ? "live" : "auto"),
     observeUntilMessages: getPath(c, "runtime.observeUntilMessages") != null ? getPath(c, "runtime.observeUntilMessages") : 80,
     semiAutoDays: getPath(c, "runtime.semiAutoDays") != null ? getPath(c, "runtime.semiAutoDays") : 3,
-    contextWindow: getPath(c, "runtime.contextWindow") != null ? getPath(c, "runtime.contextWindow") : 10, // N8
+    contextWindow: getPath(c, "runtime.contextWindow") != null ? getPath(c, "runtime.contextWindow") : 20, // N8
     depthChars: depthChars,
     gates: gatesFromConfig(c),
     audit: auditFromConfig(c),
