@@ -47,6 +47,8 @@ export function createBilibili(opts) {
   let vision = o.vision || null;
   let stt = o.stt || null;                 // 本地语音转写：抽一段音频听
   const listenSec = Math.max(0, Math.min(120, Number(o.listenSec || 0)));   // 0 = 不听
+  let sessdata = String(o.sessdata || "");     // 小号登录态：有它才拿得到 AI 字幕
+  const biliUid = String(o.uid || "");         // 用户的 B 站 UID（以后评论区 @ 用）
   const tmpDir = o.tmpDir || null;
   const frames = Math.max(0, Number(o.frames == null ? 4 : o.frames));
   const maxMinutes = Math.max(0, Number(o.maxMinutes == null ? 30 : o.maxMinutes));
@@ -54,7 +56,9 @@ export function createBilibili(opts) {
 
   async function fetchJson(url) {
     const ac = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
-    const r = await fetchFn(url, { headers: { "User-Agent": UA, Referer: REF }, signal: ac });
+    const headers = { "User-Agent": UA, Referer: REF };
+    if (sessdata) headers.Cookie = "SESSDATA=" + sessdata;      // 带登录态才拿得到 AI 字幕
+    const r = await fetchFn(url, { headers: headers, signal: ac });
     if (!r || !r.ok) throw new Error("HTTP " + (r && r.status));
     return r.json();
   }
@@ -182,5 +186,7 @@ export function createBilibili(opts) {
 
   function setVision(v) { vision = v; }
   function setStt(v) { stt = v; }
-  return { watch: watch, findAndWatch: findAndWatch, resolveBvid: resolveBvid, setVision: setVision, setStt: setStt };
+  function setAuth(sd) { sessdata = String(sd || ""); }
+  function authUid() { return biliUid; }
+  return { watch: watch, findAndWatch: findAndWatch, resolveBvid: resolveBvid, setVision: setVision, setStt: setStt, setAuth: setAuth, authUid: authUid };
 }
