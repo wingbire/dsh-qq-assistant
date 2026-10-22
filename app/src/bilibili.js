@@ -85,8 +85,16 @@ export function createBilibili(opts) {
   }
 
   async function watch(link, opts) {
-    const bvid = resolveBvid(link);
-    if (!bvid) return { ok: false, error: "没认出 BV 号" };
+    let bvid = resolveBvid(link);
+    // 短链（b23.tv/xxx）先跟一次重定向拿到真实地址，再从中取 BV 号
+    if (!bvid && /b23\.tv|bilibili\.com\/video/i.test(String(link || ""))) {
+      try {
+        const r = await fetchFn(link, { method: "GET", redirect: "follow", headers: { "User-Agent": UA, Referer: REF }, signal: AbortSignal.timeout(15000) });
+        const finalUrl = String(r && r.url || "");
+        bvid = resolveBvid(finalUrl);
+      } catch (e) { }
+    }
+    if (!bvid) return { ok: false, error: "没认出 BV 号（短链解析失败）" };
     let v;
     try { v = await fetchJson("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid); } catch (e) { return { ok: false, error: String(e && e.message) }; }
     if (!v || v.code !== 0 || !v.data) return { ok: false, error: "拿不到视频信息（code " + (v && v.code) + "）" };

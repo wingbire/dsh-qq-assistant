@@ -225,6 +225,10 @@ let ofmProbing = false;
 // 三档思考强度：配置端可调（off / low / medium / high），走免费模型时会被自动去掉
 function effortsOf(c) {
   const conf = c || cfg || {};
+  // 免费池（Our Free Model / deepseek-flash）不认 reasoningEffort：带上会直接报
+  // 'does not support reasoning effort "medium"'，整条回复就废了。走免费车道时三档全部置 null，
+  // renderTierOverlay 会把 null 的字段删掉，等于不带这个参数。
+  if (getPath(conf, "plugins.ourFreeModel") === true) return { low: null, mid: null, high: null };
   const g = function (k, d) { const v = String(getPath(conf, "brain.effort." + k) || "").trim(); return v || d; };
   return { low: g("low", "off"), mid: g("mid", "low"), high: g("high", "high") };
 }
