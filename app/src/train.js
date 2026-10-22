@@ -34,7 +34,7 @@ export function trainFromLabels(dataDir, opts) {
   const items = loadCorpus(file).filter(function (i) { return i && i.expect; });
   if (items.length < 10) return { ok: false, error: "标注太少（" + items.length + " 条，至少 10 条）" };
   const X = items.map(function (it) {
-    const f = features({ text: it.text, botNames: ["小肥鱼"], nicknames: ["肥鱼", "鲸鲸"], atBot: it.atBot, replyToBot: it.replyToBot });
+    const f = features({ text: it.text, botNames: ["小肥鱼"], nicknames: ["肥鱼", "鲸鲸"], atBot: it.atBot, replyToBot: it.replyToBot, twoPersonDialog: !!it.twoPerson, continuation: Number(it.continuation) || 0 });
     return FEATURE_KEYS.map(function (k) { return f[k] || 0; });
   });
   const Y = items.map(function (it) { return it.expect === "该不回" ? 0 : 1; });

@@ -451,8 +451,8 @@
         card("一致率", Math.round((st.agreement || 0) * 100) + "%", "") +
         card("漏接率", Math.round((st.missedRate || 0) * 100) + "%", "该回却被判否") +
         '</div>' +
-        '<div class="card"><div class="head">待标注队列</div><div class="body"><table><thead><tr><th>消息</th><th>本地判定</th><th>动作</th><th>p_say</th><th>标注</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="5" class="muted">队列是空的 —— 新群观察期会自动攒</td></tr>') + '</tbody></table></div></div>' +
+        '<details class="card"><summary>待标注队列<span class="muted" style="font-weight:400;font-size:12px">满 30 条自动回流标定</span></summary><div class="body"><table><thead><tr><th>消息</th><th>本地判定</th><th>动作</th><th>p_say</th><th>标注</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="5" class="muted">队列是空的 —— 新群观察期会自动攒</td></tr>') + '</tbody></table></div></details>' +
         corpusCard(c) + trainCard(tr);
     });
   }
@@ -487,12 +487,12 @@
         '<button class="btn-sm bad" data-cid="' + esc(it.id) + '" data-expect="该不回">不该回</button>' +
         (it.expect ? ' <span class="tag ' + cls + '">' + esc(it.expect) + '</span>' : "") + '</td></tr>';
     }).join("");
-    return '<div class="card"><div class="head">回放语料<span class="muted" style="font-size:12px">' +
+    return '<details class="card"><summary>回放语料<span class="muted" style="font-weight:400;font-size:12px">' +
       '已标 ' + (st.labeled || 0) + ' / ' + (st.total || 0) + ' · 标完跑 tools/replay-corpus.mjs 做回归</span>' +
-      '<button class="btn-sm" data-corpus-rebuild="1" style="float:right">重新拉取最近 60 条</button></div>' +
+      '<button class="btn-sm" data-corpus-rebuild="1" style="float:right">重新拉取最近 60 条</button></summary>' +
       '<div class="body"><table><thead><tr><th>时间</th><th>说话人</th><th>内容</th><th>当时的判定</th><th>你的标注</th></tr></thead><tbody>' +
       (body || '<tr><td colspan="5" class="muted">还没有语料 —— 点右上角「重新拉取最近 60 条」</td></tr>') +
-      '</tbody></table></div></div>';
+      '</tbody></table></div></details>';
   }
 
   function pageMemes() {

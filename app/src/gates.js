@@ -309,6 +309,9 @@ export function createGates(opts) {
     return {
       gid: evt.gid, uid: evt.uid, at: evt.now || Date.now(),
       action: action, verdict: verdict, auditInfo: auditInfo, pSay: Math.round(pSay * 1000) / 1000,
+      // 上下文特征也一起返回：语料里存下来，训练才能学到「两人对话」「续话」这类信号
+      twoPerson: !!evt.twoPersonDialog,
+      continuation: Math.round(Math.min(1, Math.max(0, cont || 0)) * 100) / 100,
       U: Math.round(u.U * 1000) / 1000,
       tier: tierInfo.tier, maxChars: tierInfo.maxChars,
       search: plan.search, keywords: plan.keywords,

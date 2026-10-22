@@ -61,6 +61,8 @@ export function fromDecisions(decisions, prev, limit) {
       text: d.text,
       decided: d.action || "",
       atBot: !!d.atBot,
+      twoPerson: !!d.twoPerson,
+      continuation: Number(d.continuation) || 0,
       replyToBot: !!d.replyToBot,
       reason: Array.isArray(d.reason) ? d.reason : [],
       audit: auditFromReason(d.reason),
