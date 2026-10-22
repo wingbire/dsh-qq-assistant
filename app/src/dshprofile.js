@@ -227,7 +227,8 @@ export function buildPersonaText(persona, cfg) {
   }
   if (p.memeEnabled !== false) {
     T.push("【表情包】");
-    T.push("- 什么时候发由你判断：情绪明确、或文字接不住梗时，在正文末尾写 [表情: 描述]（例：[表情: 猫猫无语]）。" + p.memeRate + "；一条最多 1 张，没有合适的图就不写。");
+    T.push("- 你爱配图：情绪到点、或者嘴已经接不住梗的时候，就在正文末尾写 [表情: 描述]，比只打一行字更有意思。" +
+      "描述要从下面清单里那几句里挑，别自己编（编的会挑到不对味的图）。" + p.memeRate + "；一条最多 1 张。");
     T.push("");
   }
   if (p.voiceEnabled) {

@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "本地 gemma 聊天机器人：从收到消息到发出回复",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "standard",
+    "output": ".archify/workflow-local-gemma-bot-20250613-120000/local-gemma-bot.html"
+  },
+  "lanes": [
+    { "id": "main", "label": "主要角色" }
+  ],
+  "phases": [
+    { "id": "p1", "label": "收消息", "fromCol": 0, "toCol": 1 },
+    { "id": "p2", "label": "备上下文", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "p3", "label": "出回复", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["n1", "n2", "n3", "n4", "n5", "n6"],
+  "nodes": [
+    { "id": "n1", "lane": "main", "col": 0, "type": "frontend", "label": "手机收到", "sublabel": "群里来消息" },
+    { "id": "n2", "lane": "main", "col": 1, "type": "backend", "label": "本机接住", "sublabel": "转发到电脑" },
+    { "id": "n3", "lane": "main", "col": 2, "type": "database", "label": "翻旧聊天", "sublabel": "取最近几句" },
+    { "id": "n4", "lane": "main", "col": 3, "type": "backend", "label": "拼提示词", "sublabel": "人设加问题" },
+    { "id": "n5", "lane": "main", "col": 4, "type": "backend", "label": "gemma", "sublabel": "本地跑推理" },
+    { "id": "n6", "lane": "main", "col": 5, "type": "frontend", "label": "发回群里", "sublabel": "文字回过去" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "n1", "to": "n2", "label": "消息上行", "role": "main" },
+    { "id": "e2", "from": "n2", "to": "n3", "label": "要上下文", "role": "main" },
+    { "id": "e3", "from": "n3", "to": "n4", "label": "带上历史", "role": "main" },
+    { "id": "e4", "from": "n4", "to": "n5", "label": "交给模型", "role": "main" },
+    { "id": "e5", "from": "n5", "to": "n6", "label": "回复文本", "role": "main" }
+  ]
+}

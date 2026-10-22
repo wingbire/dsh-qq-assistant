@@ -203,7 +203,9 @@ export function createRuntime(deps) {
     if (!gate.attach) { stats.memesSuppressed += 1; observe({ kind: "meme_suppressed", gid: key, mood: mood, reason: gate.reason }); return null; }
     if (!memes || !memes.ready || !sendImage) { stats.memesMissed += 1; return null; }
     const hit = memes.find(mood);
-    if (!hit) { stats.memesMissed += 1; observe({ kind: "meme_miss", gid: key, mood: mood }); return null; }
+    // 只认「照菜单抄的整句描述」（90/40+ 分）；靠短关键词蒙到的 30 分一律不发
+    const memeTooWeak = !hit || Number(hit.score) < 40;
+    if (memeTooWeak) { stats.memesMissed += 1; observe({ kind: "meme_miss", gid: key, mood: mood, score: (hit && hit.score) || 0 }); return null; }
     sendImage(key, hit.path);
     stats.memesSent += 1;
     repliesSinceMeme.set(key, 0);
@@ -1099,7 +1101,8 @@ export function createRuntime(deps) {
         outDir: path.join(WORKSPACE_ROOT, "app", "dsh-data", "charts")
       }) : { ok: false, error: (drew && drew.error) || "没有可用的图表文件" };
       if (conv.ok) {
-        if (sendImage) sendImage(evt.gid, conv.file);
+        if (sendImage) { try { await sendImage(evt.gid, conv.file); } catch (e) { } }   // 必须等它读完文件再清理
+        await new Promise(function (res) { setTimeout(res, 1500); });                 // 再给 NapCat 一点读取时间
         stats.chartsSent += 1;
         const keep = rc.plugins && rc.plugins.archifyCleanup === false;
         const cleaned = keep ? { removed: [], kept: [conv.file] } : cleanupChart(conv.file, { source: conv.source });
