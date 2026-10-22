@@ -433,8 +433,8 @@
 
   /* ---------- 标注 / 图库 ---------- */
   function pageLabels() {
-    return Promise.all([api("/api/labels?limit=60"), api("/api/corpus").catch(function () { return {}; })]).then(function (arr) {
-      var d = arr[0]; var c = arr[1] || {};
+    return Promise.all([api("/api/labels?limit=60"), api("/api/corpus").catch(function () { return {}; }), api("/api/train").catch(function () { return {}; })]).then(function (arr) {
+      var d = arr[0]; var c = arr[1] || {}; var tr = arr[2] || {};
       S.labels = d;
       var st = d.stats || {};
       var rows = (d.pending || []).map(function (r) {
@@ -453,8 +453,23 @@
         '</div>' +
         '<div class="card"><div class="head">待标注队列</div><div class="body"><table><thead><tr><th>消息</th><th>本地判定</th><th>动作</th><th>p_say</th><th>标注</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="5" class="muted">队列是空的 —— 新群观察期会自动攒</td></tr>') + '</tbody></table></div></div>' +
-        corpusCard(c);
+        corpusCard(c) + trainCard(tr);
     });
+  }
+
+  // 训练：用标注语料拟合开口判定；也可以设置「标够 N 条自动训练」
+  function trainCard(t) {
+    var last = (t && t.last) || {};
+    var lr = last.lastResult || {};
+    return '<div class="card"><div class="head">训练' +
+      '<span class="muted" style="font-weight:400;font-size:12px;margin-left:8px">用你标注的语料拟合开口判定</span>' +
+      '<button class="btn-sm good" data-train="1" style="float:right">开始训练</button></div><div class="body">' +
+      '<div class="hint">已标注 <b>' + (t.labeled || 0) + '</b> 条 / 共 ' + (t.total || 0) + ' 条' +
+        (last.lastAt ? '　上次训练 ' + esc(String(last.lastAt).slice(0, 16).replace('T', ' ')) + '（' + (lr.n || 0) + ' 条）' : '　还没训练过') + '</div>' +
+      (lr.n ? '<div class="hint">训练集 ' + (lr.acc || 0) + '%　留一交叉验证 ' + (lr.loo || 0) + '%　最佳阈值 ' + (lr.threshold || 0) + ' → ' + (lr.bestAcc || 0) + '%</div>' : '') +
+      '<div class="field"><div class="label">自动训练：已标注多少条时训练一次</div>' +
+      '<div class="ctrl"><input type="number" min="0" step="5" id="auto-train-at" value="' + (t.autoTrainAt || 0) + '" style="width:90px"> <span class="hint">0 = 不自动</span></div></div>' +
+      '</div></div>';
   }
 
   // 回放语料：把真实群聊截下来人工标「该回 / 该不回 / 该短回」，改动前先跑一遍 tools/replay-corpus.mjs。
@@ -1194,6 +1209,15 @@
         });
         return;
       }
+      var btnTrain = e.target.closest("[data-train]");
+      if (btnTrain) {
+        toast("训练中…（用你标注的语料拟合）");
+        api("/api/train", {}).then(function (r) {
+          toast(r.ok ? ("训练完成：训练集 " + r.acc + "% / 留一 " + r.loo + "% / 阈值 " + r.threshold + " → " + r.bestAcc + "%") : (r.error || "训练失败"), !r.ok);
+          render();
+        });
+        return;
+      }
       var mc = e.target.closest("[data-memo-clear]");
       if (mc) {
         api("/api/memo/clear", { gid: mc.getAttribute("data-memo-clear") }).then(function (r) {
@@ -1228,6 +1252,14 @@
     });
 
     document.addEventListener("change", function (e) {
+      if (e.target && e.target.id === "auto-train-at") {
+        var v = Math.max(0, Number(e.target.value) || 0);
+        setPath(S.values, "runtime.autoTrainAt", v);
+        api("/api/config", { patch: { runtime: { autoTrainAt: v } } }).then(function (r) {
+          toast(r.ok ? ("自动训练：每标够 " + v + " 条练一轮" + (v ? "" : "（已关闭）")) : "保存失败", !r.ok);
+        });
+        return;
+      }
       // 可下拉字段：选中即写进配置（把整棵内存配置当 patch 提交；遮蔽的 secret 后端会当"没改"）
       if (e.target && e.target.matches && e.target.matches("select[data-apply][data-key]")) {
         var kk = e.target.getAttribute("data-key");

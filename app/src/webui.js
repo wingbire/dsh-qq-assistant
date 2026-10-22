@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadFieldTable, defaultsFromTable, deepMerge, redactConfig, mergeConfigSafe, runtimeConfig, saveConfig, getPath, setPath, REDACTED } from "./config.js";
 import { createLabelQueue, agreementStats, foldLabels, pendingOf, labeledOf } from "./label.js";
 import { corpusFile, loadCorpus, saveCorpus, labelCorpus, corpusStats, fromDecisions } from "./corpus.js";
+import { trainFromLabels } from "./train.js";
 import { buildProfilePrompt } from "./profile.js";
 import { moneyOfRows, costOf, isPeakTime, PRICE_MODEL, PRICE_NOTE } from "./cost.js";
 
@@ -141,6 +142,28 @@ export function createWebUi(deps) {
   const runtime = d.runtime || null;
   const configFile = d.configFile;
   const labels = d.labels || (store ? createLabelQueue({ store: store }) : null);
+
+let trainingNow = false;
+function maybeAutoTrain() {
+  if (trainingNow || !store) return;
+  const everyN = Number(runtimeConfig(cfg).autoTrainAt) || 0;
+  if (!everyN) return;
+  const dir = path.dirname(store.paths.labels);
+  let labeled = 0;
+  try { labeled = corpusStats(loadCorpus(corpusFile(dir))).labeled; } catch (e) { return; }
+  let lastN = 0;
+  try { lastN = Number(JSON.parse(fs.readFileSync(path.join(dir, "train-state.json"), "utf8")).lastN) || 0; } catch (e) { }
+  if (labeled < everyN || labeled <= lastN) return;
+  trainingNow = true;
+  setTimeout(function () {
+    try {
+      const r = trainFromLabels(dir);
+      if (r && r.ok) {
+        fs.writeFileSync(path.join(dir, "train-state.json"), JSON.stringify({ lastN: labeled, lastAt: r.at, lastResult: { n: r.n, acc: r.acc, loo: r.loo, bestAcc: r.bestAcc, threshold: r.threshold }, auto: true }, null, 2));
+      }
+    } catch (e) { } finally { trainingNow = false; }
+  }, 2000);
+}
   const onConfigSaved = d.onConfigSaved || null;  // async (nextCfg) => void —— 人设改了要重渲染 profile patch
   const checkUpdateFn = d.checkUpdate || null;    // async () => 更新检查结果
   const applyUpdateFn = d.applyUpdate || null;    // async () => 执行更新
@@ -260,6 +283,21 @@ export function createWebUi(deps) {
       return sendJson(res, 200, napcatRevealFn());
     }
 
+    // ---------- 训练（用标注语料拟合开口概率模型）----------
+    if (p === "/api/train" && req.method === "GET") {
+      const items = loadCorpus(corpusFile(path.dirname(store.paths.labels)));
+      let last = null;
+      try { last = JSON.parse(fs.readFileSync(path.join(path.dirname(store.paths.labels), "train-state.json"), "utf8")); } catch (e) { }
+      return sendJson(res, 200, { ok: true, labeled: corpusStats(items).labeled, total: items.length, autoTrainAt: runtimeConfig(cfg).autoTrainAt, last: last });
+    }
+    if (p === "/api/train" && req.method === "POST") {
+      const dir = path.dirname(store.paths.labels);
+      const r = trainFromLabels(dir);
+      if (!r.ok) return sendJson(res, 400, r);
+      const items = loadCorpus(corpusFile(dir));
+      try { fs.writeFileSync(path.join(dir, "train-state.json"), JSON.stringify({ lastN: corpusStats(items).labeled, lastAt: r.at, lastResult: { n: r.n, acc: r.acc, loo: r.loo, bestAcc: r.bestAcc, threshold: r.threshold } }, null, 2)); } catch (e) { }
+      return sendJson(res, 200, { ok: true, n: r.n, acc: r.acc, loo: r.loo, bestAcc: r.bestAcc, threshold: r.threshold, at: r.at });
+    }
     // 清空某个群的「她自己记下的事」（记忆由她每 N 次发言自己总结，这里只给管理员一个后悔药）
     if (p === "/api/memo/clear" && req.method === "POST") {
       const body = await readBody(req);
@@ -480,6 +518,7 @@ export function createWebUi(deps) {
       try { b = JSON.parse(body); } catch (e) { return sendJson(res, 400, { ok: false, error: "JSON 解析失败" }); }
       if (!labels || !b || !b.id) return sendJson(res, 400, { ok: false, error: "缺少 id" });
       labels.label(b.id, b.human, b.labeler);
+      maybeAutoTrain();
       return sendJson(res, 200, { ok: true, stats: labels.status() });
     }
 
@@ -498,6 +537,7 @@ export function createWebUi(deps) {
         try {
           const items = loadCorpus(file);
           labelCorpus(items, b.id, b.expect);
+          maybeAutoTrain();
           saveCorpus(file, items);
           return sendJson(res, 200, { ok: true, stats: corpusStats(items) });
         } catch (e) { return sendJson(res, 400, { ok: false, error: String((e && e.message) || e) }); }
