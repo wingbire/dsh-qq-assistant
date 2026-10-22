@@ -357,6 +357,7 @@ export function createRuntime(deps) {
       "【记忆整理】下面是你在群里的最近互动。",
       "在原有记忆的基础上更新：该忘的删掉、新的加上，只记你在意的、有信息量的（谁是谁、聊过什么、你的看法）。",
       "每条一行，最多 5 行、总共不超过 300 字；不要客套，不要复述整段对话；没有新东西要记就只回「无」。",
+      "最后单独一行写：趣：词1、词2、词3 —— 你最近聊天里感兴趣、来劲的三五个词（具体的名词，别写「聊天」「有意思」这种）。没有就写「趣：」。",
       "",
       "【原有记忆】",
       prev || "（还没有）",
@@ -367,10 +368,32 @@ export function createRuntime(deps) {
     let out = null;
     try { out = await askBrain({ promptText: promptText, tier: "low", memory: true }); } catch (e) { out = null; }
     if (!out || !out.ok) { observe({ kind: "memo_fail", gid: gid, error: (out && out.error) || "无输出" }); return null; }
-    const txt = String(out.text || "").trim();
-    if (!txt || txt === "无" || txt.length < 2) { observe({ kind: "memo_empty", gid: gid }); return null; }
+    let txt = String(out.text || "").trim();
+    // 摘出「趣：a、b、c」那一行 → 群档案的兴趣词（最多 8 个，滚动保留最新的）
+    let interestWords = null;
+    try {
+      const mline = txt.match(/^\s*趣[：:]\s*(.+)$/m);
+      if (mline) {
+        const words = String(mline[1]).split(/[、,，\/]/).map(function (w) { return String(w).trim(); }).filter(function (w) { return w && w.length >= 1 && w.length <= 12; });
+        if (words.length) interestWords = words.slice(0, 5);
+        txt = txt.replace(/^\s*趣[：:]\s*.+$/m, "").replace(/\n{3,}/g, 
+
+).trim();
+      }
+    } catch (e) { }
     if (!store || typeof store.saveProfile !== "function") return null;
     const prof = store.loadProfile(gid) || {};
+    // 兴趣词：她提炼的排前面、老的往后挤，最多 8 个（滚动，不会无限长）。
+    // 只写进群档案，绝不改全局人设 —— 生成候选时全局权重也更高（见 B 站取词处）。
+    if (interestWords && interestWords.length) {
+      const old = Array.isArray(prof.interestWords) ? prof.interestWords : [];
+      const merged = [];
+      for (const w of interestWords.concat(old)) if (merged.indexOf(w) < 0) merged.push(w);
+      prof.interestWords = merged.slice(0, 8);
+      prof.interestAt = new Date(atMs || now()).toISOString();
+      observe({ kind: "interest_saved", gid: gid, words: prof.interestWords });
+    }
+    if (!txt || txt === "无" || txt.length < 2) { observe({ kind: "memo_empty", gid: gid }); return null; }
     prof.memo = txt.slice(0, 300);
     prof.memoAt = new Date(atMs || now()).toISOString();
     prof.memoVersion = (Number(prof.memoVersion) || 0) + 1;
@@ -840,7 +863,12 @@ export function createRuntime(deps) {
       // 自己找：消息里让她去看视频（且没带链接）→ 用她的兴趣搜一个、挑一个、看，然后回来聊
       if (bili && !biliBusy && !/b23\.tv|bilibili\.com|BV[0-9A-Za-z]{10}/i.test(String(evt.text || ""))
           && /看(个|看)?视频|找个视频|刷刷|去看(看|一眼)|B站.{0,4}看/i.test(String(evt.text || ""))) {
-        const interests = (evt.interests && evt.interests.length) ? evt.interests : ["热门"];
+        // 全局人设的词权重 3 份、群档案里她提炼的词 1 份 —— 群档案永远压不过全局人设
+        const globalW = Array.isArray(evt.interests) ? evt.interests : [];
+        let groupW = [];
+        try { groupW = (store && store.loadProfile && (store.loadProfile(evt.gid) || {}).interestWords) || []; } catch (e) { groupW = []; }
+        const pool = globalW.concat(globalW, globalW, groupW);
+        const interests = pool.length ? pool : ["热门"];
         const kw = interests[Math.floor(Math.random() * interests.length)];
         // 对方说“认真看/仔细看” → 多抽几帧；说“随便看看/简单看” → 少抽几帧。是参数，不是闸门。
         const baseF = (rc.bili && rc.bili.frames != null) ? rc.bili.frames : 4;
