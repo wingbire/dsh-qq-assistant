@@ -227,6 +227,7 @@ export function createRuntime(deps) {
       if (!local.ok && im.url && imageDir) local = await downloadImage(im.url, imageDir, {});
       stats.visionCalls += 1;
       const r = await vision.describe(local, {});
+      if (local && local.downloaded && local.path) { try { fs.unlinkSync(local.path); } catch (e7) { } }   // 临时图片识完就删（文字描述已进消息记录）
       if (r.ok) { stats.visionOk += 1; if (vkey) { visionCache.set(vkey, { at: Date.now(), text: r.text }); if (visionCache.size > 100) { const k = visionCache.keys().next().value; visionCache.delete(k); } } out.push(r.text); }
       else { stats.visionFail += 1; observe({ kind: "vision_fail", gid: batch.gid, error: r.error, file: (im.file || im.url || "").slice(0, 80) }); }
     }
@@ -272,6 +273,7 @@ export function createRuntime(deps) {
     if (!local.ok) { stats.sttFail += 1; observe({ kind: "stt_fail", gid: evt.gid, uid: evt.uid, error: local.error || "音频拿不到" }); return { ok: false, error: local.error }; }
     stats.sttCalls += 1;
     const r = await stt.transcribe(local.path);
+    if (local && local.downloaded && local.path) { try { fs.unlinkSync(local.path); } catch (e8) { } }     // 临时音频转写完就删
     if (r.ok) {
       stats.sttOk += 1;
       if (key) { voiceCache.set(key, { at: Date.now(), text: r.text }); if (voiceCache.size > 100) { const k = voiceCache.keys().next().value; voiceCache.delete(k); } }

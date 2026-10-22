@@ -144,7 +144,7 @@ export async function downloadImage(url, outDir, opts) {
     const ext = sniffExt(buf) || urlExt;          // 文件头优先，URL 只作兜底
     const file = path.join(outDir, "img-" + Date.now() + "-" + Math.floor(Math.random() * 1e6) + "." + ext);
     fs.writeFileSync(file, buf);
-    return { ok: true, path: file, bytes: buf.length, mime: mimeOf(file) };
+    return { ok: true, path: file, bytes: buf.length, mime: mimeOf(file), downloaded: true };   // 临时文件：识完就删
   } catch (e) { return { ok: false, error: String(e && e.message) }; }
 }
 
